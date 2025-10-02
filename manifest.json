@@ -14,7 +14,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://*/*", "http://localhost:*/*"],
+      "matches": ["https://*/*"],
       "js": ["content.js"],
       "run_at": "document_start",
       "all_frames": true
