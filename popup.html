@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Cross-Origin Storage</title>
+    <style>
+      :root {
+        color-scheme: dark light;
+      }
+      html {
+        box-sizing: border-box;
+      }
+      *,
+      *:before,
+      *:after {
+        box-sizing: inherit;
+      }
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 1rem;
+        background: light-dark(#ffffff, #121212);
+        color: light-dark(#000000, #f0f0f0);
+        min-width: 500px;
+      }
+      .container {
+        display: flex;
+        gap: 2em;
+        flex-wrap: wrap;
+      }
+      .panel {
+        flex: 1;
+        min-width: 400px;
+        background: light-dark(#ffffff, #1e1e1e);
+        padding: 1.5em;
+        border-radius: 8px;
+        border: solid 1px light-dark(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.6));
+        box-shadow: 0 4px 6px light-dark(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.6));
+      }
+      .logo {
+        display: inline;
+        height: 2lh;
+        width: auto;
+        vertical-align: text-bottom;
+        margin-inline-end: 0.5rem;
+      }
+      h1 {
+        color: light-dark(#1e1e1e, #fafafa);
+        display: inline-block;
+      }
+      h2 {
+        color: light-dark(#444, #ddd);
+        border-bottom: 2px solid light-dark(#eef, #444);
+        padding-bottom: 0.5em;
+      }
+      p {
+        color: light-dark(#666, #bbb);
+      }
+      select {
+        width: 100%;
+        padding: 0.8em;
+        margin: 1em 0;
+        border: 1px solid light-dark(#ccc, #666);
+        border-radius: 4px;
+        background-color: light-dark(#fff, #2c2c2c);
+        color: light-dark(#000, #f0f0f0);
+      }
+      ul {
+        list-style-type: none;
+        padding: 0;
+      }
+      .resource-item {
+        background-color: light-dark(#e9efff, #2a3b55);
+        padding: 1em;
+        margin-bottom: 0.75em;
+        border-radius: 6px;
+      }
+      .resource-item .hash-value {
+        font-family: ui-monospace, monospace;
+        font-size: 0.9em;
+        word-break: break-all;
+        font-weight: bold;
+        color: light-dark(#335d9d, #89b4fa);
+        margin-bottom: 0.5em;
+      }
+      .resource-item .access-times {
+        list-style-type: disc;
+        margin-left: 20px;
+        padding-left: 5px;
+      }
+      .resource-item .access-times li {
+        font-family: sans-serif;
+        font-size: 0.85em;
+        color: light-dark(#555, #ccc);
+        padding: 0.2em 0;
+        margin: 0;
+      }
+      #origins-list li {
+        background-color: light-dark(#e9efff, #2a3b55);
+        padding: 0.75em;
+        margin-bottom: 0.5em;
+        border-radius: 4px;
+        font-family: ui-monospace, monospace;
+        word-break: break-all;
+      }
+      button {
+        cursor: pointer;
+        padding: 0.6em 1.2em;
+        border-radius: 4px;
+        border: 1px solid transparent;
+        font-weight: 500;
+        transition: background-color 0.2s;
+      }
+      .delete-btn {
+        background-color: light-dark(#ffebee, #5c2b29);
+        color: light-dark(#c62828, #ffcdd2);
+        border-color: light-dark(#e57373, #e53935);
+        font-size: 0.8em;
+        padding: 0.4em 0.8em;
+        float: right;
+        margin-left: 1em;
+      }
+      .delete-btn:hover {
+        background-color: light-dark(#ffcdd2, #e53935);
+      }
+      .actions-container {
+        margin-top: 2em;
+        text-align: center;
+      }
+      .danger-btn {
+        background-color: #d32f2f;
+        color: #ffffff;
+        width: 100%;
+        padding: 1em;
+        border: none;
+        font-size: 1em;
+      }
+      .danger-btn:hover {
+        background-color: #b71c1c;
+      }
+      dialog {
+        border: 1px solid light-dark(#ccc, #666);
+        border-radius: 8px;
+        padding: 1.5em;
+        background: light-dark(#ffffff, #1e1e1e);
+        color: light-dark(#000000, #f0f0f0);
+        box-shadow: 0 4px 6px light-dark(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.6));
+        min-width: 300px;
+        max-width: 500px;
+      }
+      dialog::backdrop {
+        background: rgba(0, 0, 0, 0.5);
+      }
+      dialog div {
+        margin-bottom: 1.5em;
+        color: light-dark(#666, #bbb);
+      }
+      dialog ul {
+        list-style-type: disc;
+        margin-left: 20px;
+        padding-left: 5px;
+      }
+      dialog h1 {
+        font-size: 1rem;
+        font-weight: bold;
+      }
+      dialog code {
+        font-size: 0.7rem;
+      }
+      dialog form {
+        display: flex;
+        flex-direction: column;
+      }
+      dialog footer {
+        display: flex;
+        gap: 1em;
+        justify-content: flex-end;
+        margin-top: 1em;
+      }
+      #dialog-confirm-btn {
+        background-color: #d32f2f;
+        color: #ffffff;
+        width: auto;
+        padding: 0.6em 1.2em;
+        font-size: 1em;
+      }
+      #dialog-confirm-btn:hover {
+        background-color: #b71c1c;
+      }
+    </style>
+  </head>
+  <body>
+    <img class="logo" src="logo-cos.svg" alt="" width="512" height="512" />
+    <h1>Cross-Origin Storage</h1>
+    <div class="container">
+      <div class="panel">
+        <h2>View by Origin</h2>
+        <p>
+          Select an origin to see its shared resources and last access times.
+        </p>
+        <select id="origin-select"></select>
+        <ul id="hashes-list"></ul>
+      </div>
+      <div class="panel">
+        <h2>View by Resource Hash</h2>
+        <p>Select a resource hash to see which origins use it.</p>
+        <select id="hash-select"></select>
+        <ul id="origins-list"></ul>
+      </div>
+    </div>
+
+    <div class="actions-container">
+      <button id="delete-all-btn" class="danger-btn">
+        Delete All Resources
+      </button>
+    </div>
+
+    <dialog id="confirmation-dialog">
+      <form method="dialog">
+        <p id="confirmation-message"></p>
+        <footer>
+          <button type="submit" value="cancel">Cancel</button>
+          <button type="submit" value="confirm" id="dialog-confirm-btn">
+            Confirm
+          </button>
+        </footer>
+      </form>
+    </dialog>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

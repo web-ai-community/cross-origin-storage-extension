@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Cross-Origin Storage",
+  "version": "0.0.1",
+  "description": "An extension that implements the proposed Cross-Origin Storage API.",
+  "permissions": ["storage", "unlimitedStorage", "offscreen", "tabs"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "logo-cos.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*/*", "http://localhost:*/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["main-world.js"],
+      "matches": ["https://*/*", "http://localhost:*/*"]
+    }
+  ],
+  "icons": {
+    "512": "logo-cos.png"
+  }
+}
