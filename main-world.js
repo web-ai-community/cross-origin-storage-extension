@@ -38,7 +38,7 @@
           action,
           data: payload,
         },
-        window.location.origin,
+        window.location.origin
       );
     });
   }
@@ -157,7 +157,7 @@
     if (!data.success.length) {
       throw new DOMException(
         `File${data.hashes.length > 1 ? 's' : ''} "${data.hashes.map((hash) => hash.value).join(', ')}" not found in cross-origin storage.`,
-        'NotFoundError',
+        'NotFoundError'
       );
     }
 
@@ -216,7 +216,7 @@
     if (sessionPermission === 'never-allow') {
       throw new DOMException(
         `The user has denied permission...`,
-        'NotAllowedError',
+        'NotAllowedError'
       );
     }
 
@@ -236,7 +236,7 @@
       sessionPermission = 'never-allow';
       throw new DOMException(
         `The user has denied permission...`,
-        'NotAllowedError',
+        'NotAllowedError'
       );
     }
 
@@ -294,7 +294,7 @@
           if (!userChoice || userChoice === 'never-allow') {
             const error = new DOMException(
               `The user did not grant permission...`,
-              'NotAllowedError',
+              'NotAllowedError'
             );
             allRequests.forEach((req) => req.reject(error));
             return;
@@ -310,23 +310,23 @@
     requestFileHandles: async (hashes, options = {}) => {
       if (!hashes) {
         throw new TypeError(
-          `Failed to execute 'requestFileHandles': first argument 'hashes' is required.`,
+          `Failed to execute 'requestFileHandles': first argument 'hashes' is required.`
         );
       }
       if (!Array.isArray(hashes)) {
         throw new TypeError(
-          `Failed to execute 'requestFileHandles': first argument 'hashes' must be an array.`,
+          `Failed to execute 'requestFileHandles': first argument 'hashes' must be an array.`
         );
       }
       for (const hash of hashes) {
         if (!hash.value) {
           throw new TypeError(
-            `Failed to execute 'requestFileHandles': missing required 'hash.value'.`,
+            `Failed to execute 'requestFileHandles': missing required 'hash.value'.`
           );
         }
         if (!hash.algorithm) {
           throw new TypeError(
-            `Failed to execute 'requestFileHandles': missing required 'hash.algorithm'.`,
+            `Failed to execute 'requestFileHandles': missing required 'hash.algorithm'.`
           );
         }
       }

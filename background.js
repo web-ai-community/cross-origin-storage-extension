@@ -130,7 +130,7 @@ async function storeFileData(hash, blob, mimeType) {
       headers: {
         'content-type': mimeType['content-type'] || 'application/octet-stream',
       },
-    }),
+    })
   );
 }
 
@@ -152,7 +152,7 @@ async function getFileData(hash) {
       },
       (response) => {
         resolve(response.data.blobURL);
-      },
+      }
     );
   });
 }

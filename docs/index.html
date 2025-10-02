@@ -168,7 +168,7 @@
           const [handle] =
             await navigator.crossOriginStorage.requestFileHandles(
               [hash],
-              options,
+              options
             ); /* END MARK */
           const writable = await handle.createWritable();
           await writable.write(fileBlob);
@@ -213,9 +213,9 @@
        */
       Blob.prototype.toString = function () {
         return `Blob {
-  size: ${this.size} bytes,
-  type: "${this.type || 'application/octet-stream'}",
-}`;
+															size: ${this.size} bytes,
+															type: "${this.type || 'application/octet-stream'}",
+															}`;
       };
 
       const originalConsoleLog = console.log;
@@ -229,7 +229,7 @@
               ? arg.toString()
               : typeof arg === 'string'
                 ? arg
-                : JSON.stringify(arg, null, 2),
+                : JSON.stringify(arg, null, 2)
           )
           .join(' ');
         pre.append(document.createTextNode(message + '\n\n'));
@@ -243,7 +243,7 @@
               ? arg.toString()
               : typeof arg === 'string'
                 ? arg
-                : JSON.stringify(arg, null, 2),
+                : JSON.stringify(arg, null, 2)
           )
           .join(' ');
         const span = document.createElement('span');
@@ -258,18 +258,18 @@
       const regExp =
         /.*?\/\* HIGHLIGHT START \*\/(.*?)\/\* HIGHLIGHT END \*\/.*?/gms;
       const sourceCode = regExp.exec(
-        await fetch('.').then((response) => response.text()),
+        await fetch('.').then((response) => response.text())
       )[1];
       code.append(sourceCode.trim());
       hljs.highlightAll();
       code.innerHTML = code.innerHTML
         .replaceAll(
           '<span class="hljs-comment">/* BEGIN MARK */</span>',
-          '<mark>',
+          '<mark>'
         )
         .replaceAll(
           '<span class="hljs-comment">/* END MARK */</span>',
-          '</mark>',
+          '</mark>'
         )
         .split(/\n/)
         .map((line) => line.replace(/^      /, ''))

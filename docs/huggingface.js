@@ -9,7 +9,7 @@ const output = document.querySelector('output');
 
 const cachedFileHashesLocalStorageKey = 'cached-file-hashes';
 const cachedFileHashes = JSON.parse(
-  localStorage.getItem(cachedFileHashesLocalStorageKey) ?? '{}',
+  localStorage.getItem(cachedFileHashesLocalStorageKey) ?? '{}'
 );
 
 /**
@@ -33,7 +33,7 @@ console.log = (...args) => {
         ? arg.toString()
         : typeof arg === 'string'
           ? arg
-          : JSON.stringify(arg, null, 2),
+          : JSON.stringify(arg, null, 2)
     )
     .join(' ');
   pre.append(document.createTextNode(message + '\n\n'));
@@ -47,7 +47,7 @@ console.error = (...args) => {
         ? arg.toString()
         : typeof arg === 'string'
           ? arg
-          : JSON.stringify(arg, null, 2),
+          : JSON.stringify(arg, null, 2)
     )
     .join(' ');
   if (/onnxruntime/.test(message)) {
@@ -98,11 +98,11 @@ env.customCache = {
     cachedFileHashes[request] = hash.value;
     localStorage.setItem(
       cachedFileHashesLocalStorageKey,
-      JSON.stringify(cachedFileHashes),
+      JSON.stringify(cachedFileHashes)
     );
     const [handle] = await navigator.crossOriginStorage.requestFileHandles(
       [hash],
-      { create: true },
+      { create: true }
     );
     const writableStream = await handle.createWritable();
     await writableStream.write(blob);
@@ -115,7 +115,7 @@ env.customCache = {
 const transcriber = await pipeline(
   'automatic-speech-recognition',
   'onnx-community/whisper-tiny.en',
-  { device: 'webgpu' },
+  { device: 'webgpu' }
 );
 
 // Transcribe audio from a URL

@@ -79,7 +79,7 @@ class ResourceManager {
       for (const origin of origins) {
         if (this.originToHashes[origin]) {
           this.originToHashes[origin] = this.originToHashes[origin].filter(
-            (h) => h !== hash,
+            (h) => h !== hash
           );
           // If the origin now has no hashes, remove the origin key itself.
           if (this.originToHashes[origin].length === 0) {

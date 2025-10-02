@@ -31,7 +31,7 @@ window.addEventListener('message', async (event) => {
     if (response.data.blobURL) {
       // Send Blob URL as ArrayBuffer.
       response.data.arrayBuffer = await fetch(response.data.blobURL).then(
-        (response) => response.arrayBuffer(),
+        (response) => response.arrayBuffer()
       );
     }
     window.postMessage(
@@ -40,7 +40,7 @@ window.addEventListener('message', async (event) => {
         id: id,
         data: response.data,
       },
-      event.origin,
+      event.origin
     );
   });
 });

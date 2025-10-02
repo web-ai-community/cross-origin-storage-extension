@@ -58,7 +58,7 @@ async function initializePopup() {
       deleteBtn.addEventListener('click', async () => {
         const originsUsingResource = resourceManager.getOriginsByHash(hash);
         const message = `<h1>Are you sure you want to delete the resource with hash<br><code>${hash}</code>?</h1><p>It's used by the following origins:<ul><li>${originsUsingResource.join(
-          '</li><li>',
+          '</li><li>'
         )}</li></ul>`;
 
         const confirmed = await showConfirmationDialog(message, 'Delete');
@@ -78,7 +78,7 @@ async function initializePopup() {
               }
               await resourceManager.deleteResourcesByHash(hash);
               await refreshUI(); // Refresh the entire UI after deletion
-            },
+            }
           );
         }
       });
@@ -106,7 +106,7 @@ async function initializePopup() {
               minute: '2-digit',
               second: '2-digit',
               hour12: false,
-            },
+            }
           )}`;
           timesUl.append(timeLi);
         });
@@ -218,7 +218,7 @@ async function initializePopup() {
           }
           await resourceManager.deleteResourcesByHash(allHashes);
           await refreshUI();
-        },
+        }
       );
     }
   });

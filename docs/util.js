@@ -12,7 +12,7 @@ async function getBlobHash(blob) {
   // Hash the arrayBuffer using SHA-256.
   const hashBuffer = await crypto.subtle.digest(
     hashAlgorithmIdentifier,
-    arrayBuffer,
+    arrayBuffer
   );
 
   // Convert the ArrayBuffer to a hex string.
