@@ -130,7 +130,8 @@ async function initializePopup() {
       const hashDiv = document.createElement('div');
       hashDiv.className = 'hash-value';
       hashDiv.textContent = `${resourceName} (${formatBytes(size)})`.replace(
-        ' ()', ''
+        ' ()',
+        ''
       );
       li.append(hashDiv);
 
@@ -240,7 +241,10 @@ async function initializePopup() {
       for (const { hash, size } of resourcesWithSize) {
         const resourceIndex = allHashes.indexOf(hash) + 1; // Keep original index for stable naming
         const resourceName = `Resource #${resourceIndex + 1}`;
-        const optionText = `${resourceName} (${formatBytes(size)})`.replace(' ()', '');
+        const optionText = `${resourceName} (${formatBytes(size)})`.replace(
+          ' ()',
+          ''
+        );
         hashSelect.add(new Option(optionText, hash));
         if (hashesOfCurrentOrigin.includes(hash)) {
           if (!hashSelected) {

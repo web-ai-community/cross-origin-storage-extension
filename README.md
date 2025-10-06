@@ -10,9 +10,9 @@
 1. Press the **Analyze sentiment** button.
 1. Navigate to the same demo app but hosted on the different origin
    [https://googlechrome.github.io](https://googlechrome.github.io/samples/cos-demo/).
-1. Press the **Analyze sentiment** button. Now the resource with the SHA-256 hash
-   `0fb85c8c503d43711cf821d5629ac17fecaf1a3e98517c73038e72105aaf56d9` is already
-   in Cross-Origin Storage 🎉.
+1. Press the **Analyze sentiment** button. Now the resource with the SHA-256
+   hash `0fb85c8c503d43711cf821d5629ac17fecaf1a3e98517c73038e72105aaf56d9` is
+   already in Cross-Origin Storage 🎉.
 
 ## License
 
