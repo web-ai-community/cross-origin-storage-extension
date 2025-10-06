@@ -66,20 +66,28 @@ async function initializePopup() {
     const hashes = resourceManager.getHashesByOrigin(selectedOrigin);
     const allHashes = resourceManager.getAllHashes();
 
-    for (const hash of hashes) {
-      let size = resourceManager.getSizeByHash(hash);
-      // If size is not in the manager, query it from the offscreen document.
-      if (size === undefined) {
-        const response = await chrome.runtime.sendMessage({
-          action: 'getResourceSize',
-          target: 'offscreen-doc',
-          data: { hash },
-        });
-        size = response.data.size;
-        // Record the size in the manager for future use.
-        resourceManager.recordSize(hash, size);
-      }
+    // Create an array of objects with hash and size to facilitate sorting.
+    const resourcesWithSize = await Promise.all(
+      hashes.map(async (hash) => {
+        let size = resourceManager.getSizeByHash(hash);
+        // If size is not in the manager, query it from the offscreen document.
+        if (size === undefined) {
+          const response = await chrome.runtime.sendMessage({
+            action: 'getResourceSize',
+            target: 'offscreen-doc',
+            data: { hash },
+          });
+          size = response.data.size;
+          resourceManager.recordSize(hash, size);
+        }
+        return { hash, size };
+      })
+    );
 
+    // Sort resources by size in descending order.
+    resourcesWithSize.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
+
+    for (const { hash, size } of resourcesWithSize) {
       const history = resourceManager.getAccessHistory(selectedOrigin, hash);
       const resourceIndex = allHashes.indexOf(hash) + 1;
       const resourceName = `Resource #${resourceIndex}`;
@@ -209,17 +217,38 @@ async function initializePopup() {
       hashSelect.add(new Option('No resources found', ''));
     } else {
       let hashSelected = false;
-      allHashes.forEach((hash, index) => {
-        const resourceName = `Resource #${index + 1}`;
-        const option = new Option(resourceName, hash);
-        hashSelect.add(option);
+
+      const resourcesWithSize = await Promise.all(
+        allHashes.map(async (hash) => {
+          let size = resourceManager.getSizeByHash(hash);
+          if (size === undefined) {
+            const response = await chrome.runtime.sendMessage({
+              action: 'getResourceSize',
+              target: 'offscreen-doc',
+              data: { hash },
+            });
+            size = response.data.size;
+            resourceManager.recordSize(hash, size);
+          }
+          return { hash, size };
+        })
+      );
+
+      // Sort resources by size in descending order.
+      resourcesWithSize.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
+
+      for (const { hash, size } of resourcesWithSize) {
+        const resourceIndex = allHashes.indexOf(hash) + 1; // Keep original index for stable naming
+        const resourceName = `Resource #${resourceIndex + 1}`;
+        const optionText = `${resourceName} (${formatBytes(size)})`.replace(' ()', '');
+        hashSelect.add(new Option(optionText, hash));
         if (hashesOfCurrentOrigin.includes(hash)) {
           if (!hashSelected) {
             hashSelected = true;
             hashSelect.value = hash;
           }
         }
-      });
+      }
     }
 
     // Redraw the lists.
