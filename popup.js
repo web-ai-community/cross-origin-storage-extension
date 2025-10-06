@@ -87,10 +87,9 @@ async function initializePopup() {
     // Sort resources by size in descending order.
     resourcesWithSize.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
 
-    for (const { hash, size } of resourcesWithSize) {
+    for (const [index, { hash, size }] of resourcesWithSize.entries()) {
       const history = resourceManager.getAccessHistory(selectedOrigin, hash);
-      const resourceIndex = allHashes.indexOf(hash) + 1;
-      const resourceName = `Resource #${resourceIndex}`;
+      const resourceName = `Resource #${index + 1}`;
 
       const li = document.createElement('li');
       li.className = 'resource-item';
@@ -238,9 +237,8 @@ async function initializePopup() {
       // Sort resources by size in descending order.
       resourcesWithSize.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
 
-      for (const { hash, size } of resourcesWithSize) {
-        const resourceIndex = allHashes.indexOf(hash) + 1; // Keep original index for stable naming
-        const resourceName = `Resource #${resourceIndex + 1}`;
+      for (const [index, { hash, size }] of resourcesWithSize.entries()) {
+        const resourceName = `Resource #${index + 1}`;
         const optionText = `${resourceName} (${formatBytes(size)})`.replace(
           ' ()',
           ''
