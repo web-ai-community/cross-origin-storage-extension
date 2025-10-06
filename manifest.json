@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Cross-Origin Storage",
   "version": "0.0.1",
-  "description": "An extension that implements the proposed Cross-Origin Storage API.",
+  "description": "This extension implements the proposed Cross-Origin Storage API, which allows web applications to store and retrieve files across different origins with explicit user consent.",
   "permissions": ["storage", "unlimitedStorage", "offscreen", "tabs"],
   "background": {
     "service_worker": "background.js",
