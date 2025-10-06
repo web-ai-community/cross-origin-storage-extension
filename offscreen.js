@@ -20,16 +20,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           },
         });
         break;
-      case 'getResourceSize':
-        const sizeResponse = await cache.match(
+      case 'getResourceMetadata':
+        const metadataResponse = await cache.match(
           `https://cos.example.com/SHA-256_${data.hash}`
         );
-        if (sizeResponse) {
-          const sizeBlob = await sizeResponse.blob();
-          sendResponse({ data: { size: sizeBlob.size } });
+        if (metadataResponse) {
+          const blob = await metadataResponse.blob();
+          const mimeType = metadataResponse.headers.get('content-type');
+          sendResponse({ data: { size: blob.size, mimeType } });
         } else {
-          // If the resource is not in the cache, return null.
-          sendResponse({ data: { size: null } });
+          // If the resource is not in the cache, return nulls.
+          sendResponse({ data: { size: null, mimeType: null } });
         }
         break;
       case 'deleteResource':

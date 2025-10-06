@@ -56,6 +56,23 @@ async function initializePopup() {
   }
 
   /**
+   * Generates a friendly name from a MIME type.
+   * @param {string} mimeType The MIME type string.
+   * @returns {string} A capitalized, friendly name (e.g., "Image", "Model").
+   */
+  function getFriendlyNameFromMimeType(mimeType = 'Resource') {
+    if (!mimeType || typeof mimeType !== 'string') {
+      return 'Resource';
+    }
+    let name = mimeType.split('/')[0]; // "image/jpeg" -> "image"
+    if (name === 'application' && mimeType.includes('octet-stream')) {
+      name = 'Model'; // Or "Binary", "Data", etc.
+    }
+    // Capitalize the first letter
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  }
+
+  /**
    * Updates the list of hashes based on the selected origin.
    */
   async function updateHashesDisplay() {
@@ -64,30 +81,38 @@ async function initializePopup() {
     if (!selectedOrigin) return;
 
     const hashes = resourceManager.getHashesByOrigin(selectedOrigin);
-    const allHashes = resourceManager.getAllHashes();
 
     // Create an array of objects with hash and size to facilitate sorting.
     const resourcesWithSize = await Promise.all(
       hashes.map(async (hash) => {
         let size = resourceManager.getSizeByHash(hash);
-        // If size is not in the manager, query it from the offscreen document.
-        if (size === undefined) {
+        let mimeType = resourceManager.getMimeTypeByHash(hash);
+        // If metadata is not in the manager, query it from the offscreen document.
+        if (size === undefined || mimeType === undefined) {
           const response = await chrome.runtime.sendMessage({
-            action: 'getResourceSize',
+            action: 'getResourceMetadata',
             target: 'offscreen-doc',
             data: { hash },
           });
-          size = response.data.size;
-          resourceManager.recordSize(hash, size);
+          size = response.data.size ?? size;
+          mimeType = response.data.mimeType ?? mimeType;
+          // Record the metadata in the manager for future use.
+          if (response.data.size !== undefined)
+            resourceManager.recordSize(hash, size);
+          if (response.data.mimeType !== undefined)
+            resourceManager.recordMimeType(hash, mimeType);
         }
-        return { hash, size };
+        return { hash, size, mimeType };
       })
     );
 
     // Sort resources by size in descending order.
     resourcesWithSize.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
 
-    for (const [index, { hash, size }] of resourcesWithSize.entries()) {
+    for (const [
+      index,
+      { hash, size, mimeType },
+    ] of resourcesWithSize.entries()) {
       const history = resourceManager.getAccessHistory(selectedOrigin, hash);
       const resourceName = `Resource #${index + 1}`;
 
@@ -128,10 +153,9 @@ async function initializePopup() {
 
       const hashDiv = document.createElement('div');
       hashDiv.className = 'hash-value';
-      hashDiv.textContent = `${resourceName} (${formatBytes(size)})`.replace(
-        ' ()',
-        ''
-      );
+      hashDiv.textContent = `${resourceName} (${
+        (mimeType || 'unknown type').split(';')[0]
+      }) - ${formatBytes(size)}`;
       li.append(hashDiv);
 
       if (history.length > 0) {
@@ -221,28 +245,36 @@ async function initializePopup() {
       const resourcesWithSize = await Promise.all(
         allHashes.map(async (hash) => {
           let size = resourceManager.getSizeByHash(hash);
-          if (size === undefined) {
+          let mimeType = resourceManager.getMimeTypeByHash(hash);
+          if (size === undefined || mimeType === undefined) {
             const response = await chrome.runtime.sendMessage({
-              action: 'getResourceSize',
+              action: 'getResourceMetadata',
               target: 'offscreen-doc',
               data: { hash },
             });
-            size = response.data.size;
-            resourceManager.recordSize(hash, size);
+            size = response.data.size ?? size;
+            mimeType = response.data.mimeType ?? mimeType;
+            if (response.data.size !== undefined)
+              resourceManager.recordSize(hash, size);
+            if (response.data.mimeType !== undefined)
+              resourceManager.recordMimeType(hash, mimeType);
           }
-          return { hash, size };
+          return { hash, size, mimeType };
         })
       );
 
       // Sort resources by size in descending order.
       resourcesWithSize.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
 
-      for (const [index, { hash, size }] of resourcesWithSize.entries()) {
+      for (const [
+        index,
+        { hash, size, mimeType },
+      ] of resourcesWithSize.entries()) {
         const resourceName = `Resource #${index + 1}`;
-        const optionText = `${resourceName} (${formatBytes(size)})`.replace(
-          ' ()',
-          ''
-        );
+        const optionText = `${resourceName} (${
+          (mimeType || 'unknown type').split(';')[0]
+        }) - ${formatBytes(size)}`;
+
         hashSelect.add(new Option(optionText, hash));
         if (hashesOfCurrentOrigin.includes(hash)) {
           if (!hashSelected) {

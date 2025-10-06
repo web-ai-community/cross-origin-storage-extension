@@ -8,6 +8,7 @@ class ResourceManager {
     this.hashToOrigins = {};
     this.accessHistory = {};
     this.hashToSize = {};
+    this.hashToMimeType = {};
   }
 
   recordAccess(origin, hash, timestamp = new Date()) {
@@ -40,6 +41,13 @@ class ResourceManager {
     }
   }
 
+  recordMimeType(hash, mimeType) {
+    if (typeof mimeType === 'string') {
+      this.hashToMimeType[hash] = mimeType;
+      this.saveManagerToStorage();
+    }
+  }
+
   getHashesByOrigin(origin) {
     return this.originToHashes[origin]
       ? [...this.originToHashes[origin]].sort()
@@ -64,6 +72,10 @@ class ResourceManager {
 
   getSizeByHash(hash) {
     return this.hashToSize[hash];
+  }
+
+  getMimeTypeByHash(hash) {
+    return this.hashToMimeType[hash];
   }
 
   /**
@@ -107,6 +119,9 @@ class ResourceManager {
 
       // Remove the size information for the hash.
       delete this.hashToSize[hash];
+
+      // Remove the MIME type information for the hash.
+      delete this.hashToMimeType[hash];
     }
 
     // If any changes were made, persist them to storage.
@@ -124,6 +139,7 @@ class ResourceManager {
         this.hashToOrigins = stored.hashToOrigins || {};
         this.accessHistory = stored.accessHistory || {};
         this.hashToSize = stored.hashToSize || {};
+        this.hashToMimeType = stored.hashToMimeType || {};
       }
     } catch (error) {
       console.error('Error loading resource manager from storage:', error);
@@ -138,6 +154,7 @@ class ResourceManager {
           hashToOrigins: this.hashToOrigins,
           accessHistory: this.accessHistory,
           hashToSize: this.hashToSize,
+          hashToMimeType: this.hashToMimeType,
         },
       });
     } catch (error) {
