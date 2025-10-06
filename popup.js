@@ -37,29 +37,64 @@ async function initializePopup() {
   }
 
   /**
+   * Formats bytes into a human-readable string (KB, MB, GB, etc.).
+   * @param {number} bytes The number of bytes.
+   * @param {number} [decimals=2] The number of decimal places.
+   * @returns {string} The formatted file size.
+   */
+  function formatBytes(bytes, decimals = 2) {
+    if (bytes === 0) return '0 Bytes';
+    if (bytes === undefined || bytes === null) return '';
+
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+  }
+
+  /**
    * Updates the list of hashes based on the selected origin.
    */
-  function updateHashesDisplay() {
+  async function updateHashesDisplay() {
     const selectedOrigin = originSelect.value;
     hashesList.innerHTML = '';
     if (!selectedOrigin) return;
 
     const hashes = resourceManager.getHashesByOrigin(selectedOrigin);
-    hashes.forEach((hash) => {
+    const allHashes = resourceManager.getAllHashes();
+
+    for (const hash of hashes) {
+      let size = resourceManager.getSizeByHash(hash);
+      // If size is not in the manager, query it from the offscreen document.
+      if (size === undefined) {
+        const response = await chrome.runtime.sendMessage({
+          action: 'getResourceSize',
+          target: 'offscreen-doc',
+          data: { hash },
+        });
+        size = response.data.size;
+        // Record the size in the manager for future use.
+        resourceManager.recordSize(hash, size);
+      }
+
       const history = resourceManager.getAccessHistory(selectedOrigin, hash);
+      const resourceIndex = allHashes.indexOf(hash) + 1;
+      const resourceName = `Resource #${resourceIndex}`;
 
       const li = document.createElement('li');
       li.className = 'resource-item';
+      li.title = `Hash: ${hash}`;
 
       const deleteBtn = document.createElement('button');
       deleteBtn.textContent = 'Delete';
       deleteBtn.className = 'delete-btn';
-      deleteBtn.title = `Delete this resource (${hash.substring(0, 8)}...)`;
+      deleteBtn.title = `Delete ${resourceName}`;
       deleteBtn.addEventListener('click', async () => {
         const originsUsingResource = resourceManager.getOriginsByHash(hash);
-        const message = `<h1>Are you sure you want to delete the resource with hash<br><code>${hash}</code>?</h1><p>It's used by the following origins:<ul><li>${originsUsingResource.join(
-          '</li><li>'
-        )}</li></ul>`;
+        const message = `<h1>Are you sure you want to delete ${resourceName}?</h1><p>It's used by the following origins:<ul><li>${originsUsingResource.join('</li><li>')}</li></ul><p>Hash: <code>${hash}</code></p>`;
 
         const confirmed = await showConfirmationDialog(message, 'Delete');
         if (confirmed) {
@@ -86,7 +121,9 @@ async function initializePopup() {
 
       const hashDiv = document.createElement('div');
       hashDiv.className = 'hash-value';
-      hashDiv.textContent = hash;
+      hashDiv.textContent = `${resourceName} (${formatBytes(size)})`.replace(
+        ' ()', ''
+      );
       li.append(hashDiv);
 
       if (history.length > 0) {
@@ -113,7 +150,7 @@ async function initializePopup() {
         li.append(timesUl);
       }
       hashesList.append(li);
-    });
+    }
   }
 
   /**
@@ -172,8 +209,10 @@ async function initializePopup() {
       hashSelect.add(new Option('No resources found', ''));
     } else {
       let hashSelected = false;
-      allHashes.forEach((hash) => {
-        hashSelect.add(new Option(hash, hash));
+      allHashes.forEach((hash, index) => {
+        const resourceName = `Resource #${index + 1}`;
+        const option = new Option(resourceName, hash);
+        hashSelect.add(option);
         if (hashesOfCurrentOrigin.includes(hash)) {
           if (!hashSelected) {
             hashSelected = true;
@@ -188,7 +227,7 @@ async function initializePopup() {
     updateOriginsDisplay();
   }
 
-  originSelect.addEventListener('change', updateHashesDisplay);
+  originSelect.addEventListener('change', () => updateHashesDisplay());
   hashSelect.addEventListener('change', updateOriginsDisplay);
 
   deleteAllBtn.addEventListener('click', async () => {

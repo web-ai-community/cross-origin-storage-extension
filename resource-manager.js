@@ -7,6 +7,7 @@ class ResourceManager {
     this.originToHashes = {};
     this.hashToOrigins = {};
     this.accessHistory = {};
+    this.hashToSize = {};
   }
 
   recordAccess(origin, hash, timestamp = new Date()) {
@@ -32,6 +33,13 @@ class ResourceManager {
     }
   }
 
+  recordSize(hash, size) {
+    if (typeof size === 'number') {
+      this.hashToSize[hash] = size;
+      this.saveManagerToStorage();
+    }
+  }
+
   getHashesByOrigin(origin) {
     return this.originToHashes[origin]
       ? [...this.originToHashes[origin]].sort()
@@ -52,6 +60,10 @@ class ResourceManager {
 
   getAccessHistory(origin, hash) {
     return this.accessHistory[`${origin}|${hash}`] || [];
+  }
+
+  getSizeByHash(hash) {
+    return this.hashToSize[hash];
   }
 
   /**
@@ -92,6 +104,9 @@ class ResourceManager {
 
       // Remove the hash from the central hash-to-origins map.
       delete this.hashToOrigins[hash];
+
+      // Remove the size information for the hash.
+      delete this.hashToSize[hash];
     }
 
     // If any changes were made, persist them to storage.
@@ -108,6 +123,7 @@ class ResourceManager {
         this.originToHashes = stored.originToHashes || {};
         this.hashToOrigins = stored.hashToOrigins || {};
         this.accessHistory = stored.accessHistory || {};
+        this.hashToSize = stored.hashToSize || {};
       }
     } catch (error) {
       console.error('Error loading resource manager from storage:', error);
@@ -121,6 +137,7 @@ class ResourceManager {
           originToHashes: this.originToHashes,
           hashToOrigins: this.hashToOrigins,
           accessHistory: this.accessHistory,
+          hashToSize: this.hashToSize,
         },
       });
     } catch (error) {

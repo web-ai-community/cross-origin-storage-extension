@@ -80,6 +80,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           let { hash, blobURL, mimeType } = data;
           const blob = await fetch(blobURL).then((response) => response.blob());
           await storeFileData(hash, blob, mimeType);
+          resourceManager.recordSize(hash.value, blob.size);
           responseData = { hash };
           break;
         }

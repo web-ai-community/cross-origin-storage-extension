@@ -20,6 +20,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           },
         });
         break;
+      case 'getResourceSize':
+        const sizeResponse = await cache.match(
+          `https://cos.example.com/SHA-256_${data.hash}`
+        );
+        if (sizeResponse) {
+          const sizeBlob = await sizeResponse.blob();
+          sendResponse({ data: { size: sizeBlob.size } });
+        } else {
+          // If the resource is not in the cache, return null.
+          sendResponse({ data: { size: null } });
+        }
+        break;
       case 'deleteResource':
         await cache.delete(`https://cos.example.com/SHA-256_${data.hash}`);
         sendResponse({
@@ -29,8 +41,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
         break;
       case 'deleteAllResources':
-        await caches.delete('cos-storage');
-        cache = await caches.open('cos-storage');
+        const keys = await cache.keys();
+        for (const key of keys) {
+          await cache.delete(key);
+        }
         sendResponse({
           data: {
             success: true,
