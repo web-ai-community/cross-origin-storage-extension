@@ -4,12 +4,13 @@
 
 ## Usage
 
-1. Install the extension.
+1. Clone the repo or download the files manually.
+1. Install the extension as per the [Load an unpacked extension](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked) instructions.
 1. Navigate to the demo app on
-   [https://web-ai-community.github.io](https://web-ai-community.github.io/cross-origin-storage-extension/).
+   [https://web-ai-community.github.io](https://web-ai-community.github.io/cross-origin-storage-extension/) (or try the more realistic [Hugging Face Whisper example](https://web-ai-community.github.io/cross-origin-storage-extension/huggingface.html) on that origin).
 1. Press the **Analyze sentiment** button.
 1. Navigate to the same demo app but hosted on the different origin
-   [https://googlechrome.github.io](https://googlechrome.github.io/samples/cos-demo/).
+   [https://googlechrome.github.io](https://googlechrome.github.io/samples/cos-demo/) (or try the more realistic [Hugging Face Whisper example](https://googlechrome.github.io/samples/cos-demo/huggingface.html) on that different origin).
 1. Press the **Analyze sentiment** button. Now the resource with the SHA-256
    hash `0fb85c8c503d43711cf821d5629ac17fecaf1a3e98517c73038e72105aaf56d9` is
    already in Cross-Origin Storage 🎉.
