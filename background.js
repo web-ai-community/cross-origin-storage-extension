@@ -64,6 +64,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
             success.push(handle);
             // Log access statistics.
+            await resourceManager.loadManagerFromStorage();
             resourceManager.recordAccess(origin, hash.value);
           }
           resourceManager.saveManagerToStorage();
