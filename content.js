@@ -18,20 +18,20 @@ window.addEventListener('message', async (event) => {
   }
   const { id, action, data } = event.data;
 
-  if (data.arrayBuffer) {
-    // Send ArrayBuffer as Blob URL.
-    const blob = new Blob([data.arrayBuffer], {
-      type: 'application/octet-stream',
+  if (data.data) {
+    // Send data as Blob URL.
+    const blob = new Blob([data.data], {
+      type: data.data.type || 'application/octet-stream',
     });
     data.blobURL = URL.createObjectURL(blob);
-    delete data.arrayBuffer;
+    delete data.data;
   }
   // Forward the message to the background script
   chrome.runtime.sendMessage({ action, data }, async (response) => {
     if (response.data.blobURL) {
       // Send Blob URL as ArrayBuffer.
-      response.data.arrayBuffer = await fetch(response.data.blobURL).then(
-        (response) => response.arrayBuffer()
+      response.data.data = await fetch(response.data.blobURL).then((response) =>
+        response.arrayBuffer()
       );
     }
     window.postMessage(

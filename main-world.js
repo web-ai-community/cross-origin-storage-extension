@@ -166,17 +166,18 @@
     for (const hash of hashes) {
       handles.push({
         getFile: async () => {
-          const { arrayBuffer } = await talkToBridge('getFileData', { hash });
-          return new Blob([arrayBuffer]);
+          const { data } = await talkToBridge('getFileData', { hash });
+          return new Blob([data]);
         },
         createWritable: async () => {
           return {
-            write: async (blob) => {
-              const arrayBuffer = await blob.arrayBuffer();
+            write: async (data) => {
               return await talkToBridge('storeFileData', {
                 hash,
-                arrayBuffer,
-                mimeType: { 'content-type': blob.type },
+                data,
+                mimeType: {
+                  'content-type': data.type || 'application/octet-stream',
+                },
               });
             },
             close: async () => {
