@@ -2,6 +2,13 @@ import ResourceManager from './resource-manager.js';
 
 let creating; // A global promise to avoid concurrency issues
 
+chrome.runtime.onInstalled.addListener(async ({ reason }) => {
+  if (reason === 'install' || reason === 'update') {
+    await chrome.storage.local.set({ showPrompt: false });
+    await chrome.storage.local.remove('cosPermissions');
+  }
+});
+
 async function setupOffscreenDocument(path) {
   // Check all windows controlled by the service worker to see if one
   // of them is the offscreen document with the given path
@@ -104,6 +111,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           permissions[origin] = permission;
           await chrome.storage.local.set({ cosPermissions: permissions });
           responseData = { success: true };
+          break;
+        }
+        case 'getShowPromptSetting': {
+          const result = await chrome.storage.local.get('showPrompt');
+          responseData = { showPrompt: !!result.showPrompt };
           break;
         }
         default:

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Cross-Origin Storage Options</title>
+    <link rel="stylesheet" href="styles.css" />
+    <style>
+      body {
+        max-width: 600px;
+        margin: 2rem auto;
+      }
+    </style>
+  </head>
+
+  <body>
+    <img class="logo" src="logo-cos.svg" alt="" width="512" height="512" />
+    <h1>Cross-Origin Storage</h1>
+    <div class="panel">
+      <h2>Options</h2>
+      <div class="option-item">
+        <input type="checkbox" id="show-prompt" />
+        <label for="show-prompt">Show simulated permission prompt</label>
+      </div>
+      <p>
+        If enabled, the extension will show a simulated permission prompt when a
+        site requests access to cross-origin storage for the first time.
+      </p>
+    </div>
+    <div id="toast">Settings saved</div>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

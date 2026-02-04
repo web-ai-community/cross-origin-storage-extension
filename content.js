@@ -18,7 +18,7 @@ window.addEventListener('message', async (event) => {
   }
   const { id, action, data } = event.data;
 
-  if (data.data) {
+  if (data && data.data) {
     // Send data as Blob URL.
     const blob = new Blob([data.data], {
       type: data.data.type || 'application/octet-stream',
@@ -28,7 +28,7 @@ window.addEventListener('message', async (event) => {
   }
   // Forward the message to the background script
   chrome.runtime.sendMessage({ action, data }, async (response) => {
-    if (response.data.blobURL) {
+    if (response && response.data && response.data.blobURL) {
       // Send Blob URL as ArrayBuffer.
       response.data.data = await fetch(response.data.blobURL).then((response) =>
         response.arrayBuffer()

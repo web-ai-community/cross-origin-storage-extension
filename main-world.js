@@ -190,7 +190,7 @@
     return handles;
   }
 
-  async function requestFileHandlesWithPermission(hashes, create = false) {
+  async function requestFileHandlesWithOptionalPrompt(hashes, create = false) {
     const origin = location.origin;
 
     // No permission needed, creation is always allowed.
@@ -241,7 +241,19 @@
       );
     }
 
-    // If no permission is set, proceed to prompt the user.
+    // If no permission is set, check if we should show the prompt.
+    const { showPrompt } = await talkToBridge('getShowPromptSetting');
+    if (!showPrompt) {
+      // If the prompt is disabled, assume the user allowed the interaction.
+      const responseData = await talkToBridge('requestFileHandles', {
+        hashes,
+        create,
+        origin,
+      });
+      return handleRequestFileHandlesResponse(responseData);
+    }
+
+    // Proceed to prompt the user.
     return new Promise((resolve, reject) => {
       const requestPayload = { hashes, create, origin, resolve, reject };
 
@@ -332,7 +344,7 @@
         }
       }
       const { create = false } = options;
-      return requestFileHandlesWithPermission(hashes, create);
+      return requestFileHandlesWithOptionalPrompt(hashes, create);
     },
   };
 
