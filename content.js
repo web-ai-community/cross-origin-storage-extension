@@ -1,11 +1,3 @@
-// Inject the main-world.js script into the page's context.
-const script = document.createElement('script');
-script.src = chrome.runtime.getURL('main-world.js');
-script.onload = function () {
-  this.remove();
-};
-(document.head || document.documentElement).appendChild(script);
-
 // Listen for messages from the MAIN world script.
 window.addEventListener('message', async (event) => {
   // Only accept messages from the extension itself.

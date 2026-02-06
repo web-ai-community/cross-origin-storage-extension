@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Cross-Origin Storage",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Implements the proposed Cross-Origin Storage API, letting sites share files with your consent for a faster and more efficient web.",
   "options_page": "options.html",
   "permissions": ["storage", "unlimitedStorage", "offscreen", "tabs"],
@@ -15,7 +15,14 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://*/*"],
+      "matches": ["https://*/*", "http://localhost:*/*"],
+      "js": ["main-world.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    },
+    {
+      "matches": ["https://*/*", "http://localhost:*/*"],
       "js": ["content.js"],
       "run_at": "document_start",
       "all_frames": true
@@ -23,7 +30,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["main-world.js"],
+      "resources": [],
       "matches": ["https://*/*", "http://localhost:*/*"]
     }
   ],
