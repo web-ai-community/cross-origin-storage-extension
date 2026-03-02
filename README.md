@@ -4,10 +4,15 @@
 
 ## Usage
 
-1. Clone the repo or download the files manually.
-1. Install the extension as per the
-   [Load an unpacked extension](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked)
-   instructions.
+1. Choose between the developer or the end user flow:
+   - Developer:
+     - Clone the repo or download the files manually.
+     - Install the extension as per the
+       [Load an unpacked extension](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked)
+       instructions.
+   - End user:
+     - Install the extension from the
+       [Chrome Web Store](https://chromewebstore.google.com/detail/cross-origin-storage/denpnpcgjgikjpoglpjefakmdcbmlgih).    
 1. Navigate to the demo app on
    [https://web-ai-community.github.io](https://web-ai-community.github.io/cross-origin-storage-extension/)
    (or try the more realistic
