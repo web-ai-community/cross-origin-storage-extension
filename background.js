@@ -62,6 +62,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'requestFileHandles': {
           const { origin, hashes, create } = data;
           const success = [];
+          // Log access statistics.
+          await resourceManager.loadManagerFromStorage();
           for (const hash of hashes) {
             const handle = await getFileHandle(hash, create);
             if (!handle) {
@@ -70,18 +72,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               return;
             }
             success.push(handle);
-            // Log access statistics.
-            await resourceManager.loadManagerFromStorage();
             resourceManager.recordAccess(origin, hash.value);
           }
-          resourceManager.saveManagerToStorage();
+          await resourceManager.saveManagerToStorage();
           responseData = { hashes, success };
           break;
         }
         case 'getFileData': {
           const { hash } = data;
           let blobURL = await getFileData(hash);
-          responseData = { hash, blobURL };
+          const size = resourceManager.getSizeByHash(hash.value);
+          const mimeType = resourceManager.getMimeTypeByHash(hash.value);
+          responseData = { hash, blobURL, size, mimeType };
           break;
         }
         case 'storeFileData': {

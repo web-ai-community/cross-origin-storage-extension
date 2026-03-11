@@ -166,8 +166,13 @@
     for (const hash of hashes) {
       handles.push({
         getFile: async () => {
-          const { data } = await talkToBridge('getFileData', { hash });
-          return new Blob([data]);
+          const { data, mimeType } = await talkToBridge('getFileData', {
+            hash,
+          });
+          return new File([data], 'file', {
+            type: mimeType,
+            lastModified: Date.now(),
+          });
         },
         createWritable: async () => {
           return {

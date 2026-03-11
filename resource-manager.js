@@ -63,7 +63,12 @@ class ResourceManager {
   }
 
   getAllHashes() {
-    return Object.keys(this.hashToOrigins).sort();
+    const allHashes = new Set([
+      ...Object.keys(this.hashToOrigins),
+      ...Object.keys(this.hashToSize),
+      ...Object.keys(this.hashToMimeType),
+    ]);
+    return [...allHashes].sort();
   }
 
   getAccessHistory(origin, hash) {
@@ -90,32 +95,28 @@ class ResourceManager {
     let itemsWereDeleted = false;
 
     for (const hash of hashes) {
-      // Find all origins associated with this hash.
-      const origins = this.hashToOrigins[hash];
-      if (!origins) {
-        console.warn(`Resource with hash ${hash} not found. Skipping.`);
-        continue;
-      }
-
       itemsWereDeleted = true;
 
-      // Remove the hash from each associated origin's list.
-      for (const origin of origins) {
-        if (this.originToHashes[origin]) {
-          this.originToHashes[origin] = this.originToHashes[origin].filter(
-            (h) => h !== hash
-          );
-          // If the origin now has no hashes, remove the origin key itself.
-          if (this.originToHashes[origin].length === 0) {
-            delete this.originToHashes[origin];
+      // Find all origins associated with this hash.
+      const origins = this.hashToOrigins[hash];
+      if (origins) {
+        // Remove the hash from each associated origin's list.
+        for (const origin of origins) {
+          if (this.originToHashes[origin]) {
+            this.originToHashes[origin] = this.originToHashes[origin].filter(
+              (h) => h !== hash
+            );
+            // If the origin now has no hashes, remove the origin key itself.
+            if (this.originToHashes[origin].length === 0) {
+              delete this.originToHashes[origin];
+            }
           }
+          // Remove the access history for the origin-hash pair.
+          delete this.accessHistory[`${origin}|${hash}`];
         }
-        // Remove the access history for the origin-hash pair.
-        delete this.accessHistory[`${origin}|${hash}`];
+        // Remove the hash from the central hash-to-origins map.
+        delete this.hashToOrigins[hash];
       }
-
-      // Remove the hash from the central hash-to-origins map.
-      delete this.hashToOrigins[hash];
 
       // Remove the size information for the hash.
       delete this.hashToSize[hash];
