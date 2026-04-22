@@ -154,7 +154,7 @@
   }
 
   async function handleRequestFileHandlesResponse(data) {
-    if (!data.success.length) {
+    if (data.success.length !== data.hashes.length) {
       throw new DOMException(
         `File${data.hashes.length > 1 ? 's' : ''} "${data.hashes.map((hash) => hash.value).join(', ')}" not found in cross-origin storage.`,
         'NotFoundError'

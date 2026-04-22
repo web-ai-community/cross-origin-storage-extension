@@ -1,0 +1,486 @@
+<!--
+  Copyright 2025 Google LLC.
+  SPDX-License-Identifier: Apache-2.0
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧪</text></svg>"
+    />
+    <title>Cross-Origin Storage — Test Page</title>
+    <style>
+      :root {
+        color-scheme: dark light;
+      }
+
+      html {
+        box-sizing: border-box;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: inherit;
+      }
+
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: clamp(320px, 90%, 900px);
+        margin: auto;
+        padding-block-end: 4rem;
+      }
+
+      h2 {
+        margin-block-start: 2rem;
+      }
+
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+
+      th,
+      td {
+        text-align: left;
+        padding: 0.5rem 0.75rem;
+        border: 1px solid;
+        vertical-align: top;
+      }
+
+      th {
+        font-weight: bold;
+      }
+
+      button {
+        width: fit-content;
+        background-color: #004a77;
+        color: #c2e7ff;
+        padding: 0.4rem 0.75rem;
+        border-radius: 0.5rem;
+        border: none;
+        cursor: pointer;
+        font: inherit;
+        white-space: nowrap;
+      }
+
+      button:hover {
+        background-color: #2677a8;
+      }
+
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 0.1rem 0.4rem;
+        border-radius: 0.25rem;
+        font-weight: bold;
+        font-size: 0.85em;
+      }
+
+      .badge-pass {
+        background-color: #1a7a1a;
+        color: #d4f5d4;
+      }
+
+      .badge-fail {
+        background-color: #8b1a1a;
+        color: #f5d4d4;
+      }
+
+      .badge-running {
+        background-color: #7a6a00;
+        color: #f5ecd4;
+      }
+
+      .badge-pending {
+        background-color: #555;
+        color: #ccc;
+      }
+
+      .detail {
+        font-family: ui-monospace, monospace;
+        font-size: 0.85em;
+        margin: 0;
+        white-space: pre-wrap;
+      }
+
+      pre#log {
+        font-family: ui-monospace, monospace;
+        font-size: 0.85em;
+        text-wrap-mode: wrap;
+        border: 1px solid;
+        padding: 0.75rem;
+        max-height: 400px;
+        overflow-y: auto;
+      }
+
+      pre#log .error {
+        color: #f87171;
+      }
+
+      .run-all {
+        background-color: #1a7a1a;
+        color: #d4f5d4;
+        font-size: 1rem;
+        padding: 0.5rem 1rem;
+        margin-block-start: 1rem;
+      }
+
+      .run-all:hover {
+        background-color: #2a9a2a;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Cross-Origin Storage — Test Page</h1>
+    <p>
+      This page tests <code>navigator.crossOriginStorage.requestFileHandles()</code>
+      for the five combinations of existing and non-existing resources. It requires
+      the Cross-Origin Storage extension to be installed and enabled.
+    </p>
+    <p>
+      Known issue under test: when requesting multiple resources and only
+      <em>some</em> exist, the non-existent handles return a
+      <code>File</code> whose content is the string <code>"undefined"</code>
+      instead of throwing a <code>NotFoundError</code>.
+    </p>
+
+    <button class="run-all" id="run-all">Run all tests</button>
+
+    <h2>Test results</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Scenario</th>
+          <th>Status</th>
+          <th>Run</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody id="results">
+        <!-- rows injected by JS -->
+      </tbody>
+    </table>
+
+    <h2>Event log</h2>
+    <pre id="log"></pre>
+
+    <script type="module">
+      // ---------------------------------------------------------------------------
+      // Helpers
+      // ---------------------------------------------------------------------------
+
+      async function sha256Hex(text) {
+        const buf = await crypto.subtle.digest(
+          'SHA-256',
+          new TextEncoder().encode(text),
+        );
+        return Array.from(new Uint8Array(buf))
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join('');
+      }
+
+      function hashObj(hexValue) {
+        return { algorithm: 'SHA-256', value: hexValue };
+      }
+
+      // Store a small text blob in cross-origin storage and return its hash object.
+      async function storeTextBlob(label) {
+        const content = `cos-test-${label}`;
+        const blob = new Blob([content], { type: 'text/plain' });
+        const hexValue = await sha256Hex(content);
+        const hash = hashObj(hexValue);
+        const [handle] = await navigator.crossOriginStorage.requestFileHandles(
+          [hash],
+          { create: true },
+        );
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        return { hash, content };
+      }
+
+      // A hash value that is syntactically valid but never stored.
+      const MISSING_HASH_1 = hashObj('a'.repeat(64));
+      const MISSING_HASH_2 = hashObj('b'.repeat(64));
+
+      // ---------------------------------------------------------------------------
+      // Log
+      // ---------------------------------------------------------------------------
+
+      const logEl = document.getElementById('log');
+
+      function log(msg, isError = false) {
+        const line = `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+        if (isError) {
+          const span = document.createElement('span');
+          span.className = 'error';
+          span.textContent = line;
+          logEl.append(span);
+        } else {
+          logEl.append(line);
+        }
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      // ---------------------------------------------------------------------------
+      // Test runner
+      // ---------------------------------------------------------------------------
+
+      /**
+       * Each test returns { pass: boolean, detail: string }.
+       * Tests may throw — the runner catches those as failures.
+       */
+      const TESTS = [
+        {
+          id: 'single-exists',
+          label: 'Single resource exists',
+          async run() {
+            log('Test 1: storing file A…');
+            const { hash, content } = await storeTextBlob('file-A');
+            log(`Test 1: stored with hash ${hash.value.slice(0, 16)}…`);
+            const [handle] =
+              await navigator.crossOriginStorage.requestFileHandles([hash]);
+            const file = await handle.getFile();
+            const text = await file.text();
+            if (text !== content) {
+              return {
+                pass: false,
+                detail: `Expected "${content}", got "${text}"`,
+              };
+            }
+            return { pass: true, detail: `Returned File with correct content: "${text}"` };
+          },
+        },
+
+        {
+          id: 'single-missing',
+          label: 'Single resource does not exist',
+          async run() {
+            log('Test 2: requesting non-existent hash…');
+            try {
+              await navigator.crossOriginStorage.requestFileHandles([
+                MISSING_HASH_1,
+              ]);
+              return {
+                pass: false,
+                detail: 'Expected NotFoundError but call resolved without error.',
+              };
+            } catch (err) {
+              if (err.name === 'NotFoundError') {
+                return {
+                  pass: true,
+                  detail: `Correctly threw ${err.name}: ${err.message}`,
+                };
+              }
+              return {
+                pass: false,
+                detail: `Threw unexpected error ${err.name}: ${err.message}`,
+              };
+            }
+          },
+        },
+
+        {
+          id: 'multi-all-exist',
+          label: 'Multiple resources — all exist',
+          async run() {
+            log('Test 3: storing files B and C…');
+            const a = await storeTextBlob('file-B');
+            const b = await storeTextBlob('file-C');
+            log('Test 3: requesting both…');
+            const handles =
+              await navigator.crossOriginStorage.requestFileHandles([
+                a.hash,
+                b.hash,
+              ]);
+            if (handles.length !== 2) {
+              return {
+                pass: false,
+                detail: `Expected 2 handles, got ${handles.length}`,
+              };
+            }
+            const textA = await handles[0].getFile().then((f) => f.text());
+            const textB = await handles[1].getFile().then((f) => f.text());
+            if (textA !== a.content || textB !== b.content) {
+              return {
+                pass: false,
+                detail: `Content mismatch. Got: ["${textA}", "${textB}"], expected: ["${a.content}", "${b.content}"]`,
+              };
+            }
+            return {
+              pass: true,
+              detail: `Returned 2 handles with correct content: ["${textA}", "${textB}"]`,
+            };
+          },
+        },
+
+        {
+          id: 'multi-none-exist',
+          label: 'Multiple resources — none exist',
+          async run() {
+            log('Test 4: requesting two non-existent hashes…');
+            try {
+              await navigator.crossOriginStorage.requestFileHandles([
+                MISSING_HASH_1,
+                MISSING_HASH_2,
+              ]);
+              return {
+                pass: false,
+                detail: 'Expected NotFoundError but call resolved without error.',
+              };
+            } catch (err) {
+              if (err.name === 'NotFoundError') {
+                return {
+                  pass: true,
+                  detail: `Correctly threw ${err.name}: ${err.message}`,
+                };
+              }
+              return {
+                pass: false,
+                detail: `Threw unexpected error ${err.name}: ${err.message}`,
+              };
+            }
+          },
+        },
+
+        {
+          id: 'multi-some-exist',
+          label: 'Multiple resources — only some exist',
+          async run() {
+            log('Test 5: storing file D, then requesting it together with a missing hash…');
+            const { hash: existingHash, content } = await storeTextBlob('file-D');
+            log('Test 5: requesting [existing, missing]…');
+            let handles;
+            try {
+              handles = await navigator.crossOriginStorage.requestFileHandles([
+                existingHash,
+                MISSING_HASH_2,
+              ]);
+            } catch (err) {
+              // A NotFoundError here is acceptable (all-or-nothing semantics).
+              if (err.name === 'NotFoundError') {
+                return {
+                  pass: true,
+                  detail: `Threw NotFoundError as expected (all-or-nothing): ${err.message}`,
+                };
+              }
+              return {
+                pass: false,
+                detail: `Threw unexpected error ${err.name}: ${err.message}`,
+              };
+            }
+
+            // If we reached here, the API returned handles for a partial result.
+            // Inspect each handle to detect the "undefined" content bug.
+            const details = [];
+            let bugDetected = false;
+            for (let i = 0; i < handles.length; i++) {
+              try {
+                const file = await handles[i].getFile();
+                const text = await file.text();
+                if (text === 'undefined') {
+                  bugDetected = true;
+                  details.push(
+                    `Handle[${i}] getFile() returned File containing the string "undefined" (BUG)`,
+                  );
+                  log(
+                    `Test 5 BUG: handle[${i}] for missing hash returned File with content "undefined"`,
+                    true,
+                  );
+                } else {
+                  details.push(
+                    `Handle[${i}] getFile() returned File with content: "${text}"`,
+                  );
+                }
+              } catch (err) {
+                details.push(`Handle[${i}] getFile() threw ${err.name}: ${err.message}`);
+              }
+            }
+            return {
+              pass: !bugDetected,
+              detail: [
+                `requestFileHandles() resolved with ${handles.length} handle(s) instead of throwing NotFoundError.`,
+                ...details,
+              ].join('\n'),
+            };
+          },
+        },
+      ];
+
+      // ---------------------------------------------------------------------------
+      // UI
+      // ---------------------------------------------------------------------------
+
+      const tbody = document.getElementById('results');
+
+      const rows = TESTS.map((test, idx) => {
+        const tr = document.createElement('tr');
+        tr.id = `row-${test.id}`;
+        tr.innerHTML = `
+          <td>${idx + 1}</td>
+          <td>${test.label}</td>
+          <td class="status-cell"><span class="badge badge-pending">pending</span></td>
+          <td><button class="run-btn">Run</button></td>
+          <td><pre class="detail"></pre></td>
+        `;
+        tbody.append(tr);
+        return tr;
+      });
+
+      function setRowStatus(rowEl, status, detail = '') {
+        const badge = rowEl.querySelector('.badge');
+        badge.className = `badge badge-${status}`;
+        badge.textContent = status;
+        rowEl.querySelector('.detail').textContent = detail;
+      }
+
+      async function runTest(test, rowEl) {
+        const btn = rowEl.querySelector('.run-btn');
+        btn.disabled = true;
+        setRowStatus(rowEl, 'running', '');
+        log(`--- Running: ${test.label} ---`);
+        try {
+          const { pass, detail } = await test.run();
+          setRowStatus(rowEl, pass ? 'pass' : 'fail', detail);
+          log(`Result: ${pass ? 'PASS' : 'FAIL'}${detail ? ' — ' + detail.split('\n')[0] : ''}`, !pass);
+        } catch (err) {
+          const detail = `Uncaught ${err.name}: ${err.message}`;
+          setRowStatus(rowEl, 'fail', detail);
+          log(`Result: FAIL — ${detail}`, true);
+        } finally {
+          btn.disabled = false;
+        }
+      }
+
+      rows.forEach((rowEl, idx) => {
+        rowEl.querySelector('.run-btn').addEventListener('click', () => {
+          runTest(TESTS[idx], rowEl);
+        });
+      });
+
+      document.getElementById('run-all').addEventListener('click', async () => {
+        for (let i = 0; i < TESTS.length; i++) {
+          await runTest(TESTS[i], rows[i]);
+        }
+      });
+
+      // Warn if the extension is not detected.
+      if (!navigator.crossOriginStorage) {
+        log(
+          'WARNING: navigator.crossOriginStorage is not defined. Is the extension installed and enabled?',
+          true,
+        );
+      }
+    </script>
+  </body>
+</html>
