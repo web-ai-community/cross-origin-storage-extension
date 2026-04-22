@@ -142,15 +142,16 @@
   <body>
     <h1>Cross-Origin Storage — Test Page</h1>
     <p>
-      This page tests <code>navigator.crossOriginStorage.requestFileHandles()</code>
-      for the five combinations of existing and non-existing resources. It requires
-      the Cross-Origin Storage extension to be installed and enabled.
+      This page tests
+      <code>navigator.crossOriginStorage.requestFileHandles()</code>
+      for the five combinations of existing and non-existing resources. It
+      requires the Cross-Origin Storage extension to be installed and enabled.
     </p>
     <p>
       Known issue under test: when requesting multiple resources and only
       <em>some</em> exist, the non-existent handles return a
-      <code>File</code> whose content is the string <code>"undefined"</code>
-      instead of throwing a <code>NotFoundError</code>.
+      <code>File</code> whose content is the string
+      <code>"undefined"</code> instead of throwing a <code>NotFoundError</code>.
     </p>
 
     <button class="run-all" id="run-all">Run all tests</button>
@@ -182,7 +183,7 @@
       async function sha256Hex(text) {
         const buf = await crypto.subtle.digest(
           'SHA-256',
-          new TextEncoder().encode(text),
+          new TextEncoder().encode(text)
         );
         return Array.from(new Uint8Array(buf))
           .map((b) => b.toString(16).padStart(2, '0'))
@@ -201,7 +202,7 @@
         const hash = hashObj(hexValue);
         const [handle] = await navigator.crossOriginStorage.requestFileHandles(
           [hash],
-          { create: true },
+          { create: true }
         );
         const writable = await handle.createWritable();
         await writable.write(blob);
@@ -258,7 +259,10 @@
                 detail: `Expected "${content}", got "${text}"`,
               };
             }
-            return { pass: true, detail: `Returned File with correct content: "${text}"` };
+            return {
+              pass: true,
+              detail: `Returned File with correct content: "${text}"`,
+            };
           },
         },
 
@@ -273,7 +277,8 @@
               ]);
               return {
                 pass: false,
-                detail: 'Expected NotFoundError but call resolved without error.',
+                detail:
+                  'Expected NotFoundError but call resolved without error.',
               };
             } catch (err) {
               if (err.name === 'NotFoundError') {
@@ -336,7 +341,8 @@
               ]);
               return {
                 pass: false,
-                detail: 'Expected NotFoundError but call resolved without error.',
+                detail:
+                  'Expected NotFoundError but call resolved without error.',
               };
             } catch (err) {
               if (err.name === 'NotFoundError') {
@@ -357,8 +363,11 @@
           id: 'multi-some-exist',
           label: 'Multiple resources — only some exist',
           async run() {
-            log('Test 5: storing file D, then requesting it together with a missing hash…');
-            const { hash: existingHash, content } = await storeTextBlob('file-D');
+            log(
+              'Test 5: storing file D, then requesting it together with a missing hash…'
+            );
+            const { hash: existingHash, content } =
+              await storeTextBlob('file-D');
             log('Test 5: requesting [existing, missing]…');
             let handles;
             try {
@@ -391,19 +400,21 @@
                 if (text === 'undefined') {
                   bugDetected = true;
                   details.push(
-                    `Handle[${i}] getFile() returned File containing the string "undefined" (BUG)`,
+                    `Handle[${i}] getFile() returned File containing the string "undefined" (BUG)`
                   );
                   log(
                     `Test 5 BUG: handle[${i}] for missing hash returned File with content "undefined"`,
-                    true,
+                    true
                   );
                 } else {
                   details.push(
-                    `Handle[${i}] getFile() returned File with content: "${text}"`,
+                    `Handle[${i}] getFile() returned File with content: "${text}"`
                   );
                 }
               } catch (err) {
-                details.push(`Handle[${i}] getFile() threw ${err.name}: ${err.message}`);
+                details.push(
+                  `Handle[${i}] getFile() threw ${err.name}: ${err.message}`
+                );
               }
             }
             return {
@@ -452,7 +463,10 @@
         try {
           const { pass, detail } = await test.run();
           setRowStatus(rowEl, pass ? 'pass' : 'fail', detail);
-          log(`Result: ${pass ? 'PASS' : 'FAIL'}${detail ? ' — ' + detail.split('\n')[0] : ''}`, !pass);
+          log(
+            `Result: ${pass ? 'PASS' : 'FAIL'}${detail ? ' — ' + detail.split('\n')[0] : ''}`,
+            !pass
+          );
         } catch (err) {
           const detail = `Uncaught ${err.name}: ${err.message}`;
           setRowStatus(rowEl, 'fail', detail);
@@ -478,7 +492,7 @@
       if (!navigator.crossOriginStorage) {
         log(
           'WARNING: navigator.crossOriginStorage is not defined. Is the extension installed and enabled?',
-          true,
+          true
         );
       }
     </script>

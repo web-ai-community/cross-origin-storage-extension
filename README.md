@@ -12,7 +12,7 @@
        instructions.
    - End user:
      - Install the extension from the
-       [Chrome Web Store](https://chromewebstore.google.com/detail/cross-origin-storage/denpnpcgjgikjpoglpjefakmdcbmlgih).    
+       [Chrome Web Store](https://chromewebstore.google.com/detail/cross-origin-storage/denpnpcgjgikjpoglpjefakmdcbmlgih).
 1. Navigate to the demo app on
    [https://web-ai-community.github.io](https://web-ai-community.github.io/cross-origin-storage-extension/)
    (or try the more realistic
