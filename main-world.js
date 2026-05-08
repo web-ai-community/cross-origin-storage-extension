@@ -177,6 +177,20 @@
         createWritable: async () => {
           return {
             write: async (data) => {
+              const arrayBuffer = await new Blob([data]).arrayBuffer();
+              const hashBuffer = await crypto.subtle.digest(
+                hash.algorithm,
+                arrayBuffer
+              );
+              const actualHashHex = Array.from(new Uint8Array(hashBuffer))
+                .map((byte) => byte.toString(16).padStart(2, '0'))
+                .join('');
+              if (actualHashHex !== hash.value) {
+                throw new DOMException(
+                  `The hash of the provided data does not match the declared hash.`,
+                  'NotAllowedError'
+                );
+              }
               return await talkToBridge('storeFileData', {
                 hash,
                 data,
