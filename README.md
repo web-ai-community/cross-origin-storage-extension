@@ -27,7 +27,7 @@
 1. Press the **Analyze sentiment** button. Now the resource with the SHA-256
    hash `0fb85c8c503d43711cf821d5629ac17fecaf1a3e98517c73038e72105aaf56d9` is
    already in Cross-Origin Storage 🎉.
-1. Click the extenision icon to see stats about the different resources and
+1. Click the extension icon to see stats about the different resources and
    origins.
 
    <img width="631" height="757" alt="Image" src="https://github.com/user-attachments/assets/5554f89e-dd7d-478e-8cf9-edccc5a5a0c4" />
