@@ -27,7 +27,7 @@
     }
   });
 
-  function talkToBridge(action, payload) {
+  function talkToBridge(action, payload, transfer) {
     return new Promise((resolve, reject) => {
       const id = crypto.randomUUID();
       pendingRequests.set(id, { resolve, reject });
@@ -38,7 +38,8 @@
           action,
           data: payload,
         },
-        window.location.origin
+        window.location.origin,
+        transfer || []
       );
     });
   }
@@ -177,7 +178,13 @@
         createWritable: async () => {
           return {
             write: async (data) => {
-              const arrayBuffer = await new Blob([data]).arrayBuffer();
+              // Avoid wrapping an existing Blob in a redundant new Blob before
+              // converting — that doubles peak memory usage for large payloads
+              // (e.g. multi-GB LLM model weights passed by wllama).
+              const arrayBuffer =
+                data instanceof ArrayBuffer
+                  ? data
+                  : await (data instanceof Blob ? data : new Blob([data])).arrayBuffer();
               const hashBuffer = await crypto.subtle.digest(
                 hash.algorithm,
                 arrayBuffer
@@ -191,13 +198,17 @@
                   'NotAllowedError'
                 );
               }
-              return await talkToBridge('storeFileData', {
-                hash,
-                data,
-                mimeType: {
-                  'content-type': data.type || 'application/octet-stream',
-                },
-              });
+              // Transfer the ArrayBuffer (zero-copy) rather than cloning the
+              // original Blob through postMessage, which would duplicate the
+              // full payload on every hop (main-world → content.js → background).
+              const mimeType =
+                (data instanceof Blob ? data.type : '') ||
+                'application/octet-stream';
+              return await talkToBridge(
+                'storeFileData',
+                { hash, data: arrayBuffer, mimeType: { 'content-type': mimeType } },
+                [arrayBuffer]
+              );
             },
             close: async () => {
               // no-op
@@ -372,4 +383,280 @@
     writable: false,
     configurable: true,
   });
+
+  // Self-contained polyfill injected at the top of every worker blob.
+  // Must not reference anything from the outer closure.
+  function workerCrossOriginStoragePolyfill() {
+    if (typeof navigator === 'undefined' || navigator.crossOriginStorage) return;
+
+    console.log('[COS worker] polyfill starting');
+
+    let cosPort = null;
+    const pendingRequests = new Map();
+    let portReadyResolve;
+    const portReady = new Promise((resolve) => {
+      portReadyResolve = resolve;
+    });
+
+    function handleCOSReply(event) {
+      const { id, data, error } = event.data;
+      console.log('[COS worker] handleCOSReply id:', id, error ? 'error:' + error.name : 'ok');
+      const pending = pendingRequests.get(id);
+      if (!pending) return;
+      pendingRequests.delete(id);
+      if (error) {
+        pending.reject(new DOMException(error.message, error.name));
+      } else {
+        pending.resolve(data);
+      }
+    }
+
+    // Intercept the setup message before user code sees it.
+    self.addEventListener('message', function setupCOS(event) {
+      if (
+        !event.data ||
+        event.data.source !== 'cos-setup' ||
+        !event.ports ||
+        !event.ports.length
+      ) {
+        return;
+      }
+      console.log('[COS worker] received cos-setup, port:', event.ports[0]);
+      event.stopImmediatePropagation();
+      cosPort = event.ports[0];
+      cosPort.onmessage = handleCOSReply; // setting onmessage implicitly calls start()
+      self.removeEventListener('message', setupCOS);
+      portReadyResolve();
+    });
+
+    async function cosRelay(action, payload, transferables) {
+      console.log('[COS worker] cosRelay waiting for port, action:', action);
+      await portReady;
+      console.log('[COS worker] cosRelay port ready, sending action:', action);
+      return new Promise((resolve, reject) => {
+        const id = crypto.randomUUID();
+        pendingRequests.set(id, { resolve, reject });
+        cosPort.postMessage({ id, action, data: payload }, transferables || []);
+      });
+    }
+
+    const workerCrossOriginStorage = {
+      requestFileHandles: async (hashes, options = {}) => {
+        console.log('[COS worker] requestFileHandles called', hashes);
+        if (!hashes) {
+          throw new TypeError(
+            `Failed to execute 'requestFileHandles': first argument 'hashes' is required.`
+          );
+        }
+        if (!Array.isArray(hashes)) {
+          throw new TypeError(
+            `Failed to execute 'requestFileHandles': first argument 'hashes' must be an array.`
+          );
+        }
+        for (const hash of hashes) {
+          if (!hash.value) {
+            throw new TypeError(
+              `Failed to execute 'requestFileHandles': missing required 'hash.value'.`
+            );
+          }
+          if (!hash.algorithm) {
+            throw new TypeError(
+              `Failed to execute 'requestFileHandles': missing required 'hash.algorithm'.`
+            );
+          }
+        }
+        const { create = false } = options;
+        const { handleIds } = await cosRelay('requestFileHandles', {
+          hashes,
+          create,
+          origin: self.location.origin,
+        });
+        return handleIds.map((handleId, i) => ({
+          getFile: async () => {
+            const result = await cosRelay('getFileData', { handleId });
+            return new File([result.data], 'file', {
+              type: result.mimeType,
+              lastModified: result.lastModified,
+            });
+          },
+          createWritable: async () => ({
+            write: async (data) => {
+              const hash = hashes[i];
+              const arrayBuffer = await new Blob([data]).arrayBuffer();
+              const hashBuffer = await crypto.subtle.digest(
+                hash.algorithm,
+                arrayBuffer
+              );
+              const actualHashHex = Array.from(new Uint8Array(hashBuffer))
+                .map((byte) => byte.toString(16).padStart(2, '0'))
+                .join('');
+              if (actualHashHex !== hash.value) {
+                throw new DOMException(
+                  `The hash of the provided data does not match the declared hash.`,
+                  'NotAllowedError'
+                );
+              }
+              return cosRelay(
+                'storeFileData',
+                {
+                  handleId,
+                  arrayBuffer,
+                  mimeType: {
+                    'content-type': data.type || 'application/octet-stream',
+                  },
+                },
+                [arrayBuffer]
+              );
+            },
+            close: async () => {},
+          }),
+        }));
+      },
+    };
+
+    Object.defineProperty(navigator, 'crossOriginStorage', {
+      value: workerCrossOriginStorage,
+      writable: false,
+      configurable: true,
+    });
+
+    console.log('[COS worker] sending cos-worker-ready');
+    // Tell the main thread the polyfill is ready and to send the MessagePort.
+    // This fires after setupCOS is registered, so the port reply is never missed.
+    self.postMessage({ source: 'cos-worker-ready' });
+  }
+
+  if (typeof Worker !== 'undefined') {
+    const OriginalWorker = Worker;
+    const WORKER_POLYFILL =
+      '(' + workerCrossOriginStoragePolyfill.toString() + ')();';
+
+    window.Worker = class Worker extends OriginalWorker {
+      constructor(scriptURL, options) {
+        const absURL = new URL(scriptURL, location.href).href;
+        const isModule = options?.type === 'module';
+
+        // For blob: URLs we synchronously read the source right now and inline
+        // it directly in the wrapper blob.  This is necessary for two reasons:
+        //
+        // 1. Revocation race — callers often call URL.revokeObjectURL()
+        //    immediately after `new Worker(url)`.  importScripts / import()
+        //    run asynchronously inside the wrapper, by which time the URL may
+        //    already be gone.
+        //
+        // 2. Message-before-onmessage race (module workers) — import() is
+        //    async, so queued task messages can be dispatched by the event loop
+        //    before the imported module runs and sets onmessage.  Those
+        //    messages are silently lost.  Inlining makes the user code run
+        //    synchronously, so onmessage is set before any tasks fire.
+        let loader;
+        if (absURL.startsWith('blob:')) {
+          try {
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', absURL, /* async= */ false);
+            xhr.send();
+            loader = `console.log('[COS worker] inlined blob script');
+${xhr.responseText}`;
+          } catch (_) {
+            // fall through to importScripts / import()
+          }
+        }
+        if (!loader) {
+          loader = isModule
+          ? `console.log('[COS worker] loading module', ${JSON.stringify(absURL)});
+(async () => { try { await import(${JSON.stringify(absURL)}); console.log('[COS worker] module loaded, crossOriginStorage:', typeof navigator.crossOriginStorage); } catch(e) { console.error('[COS worker] module load failed:', e); } })();`
+          : `console.log('[COS worker] loading script', ${JSON.stringify(absURL)});
+try { importScripts(${JSON.stringify(absURL)}); console.log('[COS worker] script loaded, crossOriginStorage:', typeof navigator.crossOriginStorage); } catch(e) { console.error('[COS worker] script load failed:', e); }`;
+        }
+        const blobURL = URL.createObjectURL(
+          new Blob([WORKER_POLYFILL + '\n' + loader], {
+            type: 'text/javascript',
+          })
+        );
+        super(blobURL, options);
+        URL.revokeObjectURL(blobURL);
+
+        const workerHandles = new Map();
+
+        // Wait for the worker to signal it's ready before sending the port.
+        // Registered in the constructor so it fires before any user handler,
+        // letting stopImmediatePropagation() keep the message invisible.
+        OriginalWorker.prototype.addEventListener.call(
+          this,
+          'message',
+          (event) => {
+            if (event.data?.source !== 'cos-worker-ready') return;
+            event.stopImmediatePropagation();
+
+            console.log('[COS main] received cos-worker-ready, sending cos-setup');
+            const { port1: mainPort, port2: workerPort } = new MessageChannel();
+            mainPort.onmessage = async (e) => { // setting onmessage implicitly calls start()
+              const { id, action, data } = e.data;
+              console.log('[COS main] relay received action:', action);
+              try {
+                let result;
+                if (action === 'requestFileHandles') {
+                  // Run the full permission flow (including any dialog) on the
+                  // main thread, then give the worker opaque handle IDs to use.
+                  const handles = await requestFileHandlesWithOptionalPrompt(
+                    data.hashes,
+                    data.create
+                  );
+                  const handleIds = handles.map(() => crypto.randomUUID());
+                  handleIds.forEach((hid, i) =>
+                    workerHandles.set(hid, {
+                      handle: handles[i],
+                      hash: data.hashes[i],
+                    })
+                  );
+                  result = { handleIds };
+                } else if (action === 'getFileData') {
+                  const { handle } = workerHandles.get(data.handleId);
+                  const file = await handle.getFile();
+                  const ab = await file.arrayBuffer();
+                  // Transfer the ArrayBuffer to avoid copying large files.
+                  mainPort.postMessage(
+                    {
+                      id,
+                      data: {
+                        data: ab,
+                        mimeType: file.type,
+                        lastModified: file.lastModified,
+                      },
+                    },
+                    [ab]
+                  );
+                  return;
+                } else if (action === 'storeFileData') {
+                  // The worker already verified the hash; forward raw bytes to
+                  // the bridge, skipping the redundant check in the handle wrapper.
+                  const { hash } = workerHandles.get(data.handleId);
+                  await talkToBridge('storeFileData', {
+                    hash,
+                    data: new Blob([data.arrayBuffer]),
+                    mimeType: data.mimeType,
+                  });
+                  result = {};
+                }
+                mainPort.postMessage({ id, data: result });
+              } catch (e) {
+                console.log('[COS main] relay error:', e.name, e.message);
+                mainPort.postMessage({
+                  id,
+                  error: { message: e.message, name: e.name },
+                });
+              }
+            };
+            // Send the port only after onmessage is set, so no reply can arrive
+            // on a null handler and be silently dropped.
+            OriginalWorker.prototype.postMessage.call(
+              this,
+              { source: 'cos-setup' },
+              [workerPort]
+            );
+          }
+        );
+      }
+    };
+  }
 })();

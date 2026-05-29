@@ -172,6 +172,29 @@
       </tbody>
     </table>
 
+    <h2>Worker Thread Test Results</h2>
+    <p>
+      The same five tests, run inside a <code>Worker</code> to verify that
+      <code>navigator.crossOriginStorage</code> is also available on worker
+      threads.
+    </p>
+    <button class="run-all" id="run-all-worker">Run all worker tests</button>
+
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Scenario</th>
+          <th>Status</th>
+          <th>Run</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody id="worker-results">
+        <!-- rows injected by JS -->
+      </tbody>
+    </table>
+
     <h2>Event log</h2>
     <pre id="log"></pre>
 
@@ -494,6 +517,350 @@
           'WARNING: navigator.crossOriginStorage is not defined. Is the extension installed and enabled?',
           true
         );
+      }
+
+      // ---------------------------------------------------------------------------
+      // Worker Tests
+      // ---------------------------------------------------------------------------
+
+      const workerTbody = document.getElementById('worker-results');
+
+      const workerRows = TESTS.map((test, idx) => {
+        const tr = document.createElement('tr');
+        tr.id = `worker-row-${test.id}`;
+        tr.innerHTML = `
+          <td>${idx + 1}</td>
+          <td>${test.label}</td>
+          <td class="status-cell"><span class="badge badge-pending">pending</span></td>
+          <td><button class="run-btn">Run</button></td>
+          <td><pre class="detail"></pre></td>
+        `;
+        workerTbody.append(tr);
+        return tr;
+      });
+
+      let worker = null;
+      const pendingWorkerTests = new Map();
+
+      function getWorker() {
+        if (worker) return worker;
+        const src = document.getElementById('worker-src').textContent;
+        const blob = new Blob([src], { type: 'application/javascript' });
+        const url = URL.createObjectURL(blob);
+        worker = new Worker(url);
+        // Do not revoke immediately — the extension's Worker wrapper reads the
+        // blob via importScripts asynchronously, so the URL must stay live
+        // until the worker has fully loaded.  The tiny blob is released on
+        // page unload.
+        worker.onmessage = ({ data }) => {
+          if (data.type === 'log') {
+            log(`[Worker] ${data.msg}`, data.isError);
+          } else if (data.type === 'result') {
+            const resolve = pendingWorkerTests.get(data.index);
+            if (resolve) {
+              pendingWorkerTests.delete(data.index);
+              resolve({ pass: data.pass, detail: data.detail });
+            }
+          }
+        };
+        worker.onerror = (err) => {
+          log(`[Worker] Uncaught error: ${err.message}`, true);
+          for (const resolve of pendingWorkerTests.values()) {
+            resolve({ pass: false, detail: `Worker error: ${err.message}` });
+          }
+          pendingWorkerTests.clear();
+          worker = null;
+        };
+        return worker;
+      }
+
+      async function runWorkerTest(testIdx, rowEl) {
+        const btn = rowEl.querySelector('.run-btn');
+        btn.disabled = true;
+        setRowStatus(rowEl, 'running', '');
+        log(`--- Running in Worker: ${TESTS[testIdx].label} ---`);
+        try {
+          const result = await new Promise((resolve) => {
+            pendingWorkerTests.set(testIdx, resolve);
+            getWorker().postMessage({ type: 'run', index: testIdx });
+          });
+          setRowStatus(rowEl, result.pass ? 'pass' : 'fail', result.detail);
+          log(
+            `Worker Result: ${result.pass ? 'PASS' : 'FAIL'}${result.detail ? ' — ' + result.detail.split('\n')[0] : ''}`,
+            !result.pass
+          );
+        } catch (err) {
+          const detail = `Uncaught ${err.name}: ${err.message}`;
+          setRowStatus(rowEl, 'fail', detail);
+          log(`Worker Result: FAIL — ${detail}`, true);
+        } finally {
+          btn.disabled = false;
+        }
+      }
+
+      workerRows.forEach((rowEl, idx) => {
+        rowEl.querySelector('.run-btn').addEventListener('click', () => {
+          runWorkerTest(idx, rowEl);
+        });
+      });
+
+      document.getElementById('run-all-worker').addEventListener('click', async () => {
+        for (let i = 0; i < TESTS.length; i++) {
+          await runWorkerTest(i, workerRows[i]);
+        }
+      });
+    </script>
+    <!-- Worker source — extracted as text and compiled into a Blob URL at runtime. -->
+    <script id="worker-src" type="text/worker">
+      async function sha256Hex(text) {
+        const buf = await crypto.subtle.digest(
+          'SHA-256',
+          new TextEncoder().encode(text)
+        );
+        return Array.from(new Uint8Array(buf))
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join('');
+      }
+
+      function hashObj(hexValue) {
+        return { algorithm: 'SHA-256', value: hexValue };
+      }
+
+      function log(msg, isError = false) {
+        self.postMessage({ type: 'log', msg, isError });
+      }
+
+      async function storeTextBlob(label) {
+        const content = `cos-test-${label}`;
+        const blob = new Blob([content], { type: 'text/plain' });
+        const hexValue = await sha256Hex(content);
+        const hash = hashObj(hexValue);
+        const [handle] = await navigator.crossOriginStorage.requestFileHandles(
+          [hash],
+          { create: true }
+        );
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        return { hash, content };
+      }
+
+      const MISSING_HASH_1 = hashObj('a'.repeat(64));
+      const MISSING_HASH_2 = hashObj('b'.repeat(64));
+
+      const TESTS = [
+        {
+          id: 'single-exists',
+          label: 'Single resource exists',
+          async run() {
+            log('Worker Test 1: storing file A…');
+            const { hash, content } = await storeTextBlob('file-A');
+            log(`Worker Test 1: stored with hash ${hash.value.slice(0, 16)}…`);
+            const [handle] =
+              await navigator.crossOriginStorage.requestFileHandles([hash]);
+            const file = await handle.getFile();
+            const text = await file.text();
+            if (text !== content) {
+              return {
+                pass: false,
+                detail: `Expected "${content}", got "${text}"`,
+              };
+            }
+            return {
+              pass: true,
+              detail: `Returned File with correct content: "${text}"`,
+            };
+          },
+        },
+
+        {
+          id: 'single-missing',
+          label: 'Single resource does not exist',
+          async run() {
+            log('Worker Test 2: requesting non-existent hash…');
+            try {
+              await navigator.crossOriginStorage.requestFileHandles([
+                MISSING_HASH_1,
+              ]);
+              return {
+                pass: false,
+                detail: 'Expected NotFoundError but call resolved without error.',
+              };
+            } catch (err) {
+              if (err.name === 'NotFoundError') {
+                return {
+                  pass: true,
+                  detail: `Correctly threw ${err.name}: ${err.message}`,
+                };
+              }
+              return {
+                pass: false,
+                detail: `Threw unexpected error ${err.name}: ${err.message}`,
+              };
+            }
+          },
+        },
+
+        {
+          id: 'multi-all-exist',
+          label: 'Multiple resources — all exist',
+          async run() {
+            log('Worker Test 3: storing files B and C…');
+            const a = await storeTextBlob('file-B');
+            const b = await storeTextBlob('file-C');
+            log('Worker Test 3: requesting both…');
+            const handles =
+              await navigator.crossOriginStorage.requestFileHandles([
+                a.hash,
+                b.hash,
+              ]);
+            if (handles.length !== 2) {
+              return {
+                pass: false,
+                detail: `Expected 2 handles, got ${handles.length}`,
+              };
+            }
+            const textA = await handles[0].getFile().then((f) => f.text());
+            const textB = await handles[1].getFile().then((f) => f.text());
+            if (textA !== a.content || textB !== b.content) {
+              return {
+                pass: false,
+                detail: `Content mismatch. Got: ["${textA}", "${textB}"], expected: ["${a.content}", "${b.content}"]`,
+              };
+            }
+            return {
+              pass: true,
+              detail: `Returned 2 handles with correct content: ["${textA}", "${textB}"]`,
+            };
+          },
+        },
+
+        {
+          id: 'multi-none-exist',
+          label: 'Multiple resources — none exist',
+          async run() {
+            log('Worker Test 4: requesting two non-existent hashes…');
+            try {
+              await navigator.crossOriginStorage.requestFileHandles([
+                MISSING_HASH_1,
+                MISSING_HASH_2,
+              ]);
+              return {
+                pass: false,
+                detail: 'Expected NotFoundError but call resolved without error.',
+              };
+            } catch (err) {
+              if (err.name === 'NotFoundError') {
+                return {
+                  pass: true,
+                  detail: `Correctly threw ${err.name}: ${err.message}`,
+                };
+              }
+              return {
+                pass: false,
+                detail: `Threw unexpected error ${err.name}: ${err.message}`,
+              };
+            }
+          },
+        },
+
+        {
+          id: 'multi-some-exist',
+          label: 'Multiple resources — only some exist',
+          async run() {
+            log(
+              'Worker Test 5: storing file D, then requesting it together with a missing hash…'
+            );
+            const { hash: existingHash, content } =
+              await storeTextBlob('file-D');
+            log('Worker Test 5: requesting [existing, missing]…');
+            let handles;
+            try {
+              handles = await navigator.crossOriginStorage.requestFileHandles([
+                existingHash,
+                MISSING_HASH_2,
+              ]);
+            } catch (err) {
+              if (err.name === 'NotFoundError') {
+                return {
+                  pass: true,
+                  detail: `Threw NotFoundError as expected (all-or-nothing): ${err.message}`,
+                };
+              }
+              return {
+                pass: false,
+                detail: `Threw unexpected error ${err.name}: ${err.message}`,
+              };
+            }
+
+            const details = [];
+            let bugDetected = false;
+            for (let i = 0; i < handles.length; i++) {
+              try {
+                const file = await handles[i].getFile();
+                const text = await file.text();
+                if (text === 'undefined') {
+                  bugDetected = true;
+                  details.push(
+                    `Handle[${i}] getFile() returned File containing the string "undefined" (BUG)`
+                  );
+                  log(
+                    `Worker Test 5 BUG: handle[${i}] for missing hash returned File with content "undefined"`,
+                    true
+                  );
+                } else {
+                  details.push(
+                    `Handle[${i}] getFile() returned File with content: "${text}"`
+                  );
+                }
+              } catch (err) {
+                details.push(
+                  `Handle[${i}] getFile() threw ${err.name}: ${err.message}`
+                );
+              }
+            }
+            return {
+              pass: !bugDetected,
+              detail: [
+                `requestFileHandles() resolved with ${handles.length} handle(s) instead of throwing NotFoundError.`,
+                ...details,
+              ].join('\n'),
+            };
+          },
+        },
+      ];
+
+      self.onmessage = async ({ data }) => {
+        if (data.type !== 'run') return;
+        const test = TESTS[data.index];
+        if (!test) {
+          self.postMessage({
+            type: 'result',
+            index: data.index,
+            pass: false,
+            detail: 'Unknown test index',
+          });
+          return;
+        }
+        try {
+          const { pass, detail } = await test.run();
+          self.postMessage({ type: 'result', index: data.index, pass, detail });
+        } catch (err) {
+          self.postMessage({
+            type: 'result',
+            index: data.index,
+            pass: false,
+            detail: `Uncaught ${err.name}: ${err.message}`,
+          });
+        }
+      };
+
+      if (!self.navigator?.crossOriginStorage) {
+        self.postMessage({
+          type: 'log',
+          msg: 'WARNING: navigator.crossOriginStorage is not defined in this Worker. Is the extension installed and enabled?',
+          isError: true,
+        });
       }
     </script>
   </body>
