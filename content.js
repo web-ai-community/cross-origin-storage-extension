@@ -1,3 +1,6 @@
+// Copyright 2025 Google LLC.
+// SPDX-License-Identifier: Apache-2.0
+
 // Listen for messages from the MAIN world script.
 window.addEventListener('message', async (event) => {
   // Only accept messages from the extension itself.

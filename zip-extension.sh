@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright 2025 Google LLC.
+# SPDX-License-Identifier: Apache-2.0
 
 # A script to zip the necessary files for the Chrome extension,
 # automatically stripping localhost patterns for Web Store compatibility.

@@ -1,5 +1,5 @@
 <!--
-  Copyright 2025 Google LLC.
+  Copyright 2026 Google LLC.
   SPDX-License-Identifier: Apache-2.0
 -->
 <!doctype html>
@@ -191,6 +191,39 @@
         </tr>
       </thead>
       <tbody id="worker-results">
+        <!-- rows injected by JS -->
+      </tbody>
+    </table>
+
+    <h2>Worker Initialization Variants</h2>
+    <p>
+      Each row creates a worker using a different URL scheme or type and runs a
+      minimal store-then-read COS operation to confirm that
+      <code>navigator.crossOriginStorage</code> is correctly injected in every
+      case.
+    </p>
+    <p>
+      Variants: <code>blob:</code> classic &amp; module, <code>data:</code>
+      classic, same-origin HTTP classic &amp; module. The HTTP module variant
+      imports a helper via a relative path — a regression test for the bug
+      where inlining the worker source changed the base URL and broke
+      <code>import</code> resolution. Cross-origin workers (CORS) rely on the
+      native <code>import()</code>&nbsp;/&nbsp;<code>importScripts()</code>
+      fallback and require a separate server, so they are not covered here.
+    </p>
+    <button class="run-all" id="run-all-variants">Run all variant tests</button>
+
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Variant</th>
+          <th>Status</th>
+          <th>Run</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody id="variant-results">
         <!-- rows injected by JS -->
       </tbody>
     </table>
@@ -609,6 +642,196 @@
           await runWorkerTest(i, workerRows[i]);
         }
       });
+
+      // ---------------------------------------------------------------------------
+      // Worker Initialization Variants
+      // ---------------------------------------------------------------------------
+
+      // Inline source shared by the blob: and data: variant workers.
+      // Uses only self.* APIs so it runs correctly in both classic and module contexts.
+      const VARIANT_WORKER_CODE = document
+        .getElementById('variant-worker-src')
+        .textContent.trim();
+
+      const WORKER_VARIANTS = [
+        {
+          id: 'blob-classic',
+          label: 'blob: URL, classic worker',
+          create() {
+            const blob = new Blob([VARIANT_WORKER_CODE], { type: 'text/javascript' });
+            const url = URL.createObjectURL(blob);
+            const w = new Worker(url);
+            // Revoke immediately — tests that the extension's sync-XHR inline
+            // fix handles a blob: URL that has already been revoked.
+            URL.revokeObjectURL(url);
+            return w;
+          },
+        },
+        {
+          id: 'blob-module',
+          label: 'blob: URL, module worker',
+          create() {
+            const blob = new Blob([VARIANT_WORKER_CODE], { type: 'text/javascript' });
+            const url = URL.createObjectURL(blob);
+            const w = new Worker(url, { type: 'module' });
+            URL.revokeObjectURL(url);
+            return w;
+          },
+        },
+        {
+          id: 'data-classic',
+          label: 'data: URL, classic worker',
+          create() {
+            const url =
+              'data:text/javascript,' + encodeURIComponent(VARIANT_WORKER_CODE);
+            return new Worker(url);
+          },
+        },
+        {
+          id: 'http-classic',
+          label: 'HTTP URL, classic worker',
+          create() {
+            return new Worker('./test-worker-classic.js');
+          },
+        },
+        {
+          id: 'http-module',
+          label: 'HTTP URL, module worker (relative import)',
+          create() {
+            // test-worker-module.js imports ./test-worker-module-helper.js via
+            // a relative path — verifies that the extension wrapper preserves
+            // the original HTTP base URL for module resolution.
+            return new Worker('./test-worker-module.js', { type: 'module' });
+          },
+        },
+      ];
+
+      const variantTbody = document.getElementById('variant-results');
+      const variantRows = WORKER_VARIANTS.map((variant, idx) => {
+        const tr = document.createElement('tr');
+        tr.id = `variant-row-${variant.id}`;
+        tr.innerHTML = `
+          <td>${idx + 1}</td>
+          <td>${variant.label}</td>
+          <td class="status-cell"><span class="badge badge-pending">pending</span></td>
+          <td><button class="run-btn">Run</button></td>
+          <td><pre class="detail"></pre></td>
+        `;
+        variantTbody.append(tr);
+        return tr;
+      });
+
+      async function runVariantTest(variant, rowEl) {
+        const btn = rowEl.querySelector('.run-btn');
+        btn.disabled = true;
+        setRowStatus(rowEl, 'running', '');
+        log(`--- Variant: ${variant.label} ---`);
+        let worker;
+        try {
+          worker = variant.create();
+          const result = await new Promise((resolve, reject) => {
+            const timeoutId = setTimeout(
+              () => reject(new Error('Worker did not respond within 15 s')),
+              15000
+            );
+            worker.onmessage = ({ data }) => {
+              if (data.type === 'log') {
+                log(`[Variant] ${data.msg}`, data.isError);
+              } else if (data.type === 'result') {
+                clearTimeout(timeoutId);
+                resolve(data);
+              }
+            };
+            worker.onerror = (err) => {
+              clearTimeout(timeoutId);
+              reject(new Error(err.message || 'Worker error'));
+            };
+            worker.postMessage({ type: 'run', label: variant.id });
+          });
+          setRowStatus(rowEl, result.pass ? 'pass' : 'fail', result.detail);
+          log(
+            `Variant Result: ${result.pass ? 'PASS' : 'FAIL'}${result.detail ? ' — ' + result.detail : ''}`,
+            !result.pass
+          );
+        } catch (err) {
+          const detail = `${err.name}: ${err.message}`;
+          setRowStatus(rowEl, 'fail', detail);
+          log(`Variant Result: FAIL — ${detail}`, true);
+        } finally {
+          worker?.terminate();
+          btn.disabled = false;
+        }
+      }
+
+      variantRows.forEach((rowEl, idx) => {
+        rowEl.querySelector('.run-btn').addEventListener('click', () => {
+          runVariantTest(WORKER_VARIANTS[idx], rowEl);
+        });
+      });
+
+      document
+        .getElementById('run-all-variants')
+        .addEventListener('click', async () => {
+          for (let i = 0; i < WORKER_VARIANTS.length; i++) {
+            await runVariantTest(WORKER_VARIANTS[i], variantRows[i]);
+          }
+        });
+    </script>
+    <!-- Variant worker source — used for blob: and data: URL variant tests. -->
+    <script id="variant-worker-src" type="text/worker">
+      async function sha256Hex(text) {
+        const buf = await crypto.subtle.digest(
+          'SHA-256',
+          new TextEncoder().encode(text)
+        );
+        return Array.from(new Uint8Array(buf))
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join('');
+      }
+
+      function hashObj(value) {
+        return { algorithm: 'SHA-256', value };
+      }
+
+      self.onmessage = async ({ data }) => {
+        if (data.type !== 'run') return;
+        if (!self.navigator?.crossOriginStorage) {
+          self.postMessage({
+            type: 'result',
+            pass: false,
+            detail: 'navigator.crossOriginStorage is undefined',
+          });
+          return;
+        }
+        try {
+          const content = `cos-variant-${data.label}`;
+          const blob = new Blob([content], { type: 'text/plain' });
+          const hash = hashObj(await sha256Hex(content));
+          const [wh] = await navigator.crossOriginStorage.requestFileHandles(
+            [hash],
+            { create: true }
+          );
+          const writable = await wh.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          const [rh] = await navigator.crossOriginStorage.requestFileHandles([hash]);
+          const text = await (await rh.getFile()).text();
+          const pass = text === content;
+          self.postMessage({
+            type: 'result',
+            pass,
+            detail: pass
+              ? `Stored and read back correctly: "${text}"`
+              : `Expected "${content}", got "${text}"`,
+          });
+        } catch (err) {
+          self.postMessage({
+            type: 'result',
+            pass: false,
+            detail: `${err.name}: ${err.message}`,
+          });
+        }
+      };
     </script>
     <!-- Worker source — extracted as text and compiled into a Blob URL at runtime. -->
     <script id="worker-src" type="text/worker">

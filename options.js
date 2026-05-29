@@ -1,3 +1,6 @@
+// Copyright 2026 Google LLC.
+// SPDX-License-Identifier: Apache-2.0
+
 const showPromptCheckbox = document.getElementById('show-prompt');
 const toast = document.getElementById('toast');
 
