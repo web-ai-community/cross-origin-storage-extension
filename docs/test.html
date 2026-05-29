@@ -203,13 +203,38 @@
       case.
     </p>
     <p>
-      Variants: <code>blob:</code> classic &amp; module, <code>data:</code>
-      classic, same-origin HTTP classic &amp; module. The HTTP module variant
-      imports a helper via a relative path — a regression test for the bug
-      where inlining the worker source changed the base URL and broke
-      <code>import</code> resolution. Cross-origin workers (CORS) rely on the
-      native <code>import()</code>&nbsp;/&nbsp;<code>importScripts()</code>
-      fallback and require a separate server, so they are not covered here.
+      Variants: <code>blob:</code> classic &amp; module, each tested twice —
+      once with the URL revoked before the worker starts (regression test for
+      the extension's inline-source path) and once with the URL kept live (the
+      normal path). <code>data:</code> classic (<code>data:</code> module is
+      not covered: browsers reject it because a <code>data:</code> URL has an
+      opaque origin and cannot host a module worker). Same-origin HTTP classic
+      &amp; module; the module variant imports a helper via a relative path —
+      a regression test for the bug where inlining the worker source changed
+      the base URL and broke <code>import</code> resolution. Cross-origin HTTP
+      classic &amp; module, both served from <code>cdn.jsdelivr.net</code>
+      (cross-origin to the GitHub Pages host, <code>application/javascript</code>
+      MIME type, CORS <code>Access-Control-Allow-Origin: *</code>).
+      <code>SharedWorker</code> classic &amp; module — the extension patches
+      <code>window.SharedWorker</code> using the same wrapper-blob technique as
+      for <code>Worker</code>, adapted to the <code>onconnect</code> /
+      <code>MessagePort</code> API; a thin adapter in <code>create()</code>
+      presents the same interface to the test harness. A nested-worker variant
+      spawns a second worker from inside the first to verify that injection
+      propagates to dynamically created sub-workers.
+    </p>
+    <p>
+      <strong>Not covered — <code>ServiceWorker</code>:</strong> Chrome rejects
+      <code>blob:</code> URLs as service-worker script sources
+      (<em>"The script resource is behind a redirect, which is disallowed"</em>
+      / same-origin-URL requirement), so the wrapper-blob technique used for
+      <code>Worker</code> and <code>SharedWorker</code> does not apply.
+      Patching <code>navigator.serviceWorker.register()</code> to intercept
+      and serve a modified script is possible but requires a different relay
+      mechanism (service workers communicate with clients via
+      <code>Clients.matchAll()</code> + <code>client.postMessage()</code>,
+      not a direct <code>MessageChannel</code>), and is left for a future
+      implementation.
     </p>
     <button class="run-all" id="run-all-variants">Run all variant tests</button>
 
@@ -702,6 +727,102 @@
             // a relative path — verifies that the extension wrapper preserves
             // the original HTTP base URL for module resolution.
             return new Worker('./test-worker-module.js', { type: 'module' });
+          },
+        },
+        {
+          id: 'blob-classic-not-revoked',
+          label: 'blob: URL, classic worker (URL not revoked)',
+          create() {
+            const blob = new Blob([VARIANT_WORKER_CODE], { type: 'text/javascript' });
+            const url = URL.createObjectURL(blob);
+            const w = new Worker(url);
+            // Do NOT revoke — tests the normal (non-revoked) blob path.
+            // The URL is released on page unload.
+            return w;
+          },
+        },
+        {
+          id: 'blob-module-not-revoked',
+          label: 'blob: URL, module worker (URL not revoked)',
+          create() {
+            const blob = new Blob([VARIANT_WORKER_CODE], { type: 'text/javascript' });
+            const url = URL.createObjectURL(blob);
+            const w = new Worker(url, { type: 'module' });
+            // Do NOT revoke — tests the normal (non-revoked) blob module path.
+            return w;
+          },
+        },
+        {
+          id: 'cross-origin-classic',
+          label: 'Cross-origin URL, classic worker',
+          create() {
+            // Served from cdn.jsdelivr.net — cross-origin to the GitHub Pages
+            // host (web-ai-community.github.io) with CORS Access-Control-Allow-Origin: *.
+            // text/plain MIME type is acceptable for classic workers.
+            return new Worker(
+              'https://cdn.jsdelivr.net/gh/web-ai-community/cross-origin-storage-extension@main/docs/test-worker-classic.js',
+            );
+          },
+        },
+        {
+          id: 'cross-origin-module',
+          label: 'Cross-origin URL, module worker',
+          create() {
+            // jsDelivr serves application/javascript, which is required for
+            // module workers (browsers reject text/plain for module scripts).
+            return new Worker(
+              'https://cdn.jsdelivr.net/gh/web-ai-community/cross-origin-storage-extension@main/docs/test-worker-classic.js',
+              { type: 'module' },
+            );
+          },
+        },
+        {
+          id: 'shared-worker-classic',
+          label: 'SharedWorker, classic',
+          create() {
+            // SharedWorker uses a port-based API; wrap it in an adapter so the
+            // standard runVariantTest harness (onmessage / onerror / postMessage /
+            // terminate) works without modification.
+            const sw = new SharedWorker('./test-worker-shared.js', {
+              // Unique name per run prevents port reuse from a previous test.
+              name: `cos-shared-classic-${Date.now()}`,
+            });
+            sw.port.start();
+            return {
+              set onmessage(h) { sw.port.onmessage = h; },
+              set onerror(h) { sw.onerror = h; },
+              postMessage(msg) { sw.port.postMessage(msg); },
+              terminate() { sw.port.close(); },
+            };
+          },
+        },
+        {
+          id: 'shared-worker-module',
+          label: 'SharedWorker, module',
+          create() {
+            const sw = new SharedWorker('./test-worker-shared.js', {
+              name: `cos-shared-module-${Date.now()}`,
+              type: 'module',
+            });
+            sw.port.start();
+            return {
+              set onmessage(h) { sw.port.onmessage = h; },
+              set onerror(h) { sw.onerror = h; },
+              postMessage(msg) { sw.port.postMessage(msg); },
+              terminate() { sw.port.close(); },
+            };
+          },
+        },
+        {
+          id: 'nested-worker',
+          label: 'Nested worker (worker spawned from inside another worker)',
+          create() {
+            // test-worker-nested.js is a classic HTTP worker that itself
+            // creates test-worker-classic.js as an inner worker, then relays
+            // the result back.  Verifies that the extension injects
+            // navigator.crossOriginStorage into workers created at runtime
+            // from within another worker.
+            return new Worker('./test-worker-nested.js');
           },
         },
       ];

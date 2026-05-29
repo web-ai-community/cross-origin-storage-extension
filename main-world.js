@@ -529,6 +529,283 @@
     self.postMessage({ source: 'cos-worker-ready' });
   }
 
+  // Self-contained SharedWorker polyfill — must not reference the outer closure.
+  // Differences from the DedicatedWorker polyfill:
+  //  • cos-worker-ready is sent via port.postMessage() inside onconnect, not via
+  //    self.postMessage() at the top level (there is no direct channel until a client connects).
+  //  • cos-setup is intercepted on the port, not on self.
+  //  • Only the first connecting client sets up the COS relay (sufficient for tests
+  //    that use unique SharedWorker names, so each instance has exactly one client).
+  function sharedWorkerCrossOriginStoragePolyfill() {
+    if (typeof navigator === 'undefined' || navigator.crossOriginStorage) return;
+
+    console.log('[COS shared-worker] polyfill starting');
+
+    const pendingRequests = new Map();
+    let cosPort = null;
+    let portReadyResolve;
+    const portReady = new Promise((resolve) => {
+      portReadyResolve = resolve;
+    });
+
+    function handleCOSReply(event) {
+      const { id, data, error } = event.data;
+      const pending = pendingRequests.get(id);
+      if (!pending) return;
+      pendingRequests.delete(id);
+      if (error) {
+        pending.reject(new DOMException(error.message, error.name));
+      } else {
+        pending.resolve(data);
+      }
+    }
+
+    // { once: true } so that only the first client connection sets up the relay.
+    self.addEventListener('connect', function cosSetupConnect(connectEvent) {
+      const port = connectEvent.ports[0];
+      port.start();
+
+      port.addEventListener('message', function setupCOS(event) {
+        if (
+          !event.data ||
+          event.data.source !== 'cos-setup' ||
+          !event.ports ||
+          !event.ports.length
+        ) {
+          return;
+        }
+        event.stopImmediatePropagation();
+        cosPort = event.ports[0];
+        cosPort.onmessage = handleCOSReply;
+        port.removeEventListener('message', setupCOS);
+        portReadyResolve();
+      });
+
+      console.log('[COS shared-worker] sending cos-worker-ready');
+      port.postMessage({ source: 'cos-worker-ready' });
+    }, { once: true });
+
+    async function cosRelay(action, payload, transferables) {
+      await portReady;
+      return new Promise((resolve, reject) => {
+        const id = crypto.randomUUID();
+        pendingRequests.set(id, { resolve, reject });
+        cosPort.postMessage({ id, action, data: payload }, transferables || []);
+      });
+    }
+
+    const workerCrossOriginStorage = {
+      requestFileHandles: async (hashes, options = {}) => {
+        if (!hashes) {
+          throw new TypeError(
+            `Failed to execute 'requestFileHandles': first argument 'hashes' is required.`
+          );
+        }
+        if (!Array.isArray(hashes)) {
+          throw new TypeError(
+            `Failed to execute 'requestFileHandles': first argument 'hashes' must be an array.`
+          );
+        }
+        for (const hash of hashes) {
+          if (!hash.value) {
+            throw new TypeError(
+              `Failed to execute 'requestFileHandles': missing required 'hash.value'.`
+            );
+          }
+          if (!hash.algorithm) {
+            throw new TypeError(
+              `Failed to execute 'requestFileHandles': missing required 'hash.algorithm'.`
+            );
+          }
+        }
+        const { create = false } = options;
+        const { handleIds } = await cosRelay('requestFileHandles', {
+          hashes,
+          create,
+          origin: self.location.origin,
+        });
+        return handleIds.map((handleId, i) => ({
+          getFile: async () => {
+            const result = await cosRelay('getFileData', { handleId });
+            return new File([result.data], 'file', {
+              type: result.mimeType,
+              lastModified: result.lastModified,
+            });
+          },
+          createWritable: async () => ({
+            write: async (data) => {
+              const hash = hashes[i];
+              const arrayBuffer = await new Blob([data]).arrayBuffer();
+              const hashBuffer = await crypto.subtle.digest(
+                hash.algorithm,
+                arrayBuffer
+              );
+              const actualHashHex = Array.from(new Uint8Array(hashBuffer))
+                .map((byte) => byte.toString(16).padStart(2, '0'))
+                .join('');
+              if (actualHashHex !== hash.value) {
+                throw new DOMException(
+                  `The hash of the provided data does not match the declared hash.`,
+                  'NotAllowedError'
+                );
+              }
+              return cosRelay(
+                'storeFileData',
+                {
+                  handleId,
+                  arrayBuffer,
+                  mimeType: {
+                    'content-type':
+                      (data instanceof Blob ? data.type : '') ||
+                      'application/octet-stream',
+                  },
+                },
+                [arrayBuffer]
+              );
+            },
+            close: async () => {},
+          }),
+        }));
+      },
+    };
+
+    Object.defineProperty(navigator, 'crossOriginStorage', {
+      value: workerCrossOriginStorage,
+      writable: false,
+      configurable: true,
+    });
+
+    console.log('[COS shared-worker] polyfill done');
+  }
+
+  if (typeof SharedWorker !== 'undefined') {
+    const OriginalSharedWorker = SharedWorker;
+    const SHARED_WORKER_POLYFILL =
+      '(' + sharedWorkerCrossOriginStoragePolyfill.toString() + ')();';
+
+    window.SharedWorker = class SharedWorker extends OriginalSharedWorker {
+      constructor(scriptURL, options) {
+        const absURL = new URL(scriptURL, location.href).href;
+        const isModule = options?.type === 'module';
+
+        // Same inlining strategy as for DedicatedWorker:
+        // blob: and classic HTTP scripts are fetched synchronously and inlined.
+        // Module workers that load from http(s): use import() with connect-event
+        // buffering so the user's onconnect handler registers before the already-
+        // queued connect event is replayed.
+        let loader;
+        if (absURL.startsWith('blob:') || !isModule) {
+          try {
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', absURL, /* async= */ false);
+            xhr.send();
+            loader = `console.log('[COS shared-worker] inlined script');
+const __cosWorkerBaseURL = ${JSON.stringify(absURL)};
+${xhr.responseText}`;
+          } catch (_) {
+            // fall through
+          }
+        }
+        if (!loader) {
+          loader = isModule
+            ? `console.log('[COS shared-worker] loading module', ${JSON.stringify(absURL)});
+const __cosPendingConnects = [];
+let __cosConnectDone = false;
+self.addEventListener('connect', function __cosBufferConnect(e) {
+  if (__cosConnectDone) { self.removeEventListener('connect', __cosBufferConnect); return; }
+  __cosPendingConnects.push([...e.ports]);
+});
+(async () => {
+  try {
+    await import(${JSON.stringify(absURL)});
+  } catch (e) { console.error('[COS shared-worker] module load failed:', e); }
+  __cosConnectDone = true;
+  for (const ports of __cosPendingConnects.splice(0)) {
+    self.dispatchEvent(new MessageEvent('connect', { ports }));
+  }
+})();`
+            : `console.log('[COS shared-worker] loading script', ${JSON.stringify(absURL)});
+try { importScripts(${JSON.stringify(absURL)}); } catch (e) { console.error('[COS shared-worker] script load failed:', e); }`;
+        }
+
+        const blobURL = URL.createObjectURL(
+          new Blob([SHARED_WORKER_POLYFILL + '\n' + loader], {
+            type: 'text/javascript',
+          })
+        );
+        super(blobURL, options);
+        URL.revokeObjectURL(blobURL);
+
+        const workerHandles = new Map();
+
+        // Start the port so the cos-worker-ready message (queued by the worker's
+        // onconnect handler) is actually delivered to our listener below.
+        this.port.start();
+
+        this.port.addEventListener('message', (event) => {
+          if (event.data?.source !== 'cos-worker-ready') return;
+          event.stopImmediatePropagation();
+
+          console.log('[COS main] SharedWorker received cos-worker-ready, sending cos-setup');
+          const { port1: mainPort, port2: workerPort } = new MessageChannel();
+          mainPort.onmessage = async (e) => {
+            const { id, action, data } = e.data;
+            console.log('[COS main] SharedWorker relay action:', action);
+            try {
+              let result;
+              if (action === 'requestFileHandles') {
+                const handles = await requestFileHandlesWithOptionalPrompt(
+                  data.hashes,
+                  data.create
+                );
+                const handleIds = handles.map(() => crypto.randomUUID());
+                handleIds.forEach((hid, i) =>
+                  workerHandles.set(hid, {
+                    handle: handles[i],
+                    hash: data.hashes[i],
+                  })
+                );
+                result = { handleIds };
+              } else if (action === 'getFileData') {
+                const { handle } = workerHandles.get(data.handleId);
+                const file = await handle.getFile();
+                const ab = await file.arrayBuffer();
+                mainPort.postMessage(
+                  {
+                    id,
+                    data: {
+                      data: ab,
+                      mimeType: file.type,
+                      lastModified: file.lastModified,
+                    },
+                  },
+                  [ab]
+                );
+                return;
+              } else if (action === 'storeFileData') {
+                const { hash } = workerHandles.get(data.handleId);
+                await talkToBridge('storeFileData', {
+                  hash,
+                  data: new Blob([data.arrayBuffer]),
+                  mimeType: data.mimeType,
+                });
+                result = {};
+              }
+              mainPort.postMessage({ id, data: result });
+            } catch (err) {
+              console.log('[COS main] SharedWorker relay error:', err.name, err.message);
+              mainPort.postMessage({
+                id,
+                error: { message: err.message, name: err.name },
+              });
+            }
+          };
+          this.port.postMessage({ source: 'cos-setup' }, [workerPort]);
+        });
+      }
+    };
+  }
+
   if (typeof Worker !== 'undefined') {
     const OriginalWorker = Worker;
     const WORKER_POLYFILL =
@@ -561,6 +838,7 @@
             xhr.open('GET', absURL, /* async= */ false);
             xhr.send();
             loader = `console.log('[COS worker] inlined script');
+const __cosWorkerBaseURL = ${JSON.stringify(absURL)};
 ${xhr.responseText}`;
           } catch (_) {
             // fall through to importScripts / import()
