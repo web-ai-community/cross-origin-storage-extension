@@ -536,26 +536,28 @@
         const absURL = new URL(scriptURL, location.href).href;
         const isModule = options?.type === 'module';
 
-        // For blob: URLs we synchronously read the source right now and inline
-        // it directly in the wrapper blob.  This is necessary for two reasons:
+        // Strategy for loading the user's worker script without races:
         //
-        // 1. Revocation race — callers often call URL.revokeObjectURL()
-        //    immediately after `new Worker(url)`.  importScripts / import()
-        //    run asynchronously inside the wrapper, by which time the URL may
-        //    already be gone.
+        // For blob: URLs and classic (non-module) workers we synchronously
+        // fetch the source and inline it so user code runs before the event
+        // loop dispatches any queued messages — fixing both:
+        //   1. Revocation race: blob: URLs revoked right after new Worker().
+        //   2. Message-before-onmessage race: async import() lets queued
+        //      tasks fire before onmessage is set, silently dropping them.
         //
-        // 2. Message-before-onmessage race (module workers) — import() is
-        //    async, so queued task messages can be dispatched by the event loop
-        //    before the imported module runs and sets onmessage.  Those
-        //    messages are silently lost.  Inlining makes the user code run
-        //    synchronously, so onmessage is set before any tasks fire.
+        // For module workers loading from http(s): URLs we must NOT inline:
+        // the module's own import specifiers (e.g. '/node_modules/…') would
+        // be resolved against the wrapper blob URL instead of the original
+        // script URL, breaking absolute-path and relative imports.  Instead
+        // we use import() and buffer any messages that arrive before the
+        // async import resolves, then replay them once onmessage is set.
         let loader;
-        if (absURL.startsWith('blob:')) {
+        if (absURL.startsWith('blob:') || !isModule) {
           try {
             const xhr = new XMLHttpRequest();
             xhr.open('GET', absURL, /* async= */ false);
             xhr.send();
-            loader = `console.log('[COS worker] inlined blob script');
+            loader = `console.log('[COS worker] inlined script');
 ${xhr.responseText}`;
           } catch (_) {
             // fall through to importScripts / import()
@@ -564,7 +566,24 @@ ${xhr.responseText}`;
         if (!loader) {
           loader = isModule
           ? `console.log('[COS worker] loading module', ${JSON.stringify(absURL)});
-(async () => { try { await import(${JSON.stringify(absURL)}); console.log('[COS worker] module loaded, crossOriginStorage:', typeof navigator.crossOriginStorage); } catch(e) { console.error('[COS worker] module load failed:', e); } })();`
+const __cosBuffer = [];
+let __cosBuffering = true;
+self.addEventListener('message', function __cosBufferFn(e) {
+  if (!__cosBuffering) { self.removeEventListener('message', __cosBufferFn); return; }
+  if (e.data && e.data.source === 'cos-setup') return;
+  e.stopImmediatePropagation();
+  __cosBuffer.push({ data: e.data, ports: [...(e.ports || [])] });
+});
+(async () => {
+  try {
+    await import(${JSON.stringify(absURL)});
+    __cosBuffering = false;
+    for (const m of __cosBuffer.splice(0)) {
+      self.dispatchEvent(new MessageEvent('message', { data: m.data, ports: m.ports }));
+    }
+    console.log('[COS worker] module loaded, crossOriginStorage:', typeof navigator.crossOriginStorage);
+  } catch(e) { console.error('[COS worker] module load failed:', e); }
+})();`
           : `console.log('[COS worker] loading script', ${JSON.stringify(absURL)});
 try { importScripts(${JSON.stringify(absURL)}); console.log('[COS worker] script loaded, crossOriginStorage:', typeof navigator.crossOriginStorage); } catch(e) { console.error('[COS worker] script load failed:', e); }`;
         }
