@@ -523,6 +523,101 @@
       configurable: true,
     });
 
+    // Patch the Worker constructor inside this worker so any sub-workers it
+    // creates also receive the COS polyfill.  cosRelay (and portReady) are in
+    // scope here, so sub-worker COS requests are proxied through this worker's
+    // already-established relay to the main thread.
+    if (typeof Worker !== 'undefined') {
+      const OriginalSubWorker = Worker;
+      // Self-referential: serialise this very function so each sub-worker blob
+      // contains a fresh copy of the polyfill.
+      const INNER_POLYFILL = '(' + workerCrossOriginStoragePolyfill.toString() + ')();';
+
+      self.Worker = class SubWorker extends OriginalSubWorker {
+        constructor(scriptURL, opts) {
+          // Resolve relative URLs against the original HTTP URL, not the blob URL
+          // that self.location.href points to inside a COS wrapper blob.
+          // __cosWorkerBaseURL is injected by the wrapper at inlining time.
+          const baseURL =
+            typeof __cosWorkerBaseURL !== 'undefined'
+              ? __cosWorkerBaseURL
+              : self.location.href;
+          const absURL = new URL(scriptURL, baseURL).href;
+          const isModule = opts?.type === 'module';
+
+          let loader;
+          if (!isModule) {
+            try {
+              const xhr = new XMLHttpRequest();
+              xhr.open('GET', absURL, false);
+              xhr.send();
+              loader =
+                'const __cosWorkerBaseURL = ' +
+                JSON.stringify(absURL) +
+                ';\n' +
+                xhr.responseText;
+            } catch (_) {}
+          }
+          if (!loader) {
+            loader = isModule
+              ? '(async()=>{ try { await import(' +
+                JSON.stringify(absURL) +
+                '); } catch(e) { console.error(e); } })();'
+              : 'try { importScripts(' +
+                JSON.stringify(absURL) +
+                '); } catch(e) { console.error(e); }';
+          }
+
+          const blob = new Blob([INNER_POLYFILL + '\n' + loader], {
+            type: 'text/javascript',
+          });
+          const blobURL = URL.createObjectURL(blob);
+          super(blobURL, opts);
+          URL.revokeObjectURL(blobURL);
+
+          // When the sub-worker signals readiness, wire up a relay that forwards
+          // its COS actions through this worker's own cosRelay (and therefore
+          // through the existing MessageChannel to the main-thread relay).
+          OriginalSubWorker.prototype.addEventListener.call(
+            this,
+            'message',
+            (event) => {
+              if (event.data?.source !== 'cos-worker-ready') return;
+              event.stopImmediatePropagation();
+
+              const ch = new MessageChannel();
+              ch.port1.onmessage = async (e) => {
+                const { id: innerReqId, action, data: reqData } = e.data;
+                try {
+                  const transfers =
+                    action === 'storeFileData' && reqData.arrayBuffer
+                      ? [reqData.arrayBuffer]
+                      : [];
+                  const respData = await cosRelay(action, reqData, transfers);
+                  const respTransfers =
+                    respData?.data instanceof ArrayBuffer ? [respData.data] : [];
+                  ch.port1.postMessage(
+                    { id: innerReqId, data: respData },
+                    respTransfers
+                  );
+                } catch (err) {
+                  ch.port1.postMessage({
+                    id: innerReqId,
+                    error: { message: err.message, name: err.name },
+                  });
+                }
+              };
+              OriginalSubWorker.prototype.postMessage.call(
+                this,
+                { source: 'cos-setup' },
+                [ch.port2]
+              );
+            }
+          );
+        }
+      };
+    }
+
     console.log('[COS worker] sending cos-worker-ready');
     // Tell the main thread the polyfill is ready and to send the MessagePort.
     // This fires after setupCOS is registered, so the port reply is never missed.
@@ -686,45 +781,34 @@
     window.SharedWorker = class SharedWorker extends OriginalSharedWorker {
       constructor(scriptURL, options) {
         const absURL = new URL(scriptURL, location.href).href;
-        const isModule = options?.type === 'module';
 
-        // Same inlining strategy as for DedicatedWorker:
-        // blob: and classic HTTP scripts are fetched synchronously and inlined.
-        // Module workers that load from http(s): use import() with connect-event
-        // buffering so the user's onconnect handler registers before the already-
-        // queued connect event is replayed.
+        // SharedWorker connect-timing constraint:
+        // Chrome dispatches the 'connect' event as soon as the worker global
+        // scope is created — BEFORE a top-level 'await import()' resolves in
+        // module workers.  That means the user's onconnect handler is not yet
+        // registered when the only connect event fires, so it never runs.
+        //
+        // Fix: always use a classic wrapper blob (type: 'text/javascript').
+        // importScripts() executes synchronously, so self.onconnect is set
+        // before the connect event can fire.  We strip 'type' from the options
+        // passed to super() so the browser treats the wrapper as classic;
+        // the user's script still loads and behaves correctly for any script
+        // that doesn't rely on static import/export declarations (which covers
+        // all SharedWorker scripts in practice, since classic importScripts is
+        // the dominant pattern).
         let loader;
-        if (absURL.startsWith('blob:') || !isModule) {
-          try {
-            const xhr = new XMLHttpRequest();
-            xhr.open('GET', absURL, /* async= */ false);
-            xhr.send();
-            loader = `console.log('[COS shared-worker] inlined script');
+        try {
+          const xhr = new XMLHttpRequest();
+          xhr.open('GET', absURL, /* async= */ false);
+          xhr.send();
+          loader = `console.log('[COS shared-worker] inlined script');
 const __cosWorkerBaseURL = ${JSON.stringify(absURL)};
 ${xhr.responseText}`;
-          } catch (_) {
-            // fall through
-          }
+        } catch (_) {
+          // Cross-origin or revoked-blob URL — fall back to importScripts().
         }
         if (!loader) {
-          loader = isModule
-            ? `console.log('[COS shared-worker] loading module', ${JSON.stringify(absURL)});
-const __cosPendingConnects = [];
-let __cosConnectDone = false;
-self.addEventListener('connect', function __cosBufferConnect(e) {
-  if (__cosConnectDone) { self.removeEventListener('connect', __cosBufferConnect); return; }
-  __cosPendingConnects.push([...e.ports]);
-});
-(async () => {
-  try {
-    await import(${JSON.stringify(absURL)});
-  } catch (e) { console.error('[COS shared-worker] module load failed:', e); }
-  __cosConnectDone = true;
-  for (const ports of __cosPendingConnects.splice(0)) {
-    self.dispatchEvent(new MessageEvent('connect', { ports }));
-  }
-})();`
-            : `console.log('[COS shared-worker] loading script', ${JSON.stringify(absURL)});
+          loader = `console.log('[COS shared-worker] loading script', ${JSON.stringify(absURL)});
 try { importScripts(${JSON.stringify(absURL)}); } catch (e) { console.error('[COS shared-worker] script load failed:', e); }`;
         }
 
@@ -733,7 +817,9 @@ try { importScripts(${JSON.stringify(absURL)}); } catch (e) { console.error('[CO
             type: 'text/javascript',
           })
         );
-        super(blobURL, options);
+        // Pass options without 'type' — the wrapper blob is always classic.
+        const { type: _t, ...superOptions } = options ?? {};
+        super(blobURL, Object.keys(superOptions).length ? superOptions : undefined);
         URL.revokeObjectURL(blobURL);
 
         const workerHandles = new Map();

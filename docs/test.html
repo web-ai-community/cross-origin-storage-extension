@@ -202,40 +202,52 @@
       <code>navigator.crossOriginStorage</code> is correctly injected in every
       case.
     </p>
-    <p>
-      Variants: <code>blob:</code> classic &amp; module, each tested twice —
-      once with the URL revoked before the worker starts (regression test for
-      the extension's inline-source path) and once with the URL kept live (the
-      normal path). <code>data:</code> classic (<code>data:</code> module is
-      not covered: browsers reject it because a <code>data:</code> URL has an
-      opaque origin and cannot host a module worker). Same-origin HTTP classic
-      &amp; module; the module variant imports a helper via a relative path —
-      a regression test for the bug where inlining the worker source changed
-      the base URL and broke <code>import</code> resolution. Cross-origin HTTP
-      classic &amp; module, both served from <code>cdn.jsdelivr.net</code>
-      (cross-origin to the GitHub Pages host, <code>application/javascript</code>
-      MIME type, CORS <code>Access-Control-Allow-Origin: *</code>).
-      <code>SharedWorker</code> classic &amp; module — the extension patches
-      <code>window.SharedWorker</code> using the same wrapper-blob technique as
-      for <code>Worker</code>, adapted to the <code>onconnect</code> /
-      <code>MessagePort</code> API; a thin adapter in <code>create()</code>
-      presents the same interface to the test harness. A nested-worker variant
-      spawns a second worker from inside the first to verify that injection
-      propagates to dynamically created sub-workers.
-    </p>
-    <p>
-      <strong>Not covered — <code>ServiceWorker</code>:</strong> Chrome rejects
-      <code>blob:</code> URLs as service-worker script sources
-      (<em>"The script resource is behind a redirect, which is disallowed"</em>
-      / same-origin-URL requirement), so the wrapper-blob technique used for
-      <code>Worker</code> and <code>SharedWorker</code> does not apply.
-      Patching <code>navigator.serviceWorker.register()</code> to intercept
-      and serve a modified script is possible but requires a different relay
-      mechanism (service workers communicate with clients via
-      <code>Clients.matchAll()</code> + <code>client.postMessage()</code>,
-      not a direct <code>MessageChannel</code>), and is left for a future
-      implementation.
-    </p>
+    <ul>
+      <li>
+        <code>blob:</code> URL, classic &amp; module — tested twice each: once
+        with the URL <em>revoked</em> before the worker starts (regression for
+        the extension's sync-XHR inline path) and once with it kept live (the
+        normal path).
+      </li>
+      <li>
+        <code>data:</code> URL, classic only — the module variant is not covered
+        because browsers reject <code>data:</code> URLs as module-worker sources
+        (opaque origin).
+      </li>
+      <li>
+        Same-origin HTTP, classic &amp; module — the module variant imports a
+        helper via a relative path, which is a regression test for the bug where
+        inlining the worker source changed the base URL and broke
+        <code>import</code> resolution.
+      </li>
+      <li>
+        Cross-origin HTTP, classic &amp; module — both served from
+        <code>cdn.jsdelivr.net</code> (cross-origin to the GitHub Pages host,
+        <code>application/javascript</code> MIME type,
+        CORS <code>Access-Control-Allow-Origin: *</code>).
+      </li>
+      <li>
+        <code>SharedWorker</code>, classic &amp; module — the extension patches
+        <code>window.SharedWorker</code> with the same wrapper-blob technique,
+        adapted to the <code>onconnect</code> / <code>MessagePort</code> API.
+        A thin adapter in <code>create()</code> presents the same interface to
+        the test harness.
+      </li>
+      <li>
+        Nested worker — spawns a second worker from inside the first to verify
+        that injection propagates to dynamically created sub-workers.
+      </li>
+      <li>
+        <strong>Not covered — <code>ServiceWorker</code>:</strong> Chrome rejects
+        <code>blob:</code> URLs as service-worker script sources, so the
+        wrapper-blob technique does not apply. Patching
+        <code>navigator.serviceWorker.register()</code> is possible but requires
+        a different relay mechanism (service workers communicate via
+        <code>Clients.matchAll()</code> + <code>client.postMessage()</code>,
+        not a direct <code>MessageChannel</code>), and is left for a future
+        implementation.
+      </li>
+    </ul>
     <button class="run-all" id="run-all-variants">Run all variant tests</button>
 
     <table>
