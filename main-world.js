@@ -370,9 +370,19 @@
             `Failed to execute 'requestFileHandles': missing required 'hash.value'.`
           );
         }
+        if (!/^[0-9a-f]{64}$/.test(hash.value)) {
+          throw new TypeError(
+            `Failed to execute 'requestFileHandles': 'hash.value' must be a valid lowercase hexadecimal string of length 64.`
+          );
+        }
         if (!hash.algorithm) {
           throw new TypeError(
             `Failed to execute 'requestFileHandles': missing required 'hash.algorithm'.`
+          );
+        }
+        if (!['SHA-1', 'SHA-256', 'SHA-384', 'SHA-512'].includes(hash.algorithm)) {
+          throw new TypeError(
+            `Failed to execute 'requestFileHandles': 'hash.algorithm' must be a valid HashAlgorithmIdentifier (e.g. "SHA-256").`
           );
         }
       }
@@ -462,9 +472,19 @@
               `Failed to execute 'requestFileHandles': missing required 'hash.value'.`
             );
           }
+          if (!/^[0-9a-f]{64}$/.test(hash.value)) {
+            throw new TypeError(
+              `Failed to execute 'requestFileHandles': 'hash.value' must be a valid lowercase hexadecimal string of length 64.`
+            );
+          }
           if (!hash.algorithm) {
             throw new TypeError(
               `Failed to execute 'requestFileHandles': missing required 'hash.algorithm'.`
+            );
+          }
+          if (!['SHA-1', 'SHA-256', 'SHA-384', 'SHA-512'].includes(hash.algorithm)) {
+            throw new TypeError(
+              `Failed to execute 'requestFileHandles': 'hash.algorithm' must be a valid HashAlgorithmIdentifier (e.g. "SHA-256").`
             );
           }
         }
@@ -707,9 +727,19 @@
               `Failed to execute 'requestFileHandles': missing required 'hash.value'.`
             );
           }
+          if (!/^[0-9a-f]{64}$/.test(hash.value)) {
+            throw new TypeError(
+              `Failed to execute 'requestFileHandles': 'hash.value' must be a valid lowercase hexadecimal string of length 64.`
+            );
+          }
           if (!hash.algorithm) {
             throw new TypeError(
               `Failed to execute 'requestFileHandles': missing required 'hash.algorithm'.`
+            );
+          }
+          if (!['SHA-1', 'SHA-256', 'SHA-384', 'SHA-512'].includes(hash.algorithm)) {
+            throw new TypeError(
+              `Failed to execute 'requestFileHandles': 'hash.algorithm' must be a valid HashAlgorithmIdentifier (e.g. "SHA-256").`
             );
           }
         }
