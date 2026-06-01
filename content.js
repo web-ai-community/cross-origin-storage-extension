@@ -44,9 +44,9 @@ window.addEventListener('message', async (event) => {
           return;
         }
         if (retryResponse.data && retryResponse.data.blobURL) {
-          retryResponse.data.data = await fetch(retryResponse.data.blobURL).then(
-            (r) => r.arrayBuffer()
-          );
+          retryResponse.data.data = await fetch(
+            retryResponse.data.blobURL
+          ).then((r) => r.arrayBuffer());
         }
         window.postMessage(
           { source: 'cos-polyfill-isolated', id, data: retryResponse.data },

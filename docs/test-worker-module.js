@@ -22,10 +22,9 @@ self.onmessage = async ({ data }) => {
     const content = `cos-variant-${data.label}`;
     const blob = new Blob([content], { type: 'text/plain' });
     const hash = hashObj(await sha256Hex(content));
-    const [wh] = await navigator.crossOriginStorage.requestFileHandles(
-      [hash],
-      { create: true },
-    );
+    const [wh] = await navigator.crossOriginStorage.requestFileHandles([hash], {
+      create: true,
+    });
     const writable = await wh.createWritable();
     await writable.write(blob);
     await writable.close();

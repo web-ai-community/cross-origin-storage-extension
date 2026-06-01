@@ -223,28 +223,28 @@
       <li>
         Cross-origin HTTP, classic &amp; module — both served from
         <code>cdn.jsdelivr.net</code> (cross-origin to the GitHub Pages host,
-        <code>application/javascript</code> MIME type,
-        CORS <code>Access-Control-Allow-Origin: *</code>).
+        <code>application/javascript</code> MIME type, CORS
+        <code>Access-Control-Allow-Origin: *</code>).
       </li>
       <li>
         <code>SharedWorker</code>, classic &amp; module — the extension patches
         <code>window.SharedWorker</code> with the same wrapper-blob technique,
-        adapted to the <code>onconnect</code> / <code>MessagePort</code> API.
-        A thin adapter in <code>create()</code> presents the same interface to
-        the test harness.
+        adapted to the <code>onconnect</code> / <code>MessagePort</code> API. A
+        thin adapter in <code>create()</code> presents the same interface to the
+        test harness.
       </li>
       <li>
         Nested worker — spawns a second worker from inside the first to verify
         that injection propagates to dynamically created sub-workers.
       </li>
       <li>
-        <strong>Not covered — <code>ServiceWorker</code>:</strong> Chrome rejects
-        <code>blob:</code> URLs as service-worker script sources, so the
+        <strong>Not covered — <code>ServiceWorker</code>:</strong> Chrome
+        rejects <code>blob:</code> URLs as service-worker script sources, so the
         wrapper-blob technique does not apply. Patching
         <code>navigator.serviceWorker.register()</code> is possible but requires
         a different relay mechanism (service workers communicate via
-        <code>Clients.matchAll()</code> + <code>client.postMessage()</code>,
-        not a direct <code>MessageChannel</code>), and is left for a future
+        <code>Clients.matchAll()</code> + <code>client.postMessage()</code>, not
+        a direct <code>MessageChannel</code>), and is left for a future
         implementation.
       </li>
     </ul>
@@ -674,11 +674,13 @@
         });
       });
 
-      document.getElementById('run-all-worker').addEventListener('click', async () => {
-        for (let i = 0; i < TESTS.length; i++) {
-          await runWorkerTest(i, workerRows[i]);
-        }
-      });
+      document
+        .getElementById('run-all-worker')
+        .addEventListener('click', async () => {
+          for (let i = 0; i < TESTS.length; i++) {
+            await runWorkerTest(i, workerRows[i]);
+          }
+        });
 
       // ---------------------------------------------------------------------------
       // Worker Initialization Variants
@@ -695,7 +697,9 @@
           id: 'blob-classic',
           label: 'blob: URL, classic worker',
           create() {
-            const blob = new Blob([VARIANT_WORKER_CODE], { type: 'text/javascript' });
+            const blob = new Blob([VARIANT_WORKER_CODE], {
+              type: 'text/javascript',
+            });
             const url = URL.createObjectURL(blob);
             const w = new Worker(url);
             // Revoke immediately — tests that the extension's sync-XHR inline
@@ -708,7 +712,9 @@
           id: 'blob-module',
           label: 'blob: URL, module worker',
           create() {
-            const blob = new Blob([VARIANT_WORKER_CODE], { type: 'text/javascript' });
+            const blob = new Blob([VARIANT_WORKER_CODE], {
+              type: 'text/javascript',
+            });
             const url = URL.createObjectURL(blob);
             const w = new Worker(url, { type: 'module' });
             URL.revokeObjectURL(url);
@@ -745,7 +751,9 @@
           id: 'blob-classic-not-revoked',
           label: 'blob: URL, classic worker (URL not revoked)',
           create() {
-            const blob = new Blob([VARIANT_WORKER_CODE], { type: 'text/javascript' });
+            const blob = new Blob([VARIANT_WORKER_CODE], {
+              type: 'text/javascript',
+            });
             const url = URL.createObjectURL(blob);
             const w = new Worker(url);
             // Do NOT revoke — tests the normal (non-revoked) blob path.
@@ -757,7 +765,9 @@
           id: 'blob-module-not-revoked',
           label: 'blob: URL, module worker (URL not revoked)',
           create() {
-            const blob = new Blob([VARIANT_WORKER_CODE], { type: 'text/javascript' });
+            const blob = new Blob([VARIANT_WORKER_CODE], {
+              type: 'text/javascript',
+            });
             const url = URL.createObjectURL(blob);
             const w = new Worker(url, { type: 'module' });
             // Do NOT revoke — tests the normal (non-revoked) blob module path.
@@ -772,7 +782,7 @@
             // host (web-ai-community.github.io) with CORS Access-Control-Allow-Origin: *.
             // text/plain MIME type is acceptable for classic workers.
             return new Worker(
-              'https://cdn.jsdelivr.net/gh/web-ai-community/cross-origin-storage-extension@main/docs/test-worker-classic.js',
+              'https://cdn.jsdelivr.net/gh/web-ai-community/cross-origin-storage-extension@main/docs/test-worker-classic.js'
             );
           },
         },
@@ -784,7 +794,7 @@
             // module workers (browsers reject text/plain for module scripts).
             return new Worker(
               'https://cdn.jsdelivr.net/gh/web-ai-community/cross-origin-storage-extension@main/docs/test-worker-classic.js',
-              { type: 'module' },
+              { type: 'module' }
             );
           },
         },
@@ -801,10 +811,18 @@
             });
             sw.port.start();
             return {
-              set onmessage(h) { sw.port.onmessage = h; },
-              set onerror(h) { sw.onerror = h; },
-              postMessage(msg) { sw.port.postMessage(msg); },
-              terminate() { sw.port.close(); },
+              set onmessage(h) {
+                sw.port.onmessage = h;
+              },
+              set onerror(h) {
+                sw.onerror = h;
+              },
+              postMessage(msg) {
+                sw.port.postMessage(msg);
+              },
+              terminate() {
+                sw.port.close();
+              },
             };
           },
         },
@@ -818,10 +836,18 @@
             });
             sw.port.start();
             return {
-              set onmessage(h) { sw.port.onmessage = h; },
-              set onerror(h) { sw.onerror = h; },
-              postMessage(msg) { sw.port.postMessage(msg); },
-              terminate() { sw.port.close(); },
+              set onmessage(h) {
+                sw.port.onmessage = h;
+              },
+              set onerror(h) {
+                sw.onerror = h;
+              },
+              postMessage(msg) {
+                sw.port.postMessage(msg);
+              },
+              terminate() {
+                sw.port.close();
+              },
             };
           },
         },
