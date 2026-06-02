@@ -13,6 +13,7 @@ async function initializePopup() {
   const originsList = document.getElementById('origins-list');
   const deleteAllBtn = document.getElementById('delete-all-btn');
   const hashCopyBtn = document.getElementById('hash-copy-btn');
+  const hashSaveBtn = document.getElementById('hash-save-btn');
   const hashDeleteBtn = document.getElementById('hash-delete-btn');
   const pickFileBtn = document.getElementById('pick-file-btn');
   const addResourceStatus = document.getElementById('add-resource-status');
@@ -86,6 +87,58 @@ async function initializePopup() {
     }
     // Capitalize the first letter
     return name.charAt(0).toUpperCase() + name.slice(1);
+  }
+
+  function getExtensionFromMimeType(mimeType) {
+    const base = (mimeType || '').split(';')[0].trim().toLowerCase();
+    const overrides = {
+      'image/jpeg': '.jpg',
+      'image/svg+xml': '.svg',
+      'audio/mpeg': '.mp3',
+      'application/octet-stream': '.bin',
+      'text/javascript': '.js',
+    };
+    if (overrides[base]) return overrides[base];
+    const subtype = base.split('/')[1] || '';
+    return subtype ? `.${subtype}` : '';
+  }
+
+  async function saveResourceToFile(hash) {
+    const cosCache = await caches.open('cos-storage');
+    const response = await cosCache.match(
+      `https://cos.example.com/SHA-256_${hash}`
+    );
+    if (!response) {
+      showToast('Resource not found in cache.');
+      return;
+    }
+
+    const blob = await response.blob();
+    const mimeType = (
+      response.headers.get('content-type') || 'application/octet-stream'
+    )
+      .split(';')[0]
+      .trim();
+    const ext = getExtensionFromMimeType(mimeType);
+
+    const pickerOpts = { suggestedName: `resource-${hash.slice(0, 8)}${ext}` };
+    if (ext) {
+      pickerOpts.types = [
+        { description: 'Resource file', accept: { [mimeType]: [ext] } },
+      ];
+    }
+
+    try {
+      const fileHandle = await showSaveFilePicker(pickerOpts);
+      const writable = await fileHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      showToast('Resource saved to disk.');
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        showToast(`Error saving file: ${err.message}`);
+      }
+    }
   }
 
   /**
@@ -174,10 +227,17 @@ async function initializePopup() {
           );
         }
       });
+      const saveBtn = document.createElement('button');
+      saveBtn.textContent = 'Save';
+      saveBtn.className = 'save-btn';
+      saveBtn.title = 'Save resource to disk';
+      saveBtn.addEventListener('click', () => saveResourceToFile(hash));
+
       const btnGroup = document.createElement('div');
       btnGroup.className = 'item-actions';
-      btnGroup.append(deleteBtn);
       btnGroup.append(copyBtn);
+      btnGroup.append(saveBtn);
+      btnGroup.append(deleteBtn);
       li.append(btnGroup);
 
       const hashDiv = document.createElement('div');
@@ -222,6 +282,7 @@ async function initializePopup() {
     originsList.innerHTML = '';
     const hasSelection = !!selectedHash;
     hashCopyBtn.disabled = !hasSelection;
+    hashSaveBtn.disabled = !hasSelection;
     hashDeleteBtn.disabled = !hasSelection;
     if (!selectedHash) return;
 
@@ -237,6 +298,8 @@ async function initializePopup() {
     await navigator.clipboard.writeText(hashSelect.value);
     showToast('Hash copied to clipboard.');
   });
+
+  hashSaveBtn.addEventListener('click', () => saveResourceToFile(hashSelect.value));
 
   hashDeleteBtn.addEventListener('click', async () => {
     const hash = hashSelect.value;

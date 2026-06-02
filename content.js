@@ -46,7 +46,7 @@ window.addEventListener('message', async (event) => {
         if (retryResponse.data && retryResponse.data.blobURL) {
           retryResponse.data.data = await fetch(
             retryResponse.data.blobURL
-          ).then((r) => r.arrayBuffer());
+          ).then((r) => r.blob());
         }
         window.postMessage(
           { source: 'cos-polyfill-isolated', id, data: retryResponse.data },
@@ -56,9 +56,10 @@ window.addEventListener('message', async (event) => {
       return;
     }
     if (response.data && response.data.blobURL) {
-      // Send Blob URL as ArrayBuffer.
+      // Fetch as Blob — structured-clone across postMessage is ref-counted
+      // in Chrome (no byte copy), avoiding a full ArrayBuffer allocation.
       response.data.data = await fetch(response.data.blobURL).then((r) =>
-        r.arrayBuffer()
+        r.blob()
       );
     }
     window.postMessage(

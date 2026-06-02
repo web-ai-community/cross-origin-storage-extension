@@ -101,6 +101,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           responseData = { hash };
           break;
         }
+        case 'deleteResource': {
+          const { hash } = data;
+          const offscreenResp = await new Promise((resolve) => {
+            chrome.runtime.sendMessage(
+              {
+                action: 'deleteResource',
+                target: 'offscreen-doc',
+                data: { hash: hash.value },
+              },
+              resolve
+            );
+          });
+          if (offscreenResp?.data?.success) {
+            await resourceManager.loadManagerFromStorage();
+            await resourceManager.deleteResourcesByHash(hash.value);
+          }
+          responseData = { success: !!offscreenResp?.data?.success };
+          break;
+        }
         case 'getPermission': {
           const { origin } = data;
           const permissions = await chrome.storage.local.get('cosPermissions');

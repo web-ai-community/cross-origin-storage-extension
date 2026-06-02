@@ -156,7 +156,20 @@ button {
   background-color: light-dark(#d2e3fc, #2a4a7c);
 }
 
+.save-btn {
+  background-color: light-dark(#e0f2f1, #1a3d3b);
+  color: light-dark(#00695c, #80cbc4);
+  border-color: light-dark(#00897b, #00695c);
+  font-size: 0.8em;
+  padding: 0.4em 0.8em;
+}
+
+.save-btn:hover {
+  background-color: light-dark(#b2dfdb, #2a5a56);
+}
+
 .copy-btn:disabled,
+.save-btn:disabled,
 .delete-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
