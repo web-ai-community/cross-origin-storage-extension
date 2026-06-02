@@ -12,9 +12,22 @@ async function initializePopup() {
   const hashesList = document.getElementById('hashes-list');
   const originsList = document.getElementById('origins-list');
   const deleteAllBtn = document.getElementById('delete-all-btn');
+  const hashCopyBtn = document.getElementById('hash-copy-btn');
+  const hashDeleteBtn = document.getElementById('hash-delete-btn');
+  const pickFileBtn = document.getElementById('pick-file-btn');
+  const addResourceStatus = document.getElementById('add-resource-status');
+  const toast = document.getElementById('toast');
   const confirmationDialog = document.getElementById('confirmation-dialog');
   const confirmationMessage = document.getElementById('confirmation-message');
   const dialogConfirmBtn = document.getElementById('dialog-confirm-btn');
+
+  let toastTimer;
+  function showToast(message) {
+    clearTimeout(toastTimer);
+    toast.textContent = message;
+    toast.classList.add('show');
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 3000);
+  }
 
   /**
    * Shows a custom confirmation dialog.
@@ -123,6 +136,15 @@ async function initializePopup() {
       li.className = 'resource-item';
       li.title = `Hash: ${hash}`;
 
+      const copyBtn = document.createElement('button');
+      copyBtn.textContent = 'Copy hash';
+      copyBtn.className = 'copy-btn';
+      copyBtn.title = `Copy SHA-256 hash to clipboard`;
+      copyBtn.addEventListener('click', async () => {
+        await navigator.clipboard.writeText(hash);
+        showToast('Hash copied to clipboard.');
+      });
+
       const deleteBtn = document.createElement('button');
       deleteBtn.textContent = 'Delete';
       deleteBtn.className = 'delete-btn';
@@ -152,7 +174,11 @@ async function initializePopup() {
           );
         }
       });
-      li.append(deleteBtn);
+      const btnGroup = document.createElement('div');
+      btnGroup.className = 'item-actions';
+      btnGroup.append(deleteBtn);
+      btnGroup.append(copyBtn);
+      li.append(btnGroup);
 
       const hashDiv = document.createElement('div');
       hashDiv.className = 'hash-value';
@@ -194,6 +220,9 @@ async function initializePopup() {
   function updateOriginsDisplay() {
     const selectedHash = hashSelect.value;
     originsList.innerHTML = '';
+    const hasSelection = !!selectedHash;
+    hashCopyBtn.disabled = !hasSelection;
+    hashDeleteBtn.disabled = !hasSelection;
     if (!selectedHash) return;
 
     const origins = resourceManager.getOriginsByHash(selectedHash);
@@ -203,6 +232,39 @@ async function initializePopup() {
       originsList.append(li);
     });
   }
+
+  hashCopyBtn.addEventListener('click', async () => {
+    await navigator.clipboard.writeText(hashSelect.value);
+    showToast('Hash copied to clipboard.');
+  });
+
+  hashDeleteBtn.addEventListener('click', async () => {
+    const hash = hashSelect.value;
+    if (!hash) return;
+    const resourceName =
+      hashSelect.options[hashSelect.selectedIndex]?.text ?? 'this resource';
+    const originsUsingResource = resourceManager.getOriginsByHash(hash);
+    const originList =
+      originsUsingResource.length > 0
+        ? `<ul><li>${originsUsingResource.join('</li><li>')}</li></ul>`
+        : '<p>No origins on record.</p>';
+    const message = `<h1>Are you sure you want to delete ${resourceName}?</h1>${originList}<p>Hash: <code>${hash}</code></p>`;
+
+    const confirmed = await showConfirmationDialog(message, 'Delete');
+    if (confirmed) {
+      chrome.runtime.sendMessage(
+        { action: 'deleteResource', target: 'offscreen-doc', data: { hash } },
+        async (response) => {
+          if (!response.data.success) {
+            console.error(`Deleting resource with hash ${hash} failed.`);
+            return;
+          }
+          await resourceManager.deleteResourcesByHash(hash);
+          await refreshUI();
+        }
+      );
+    }
+  });
 
   /**
    * A central function to completely refresh the UI from storage data.
@@ -292,6 +354,78 @@ async function initializePopup() {
     updateHashesDisplay();
     updateOriginsDisplay();
   }
+
+  async function addResourceFromFile() {
+    let fileHandle;
+    try {
+      [fileHandle] = await showOpenFilePicker();
+    } catch (err) {
+      // User cancelled the picker — not an error.
+      if (err.name === 'AbortError') return;
+      addResourceStatus.hidden = false;
+      addResourceStatus.innerHTML = `<span class="status-error">Error: ${err.message}</span>`;
+      return;
+    }
+
+    const file = await fileHandle.getFile();
+    pickFileBtn.disabled = true;
+    addResourceStatus.hidden = false;
+    addResourceStatus.textContent = `Computing hash for "${file.name}" (${formatBytes(file.size)})…`;
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+
+      const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+      const hashHex = Array.from(new Uint8Array(hashBuffer))
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join('');
+
+      const mimeType = file.type || 'application/octet-stream';
+      const blob = new Blob([arrayBuffer], { type: mimeType });
+      const blobURL = URL.createObjectURL(blob);
+
+      addResourceStatus.textContent = `Storing "${file.name}"…`;
+
+      chrome.runtime.sendMessage(
+        {
+          action: 'storeFileData',
+          data: {
+            hash: { algorithm: 'SHA-256', value: hashHex },
+            blobURL,
+            mimeType: { 'content-type': mimeType },
+          },
+        },
+        async (response) => {
+          URL.revokeObjectURL(blobURL);
+          pickFileBtn.disabled = false;
+          if (response?.error) {
+            addResourceStatus.innerHTML = `<span class="status-error">Error: ${response.error}</span>`;
+            return;
+          }
+          addResourceStatus.textContent = '';
+          const storedStrong = document.createElement('strong');
+          storedStrong.textContent = file.name;
+          const storedCode = document.createElement('code');
+          storedCode.textContent = hashHex;
+          addResourceStatus.append(
+            'Stored ',
+            storedStrong,
+            '.',
+            document.createElement('br'),
+            'Hash: ',
+            storedCode
+          );
+          await refreshUI();
+          showToast('Resource stored successfully.');
+        }
+      );
+    } catch (err) {
+      pickFileBtn.disabled = false;
+      addResourceStatus.innerHTML = `<span class="status-error">Error: ${err.message}</span>`;
+    }
+  }
+
+  pickFileBtn.addEventListener('click', addResourceFromFile);
 
   originSelect.addEventListener('change', () => updateHashesDisplay());
   hashSelect.addEventListener('change', updateOriginsDisplay);

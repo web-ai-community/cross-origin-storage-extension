@@ -29,9 +29,17 @@
         <ul id="hashes-list"></ul>
       </div>
       <div class="panel">
-        <h2>View by Resource Hash</h2>
-        <p>Select a resource hash to see which origins use it.</p>
+        <h2>View by Resource</h2>
+        <p>Select a resource to see which origins use it.</p>
         <select id="hash-select"></select>
+        <div class="hash-actions">
+          <button id="hash-copy-btn" class="copy-btn" disabled>
+            Copy hash
+          </button>
+          <button id="hash-delete-btn" class="delete-btn" disabled>
+            Delete
+          </button>
+        </div>
         <ul id="origins-list"></ul>
       </div>
     </div>
@@ -41,6 +49,18 @@
         Delete All Resources
       </button>
     </div>
+
+    <div class="panel add-resource-panel">
+      <h2>Add Resource to COS</h2>
+      <p>
+        Pick a file to store it in Cross-Origin Storage. The SHA-256 hash will
+        be computed automatically.
+      </p>
+      <button id="pick-file-btn" class="primary-btn">Pick a File…</button>
+      <div id="add-resource-status" class="add-resource-status" hidden></div>
+    </div>
+
+    <div id="toast"></div>
 
     <dialog id="confirmation-dialog">
       <form method="dialog">

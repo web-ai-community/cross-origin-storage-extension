@@ -124,23 +124,90 @@ button {
   transition: background-color 0.2s;
 }
 
+.item-actions {
+  float: right;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+  margin-left: 0.75em;
+}
+
 .delete-btn {
   background-color: light-dark(#ffebee, #5c2b29);
   color: light-dark(#c62828, #ffcdd2);
   border-color: light-dark(#e57373, #e53935);
   font-size: 0.8em;
   padding: 0.4em 0.8em;
-  float: right;
-  margin-left: 1em;
 }
 
 .delete-btn:hover {
   background-color: light-dark(#ffcdd2, #e53935);
 }
 
+.copy-btn {
+  background-color: light-dark(#e8f0fe, #1a3357);
+  color: light-dark(#1a73e8, #89b4fa);
+  border-color: light-dark(#1a73e8, #4a7fbf);
+  font-size: 0.8em;
+  padding: 0.4em 0.8em;
+}
+
+.copy-btn:hover {
+  background-color: light-dark(#d2e3fc, #2a4a7c);
+}
+
+.copy-btn:disabled,
+.delete-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.hash-actions {
+  display: flex;
+  gap: 0.5em;
+  margin-bottom: 1em;
+}
+
 .actions-container {
   margin-top: 2em;
   text-align: center;
+}
+
+.add-resource-panel {
+  margin-top: 2em;
+}
+
+.primary-btn {
+  background-color: light-dark(#e8f5e9, #1b4332);
+  color: light-dark(#2e7d32, #81c784);
+  border-color: light-dark(#4caf50, #2e7d32);
+}
+
+.primary-btn:hover {
+  background-color: light-dark(#c8e6c9, #2d6a4f);
+}
+
+.primary-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.add-resource-status {
+  margin-top: 1em;
+  font-size: 0.9em;
+  color: light-dark(#444, #ccc);
+  word-break: break-all;
+  line-height: 1.6;
+}
+
+.add-resource-status code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85em;
+  color: light-dark(#335d9d, #89b4fa);
+}
+
+.status-error {
+  color: light-dark(#c62828, #ffcdd2);
 }
 
 .danger-btn {
