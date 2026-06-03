@@ -81,6 +81,14 @@ ul {
   padding: 1em;
   margin-bottom: 0.75em;
   border-radius: 6px;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75em;
+}
+
+.resource-text {
+  flex: 1;
+  min-width: 0;
 }
 
 .resource-item .hash-value {
@@ -125,11 +133,10 @@ button {
 }
 
 .item-actions {
-  float: right;
   display: flex;
   flex-direction: column;
   gap: 0.4em;
-  margin-left: 0.75em;
+  flex-shrink: 0;
 }
 
 .delete-btn {

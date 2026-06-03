@@ -238,14 +238,16 @@ async function initializePopup() {
       btnGroup.append(copyBtn);
       btnGroup.append(saveBtn);
       btnGroup.append(deleteBtn);
-      li.append(btnGroup);
+
+      const textContent = document.createElement('div');
+      textContent.className = 'resource-text';
 
       const hashDiv = document.createElement('div');
       hashDiv.className = 'hash-value';
       hashDiv.textContent = `${resourceName} (${
         (mimeType || 'unknown type').split(';')[0]
       }) - ${formatBytes(size)}`;
-      li.append(hashDiv);
+      textContent.append(hashDiv);
 
       if (history.length > 0) {
         const timesUl = document.createElement('ul');
@@ -268,8 +270,11 @@ async function initializePopup() {
           )}`;
           timesUl.append(timeLi);
         });
-        li.append(timesUl);
+        textContent.append(timesUl);
       }
+
+      li.append(textContent);
+      li.append(btnGroup);
       hashesList.append(li);
     }
   }
@@ -418,77 +423,166 @@ async function initializePopup() {
     updateOriginsDisplay();
   }
 
-  async function addResourceFromFile() {
-    let fileHandle;
+  // Streaming SHA-256 that processes a File/Blob in 4 MiB slices so peak
+  // memory is O(chunk) rather than O(file) — necessary for >2 GB assets.
+  async function streamingHexDigest(blob) {
+    const CHUNK = 4 * 1024 * 1024;
+    const K = new Int32Array([
+      0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
+      0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+      0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+      0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+      0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+      0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+      0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+      0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+      0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+      0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+      0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    ]);
+    let H = new Int32Array([
+      0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+      0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+    ]);
+    let byteCount = 0;
+    let pending = new Uint8Array(0);
+    const W = new Int32Array(64);
+    const rotr = (x, n) => (x >>> n) | (x << (32 - n));
+    function processBlock(blk) {
+      for (let i = 0; i < 16; i++) {
+        W[i] = (blk[i*4]<<24)|(blk[i*4+1]<<16)|(blk[i*4+2]<<8)|blk[i*4+3];
+      }
+      for (let i = 16; i < 64; i++) {
+        const s0 = rotr(W[i-15],7)^rotr(W[i-15],18)^(W[i-15]>>>3);
+        const s1 = rotr(W[i-2],17)^rotr(W[i-2],19)^(W[i-2]>>>10);
+        W[i] = (W[i-16]+s0+W[i-7]+s1)|0;
+      }
+      let a=H[0],b=H[1],c=H[2],d=H[3],e=H[4],f=H[5],g=H[6],h=H[7];
+      for (let i = 0; i < 64; i++) {
+        const t1=(h+(rotr(e,6)^rotr(e,11)^rotr(e,25))+((e&f)^(~e&g))+K[i]+W[i])|0;
+        const t2=((rotr(a,2)^rotr(a,13)^rotr(a,22))+((a&b)^(a&c)^(b&c)))|0;
+        h=g; g=f; f=e; e=(d+t1)|0; d=c; c=b; b=a; a=(t1+t2)|0;
+      }
+      H[0]=(H[0]+a)|0; H[1]=(H[1]+b)|0; H[2]=(H[2]+c)|0; H[3]=(H[3]+d)|0;
+      H[4]=(H[4]+e)|0; H[5]=(H[5]+f)|0; H[6]=(H[6]+g)|0; H[7]=(H[7]+h)|0;
+    }
+    for (let offset = 0; offset < blob.size; offset += CHUNK) {
+      const chunk = new Uint8Array(
+        await blob.slice(offset, offset + CHUNK).arrayBuffer()
+      );
+      const buf = new Uint8Array(pending.length + chunk.length);
+      buf.set(pending);
+      buf.set(chunk, pending.length);
+      byteCount += chunk.length;
+      let i = 0;
+      for (; i + 64 <= buf.length; i += 64) processBlock(buf.subarray(i, i + 64));
+      pending = buf.subarray(i);
+    }
+    const k = Math.ceil((pending.length + 9) / 64);
+    const pad = new Uint8Array(k * 64);
+    pad.set(pending);
+    pad[pending.length] = 0x80;
+    const dv = new DataView(pad.buffer);
+    dv.setUint32(k * 64 - 8, Math.floor(byteCount / 0x20000000), false);
+    dv.setUint32(k * 64 - 4, (byteCount % 0x20000000) * 8, false);
+    for (let i = 0; i < pad.length; i += 64) processBlock(pad.subarray(i, i + 64));
+    return Array.from(H).map((w) => (w >>> 0).toString(16).padStart(8, '0')).join('');
+  }
+
+  async function addResourcesFromFiles() {
+    let fileHandles;
     try {
-      [fileHandle] = await showOpenFilePicker();
+      fileHandles = await showOpenFilePicker({ multiple: true });
     } catch (err) {
-      // User cancelled the picker — not an error.
       if (err.name === 'AbortError') return;
       addResourceStatus.hidden = false;
       addResourceStatus.innerHTML = `<span class="status-error">Error: ${err.message}</span>`;
       return;
     }
 
-    const file = await fileHandle.getFile();
     pickFileBtn.disabled = true;
     addResourceStatus.hidden = false;
-    addResourceStatus.textContent = `Computing hash for "${file.name}" (${formatBytes(file.size)})…`;
 
-    try {
-      const arrayBuffer = await file.arrayBuffer();
+    const total = fileHandles.length;
+    const successes = [];
+    const errors = [];
 
-      const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
-      const hashHex = Array.from(new Uint8Array(hashBuffer))
-        .map((byte) => byte.toString(16).padStart(2, '0'))
-        .join('');
+    for (const [i, fileHandle] of fileHandles.entries()) {
+      const file = await fileHandle.getFile();
+      addResourceStatus.textContent =
+        `[${i + 1}/${total}] Computing SHA-256 for "${file.name}" ` +
+        `(${formatBytes(file.size)})…`;
 
-      const mimeType = file.type || 'application/octet-stream';
-      const blob = new Blob([arrayBuffer], { type: mimeType });
-      const blobURL = URL.createObjectURL(blob);
+      try {
+        const hashHex = await streamingHexDigest(file);
+        const mimeType = file.type || 'application/octet-stream';
+        // Use the File directly — no intermediate ArrayBuffer copy.
+        const blobURL = URL.createObjectURL(file);
 
-      addResourceStatus.textContent = `Storing "${file.name}"…`;
+        addResourceStatus.textContent =
+          `[${i + 1}/${total}] Storing "${file.name}"…`;
 
-      chrome.runtime.sendMessage(
-        {
-          action: 'storeFileData',
-          data: {
-            hash: { algorithm: 'SHA-256', value: hashHex },
-            blobURL,
-            mimeType: { 'content-type': mimeType },
-          },
-        },
-        async (response) => {
-          URL.revokeObjectURL(blobURL);
-          pickFileBtn.disabled = false;
-          if (response?.error) {
-            addResourceStatus.innerHTML = `<span class="status-error">Error: ${response.error}</span>`;
-            return;
-          }
-          addResourceStatus.textContent = '';
-          const storedStrong = document.createElement('strong');
-          storedStrong.textContent = file.name;
-          const storedCode = document.createElement('code');
-          storedCode.textContent = hashHex;
-          addResourceStatus.append(
-            'Stored ',
-            storedStrong,
-            '.',
-            document.createElement('br'),
-            'Hash: ',
-            storedCode
+        await new Promise((resolve) => {
+          chrome.runtime.sendMessage(
+            {
+              action: 'storeFileData',
+              data: {
+                hash: { algorithm: 'SHA-256', value: hashHex },
+                blobURL,
+                mimeType: { 'content-type': mimeType },
+              },
+            },
+            (response) => {
+              URL.revokeObjectURL(blobURL);
+              if (response?.error) {
+                errors.push({ name: file.name, message: response.error });
+              } else {
+                successes.push({ name: file.name, hashHex });
+              }
+              resolve();
+            }
           );
-          await refreshUI();
-          showToast('Resource stored successfully.');
-        }
+        });
+      } catch (err) {
+        errors.push({ name: file.name, message: err.message });
+      }
+    }
+
+    pickFileBtn.disabled = false;
+    addResourceStatus.textContent = '';
+
+    if (successes.length > 0) {
+      const heading = document.createElement('div');
+      heading.textContent =
+        `Stored ${successes.length} resource${successes.length > 1 ? 's' : ''}:`;
+      addResourceStatus.append(heading);
+      for (const { name, hashHex } of successes) {
+        const row = document.createElement('div');
+        const strong = document.createElement('strong');
+        strong.textContent = name;
+        const code = document.createElement('code');
+        code.textContent = hashHex;
+        row.append(strong, document.createElement('br'), 'Hash: ', code);
+        addResourceStatus.append(row);
+      }
+    }
+
+    for (const { name, message } of errors) {
+      const errSpan = document.createElement('span');
+      errSpan.className = 'status-error';
+      errSpan.textContent = `Error storing "${name}": ${message}`;
+      addResourceStatus.append(errSpan, document.createElement('br'));
+    }
+
+    if (successes.length > 0) {
+      await refreshUI();
+      showToast(
+        `${successes.length} resource${successes.length > 1 ? 's' : ''} stored successfully.`
       );
-    } catch (err) {
-      pickFileBtn.disabled = false;
-      addResourceStatus.innerHTML = `<span class="status-error">Error: ${err.message}</span>`;
     }
   }
 
-  pickFileBtn.addEventListener('click', addResourceFromFile);
+  pickFileBtn.addEventListener('click', addResourcesFromFiles);
 
   originSelect.addEventListener('change', () => updateHashesDisplay());
   hashSelect.addEventListener('change', updateOriginsDisplay);
