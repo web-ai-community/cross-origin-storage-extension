@@ -24,6 +24,7 @@ FILES_TO_ZIP=(
   "logo-cos.png"
   "content.js"
   "background.js"
+  "sha256.js"
 )
 
 # Check if an old zip file exists and remove it.
