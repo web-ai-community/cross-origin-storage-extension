@@ -157,9 +157,9 @@
     return iframe;
   }
 
-  // Streaming SHA-256: processes a Blob in CHUNK-sized slices so peak memory
-  // is O(chunk) rather than O(file).  Falls back to the full-buffer
-  // crypto.subtle.digest path for SHA-384 / SHA-512 (rare for large assets).
+  // Inline copy of sha256.js — main-world.js is a classic MAIN-world content
+  // script that must execute synchronously at document_start and therefore
+  // cannot use ES module imports.  Keep in sync with sha256.js manually.
   async function streamingHexDigest(algorithm, blob) {
     if (algorithm !== 'SHA-256') {
       const buf = await blob.arrayBuffer();
@@ -185,8 +185,8 @@
       0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
     ]);
     let H = new Int32Array([
-      0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-      0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+      0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c,
+      0x1f83d9ab, 0x5be0cd19,
     ]);
     let byteCount = 0;
     let pending = new Uint8Array(0);
@@ -201,8 +201,7 @@
           blk[i * 4 + 3];
       }
       for (let i = 16; i < 64; i++) {
-        const s0 =
-          rotr(W[i - 15], 7) ^ rotr(W[i - 15], 18) ^ (W[i - 15] >>> 3);
+        const s0 = rotr(W[i - 15], 7) ^ rotr(W[i - 15], 18) ^ (W[i - 15] >>> 3);
         const s1 = rotr(W[i - 2], 17) ^ rotr(W[i - 2], 19) ^ (W[i - 2] >>> 10);
         W[i] = (W[i - 16] + s0 + W[i - 7] + s1) | 0;
       }
@@ -253,7 +252,8 @@
       buf.set(chunk, pending.length);
       byteCount += chunk.length;
       let i = 0;
-      for (; i + 64 <= buf.length; i += 64) processBlock(buf.subarray(i, i + 64));
+      for (; i + 64 <= buf.length; i += 64)
+        processBlock(buf.subarray(i, i + 64));
       pending = buf.subarray(i);
     }
     // Padding: append 0x80, zeros, then 64-bit big-endian bit count.
@@ -266,7 +266,8 @@
     // loss for files larger than 512 MiB (> 2^32 bits).
     dv.setUint32(k * 64 - 8, Math.floor(byteCount / 0x20000000), false);
     dv.setUint32(k * 64 - 4, (byteCount % 0x20000000) * 8, false);
-    for (let i = 0; i < pad.length; i += 64) processBlock(pad.subarray(i, i + 64));
+    for (let i = 0; i < pad.length; i += 64)
+      processBlock(pad.subarray(i, i + 64));
     return Array.from(H)
       .map((w) => (w >>> 0).toString(16).padStart(8, '0'))
       .join('');
@@ -543,14 +544,19 @@
     configurable: true,
   });
 
-  // Self-contained polyfill injected at the top of every worker blob.
-  // Must not reference anything from the outer closure.
-  function workerCrossOriginStoragePolyfill() {
+  // Single polyfill for both DedicatedWorker and SharedWorker contexts.
+  // Injected verbatim into wrapper blobs via .toString() — must be completely
+  // self-contained (no outer-closure references, no imports).
+  function universalWorkerPolyfill() {
     if (typeof navigator === 'undefined' || navigator.crossOriginStorage)
       return;
 
-    let cosPort = null;
+    const isSharedWorker =
+      typeof SharedWorkerGlobalScope !== 'undefined' &&
+      self instanceof SharedWorkerGlobalScope;
+
     const pendingRequests = new Map();
+    let cosPort = null;
     let portReadyResolve;
     const portReady = new Promise((resolve) => {
       portReadyResolve = resolve;
@@ -568,22 +574,51 @@
       }
     }
 
-    // Intercept the setup message before user code sees it.
-    self.addEventListener('message', function setupCOS(event) {
-      if (
-        !event.data ||
-        event.data.source !== 'cos-setup' ||
-        !event.ports ||
-        !event.ports.length
-      ) {
-        return;
-      }
-      event.stopImmediatePropagation();
-      cosPort = event.ports[0];
-      cosPort.onmessage = handleCOSReply; // setting onmessage implicitly calls start()
-      self.removeEventListener('message', setupCOS);
-      portReadyResolve();
-    });
+    if (isSharedWorker) {
+      // SharedWorker: relay port arrives on the first connect event.
+      // cos-worker-ready is sent inside the handler — there is no direct
+      // channel to the creating page until a client connects.
+      self.addEventListener(
+        'connect',
+        function cosSetupConnect(connectEvent) {
+          const port = connectEvent.ports[0];
+          port.start();
+          port.addEventListener('message', function setupCOS(event) {
+            if (
+              !event.data ||
+              event.data.source !== 'cos-setup' ||
+              !event.ports ||
+              !event.ports.length
+            )
+              return;
+            event.stopImmediatePropagation();
+            cosPort = event.ports[0];
+            cosPort.onmessage = handleCOSReply;
+            port.removeEventListener('message', setupCOS);
+            portReadyResolve();
+          });
+          port.postMessage({ source: 'cos-worker-ready' });
+        },
+        { once: true }
+      );
+    } else {
+      // DedicatedWorker: cos-setup arrives as a regular message on self.
+      self.addEventListener('message', function setupCOS(event) {
+        if (
+          !event.data ||
+          event.data.source !== 'cos-setup' ||
+          !event.ports ||
+          !event.ports.length
+        ) {
+          return;
+        }
+        event.stopImmediatePropagation();
+        cosPort = event.ports[0];
+        cosPort.onmessage = handleCOSReply; // setting onmessage implicitly calls start()
+        self.removeEventListener('message', setupCOS);
+        portReadyResolve();
+      });
+    }
 
     async function cosRelay(action, payload, transferables) {
       await portReady;
@@ -685,16 +720,13 @@
       configurable: true,
     });
 
-    // Patch the Worker constructor inside this worker so any sub-workers it
-    // creates also receive the COS polyfill.  cosRelay (and portReady) are in
-    // scope here, so sub-worker COS requests are proxied through this worker's
-    // already-established relay to the main thread.
-    if (typeof Worker !== 'undefined') {
+    // Sub-worker patching: dedicated workers only — SharedWorkers don't spawn
+    // child workers through this relay in the current implementation.
+    if (!isSharedWorker && typeof Worker !== 'undefined') {
       const OriginalSubWorker = Worker;
       // Self-referential: serialise this very function so each sub-worker blob
       // contains a fresh copy of the polyfill.
-      const INNER_POLYFILL =
-        '(' + workerCrossOriginStoragePolyfill.toString() + ')();';
+      const INNER_POLYFILL = '(' + universalWorkerPolyfill.toString() + ')();';
 
       self.Worker = class SubWorker extends OriginalSubWorker {
         constructor(scriptURL, opts) {
@@ -783,176 +815,19 @@
       };
     }
 
-    // Tell the main thread the polyfill is ready and to send the MessagePort.
-    // This fires after setupCOS is registered, so the port reply is never missed.
-    self.postMessage({ source: 'cos-worker-ready' });
+    // Dedicated workers signal readiness after wiring up the setupCOS listener;
+    // SharedWorkers signal inside the connect handler instead (see above).
+    if (!isSharedWorker) {
+      self.postMessage({ source: 'cos-worker-ready' });
+    }
   }
 
-  // Self-contained SharedWorker polyfill — must not reference the outer closure.
-  // Differences from the DedicatedWorker polyfill:
-  //  • cos-worker-ready is sent via port.postMessage() inside onconnect, not via
-  //    self.postMessage() at the top level (there is no direct channel until a client connects).
-  //  • cos-setup is intercepted on the port, not on self.
-  //  • Only the first connecting client sets up the COS relay (sufficient for tests
-  //    that use unique SharedWorker names, so each instance has exactly one client).
-  function sharedWorkerCrossOriginStoragePolyfill() {
-    if (typeof navigator === 'undefined' || navigator.crossOriginStorage)
-      return;
-
-    const pendingRequests = new Map();
-    let cosPort = null;
-    let portReadyResolve;
-    const portReady = new Promise((resolve) => {
-      portReadyResolve = resolve;
-    });
-
-    function handleCOSReply(event) {
-      const { id, data, error } = event.data;
-      const pending = pendingRequests.get(id);
-      if (!pending) return;
-      pendingRequests.delete(id);
-      if (error) {
-        pending.reject(new DOMException(error.message, error.name));
-      } else {
-        pending.resolve(data);
-      }
-    }
-
-    // { once: true } so that only the first client connection sets up the relay.
-    self.addEventListener(
-      'connect',
-      function cosSetupConnect(connectEvent) {
-        const port = connectEvent.ports[0];
-        port.start();
-
-        port.addEventListener('message', function setupCOS(event) {
-          if (
-            !event.data ||
-            event.data.source !== 'cos-setup' ||
-            !event.ports ||
-            !event.ports.length
-          ) {
-            return;
-          }
-          event.stopImmediatePropagation();
-          cosPort = event.ports[0];
-          cosPort.onmessage = handleCOSReply;
-          port.removeEventListener('message', setupCOS);
-          portReadyResolve();
-        });
-
-        port.postMessage({ source: 'cos-worker-ready' });
-      },
-      { once: true }
-    );
-
-    async function cosRelay(action, payload, transferables) {
-      await portReady;
-      return new Promise((resolve, reject) => {
-        const id = crypto.randomUUID();
-        pendingRequests.set(id, { resolve, reject });
-        cosPort.postMessage({ id, action, data: payload }, transferables || []);
-      });
-    }
-
-    const workerCrossOriginStorage = {
-      requestFileHandles: async (hashes, options = {}) => {
-        if (!hashes) {
-          throw new TypeError(
-            `Failed to execute 'requestFileHandles': first argument 'hashes' is required.`
-          );
-        }
-        if (!Array.isArray(hashes)) {
-          throw new TypeError(
-            `Failed to execute 'requestFileHandles': first argument 'hashes' must be an array.`
-          );
-        }
-        for (const hash of hashes) {
-          if (!hash.value) {
-            throw new TypeError(
-              `Failed to execute 'requestFileHandles': missing required 'hash.value'.`
-            );
-          }
-          if (!/^[0-9a-f]{64}$/.test(hash.value)) {
-            throw new TypeError(
-              `Failed to execute 'requestFileHandles': 'hash.value' must be a valid lowercase hexadecimal string of length 64.`
-            );
-          }
-          if (!hash.algorithm) {
-            throw new TypeError(
-              `Failed to execute 'requestFileHandles': missing required 'hash.algorithm'.`
-            );
-          }
-          if (
-            !['SHA-1', 'SHA-256', 'SHA-384', 'SHA-512'].includes(hash.algorithm)
-          ) {
-            throw new TypeError(
-              `Failed to execute 'requestFileHandles': 'hash.algorithm' must be a valid HashAlgorithmIdentifier (e.g. "SHA-256").`
-            );
-          }
-        }
-        const { create = false } = options;
-        const { handleIds } = await cosRelay('requestFileHandles', {
-          hashes,
-          create,
-          origin: self.location.origin,
-        });
-        return handleIds.map((handleId, i) => ({
-          getFile: async () => {
-            const result = await cosRelay('getFileData', { handleId });
-            return new File([result.data], 'file', {
-              type: result.mimeType,
-              lastModified: result.lastModified,
-            });
-          },
-          createWritable: async () => ({
-            write: async (data) => {
-              const hash = hashes[i];
-              const arrayBuffer = await new Blob([data]).arrayBuffer();
-              const hashBuffer = await crypto.subtle.digest(
-                hash.algorithm,
-                arrayBuffer
-              );
-              const actualHashHex = Array.from(new Uint8Array(hashBuffer))
-                .map((byte) => byte.toString(16).padStart(2, '0'))
-                .join('');
-              if (actualHashHex !== hash.value) {
-                throw new DOMException(
-                  `The hash of the provided data does not match the declared hash.`,
-                  'NotAllowedError'
-                );
-              }
-              return cosRelay(
-                'storeFileData',
-                {
-                  handleId,
-                  arrayBuffer,
-                  mimeType: {
-                    'content-type':
-                      (data instanceof Blob ? data.type : '') ||
-                      'application/octet-stream',
-                  },
-                },
-                [arrayBuffer]
-              );
-            },
-            close: async () => {},
-          }),
-        }));
-      },
-    };
-
-    Object.defineProperty(navigator, 'crossOriginStorage', {
-      value: workerCrossOriginStorage,
-      writable: false,
-      configurable: true,
-    });
-  }
+  // (sharedWorkerCrossOriginStoragePolyfill merged into universalWorkerPolyfill above)
 
   if (typeof SharedWorker !== 'undefined') {
     const OriginalSharedWorker = SharedWorker;
     const SHARED_WORKER_POLYFILL =
-      '(' + sharedWorkerCrossOriginStoragePolyfill.toString() + ')();';
+      '(' + universalWorkerPolyfill.toString() + ')();';
 
     const makeCOSSharedWorker = (scriptURL, options) => {
       const absURL = new URL(scriptURL, location.href).href;
@@ -1098,8 +973,7 @@ ${xhr.responseText}`;
 
   if (typeof Worker !== 'undefined') {
     const OriginalWorker = Worker;
-    const WORKER_POLYFILL =
-      '(' + workerCrossOriginStoragePolyfill.toString() + ')();';
+    const WORKER_POLYFILL = '(' + universalWorkerPolyfill.toString() + ')();';
 
     const makeCOSWorker = (scriptURL, options) => {
       const absURL = new URL(scriptURL, location.href).href;
