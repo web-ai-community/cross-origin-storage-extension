@@ -1,6 +1,22 @@
 // Copyright 2025 Google LLC.
 // SPDX-License-Identifier: Apache-2.0
 
+// For each font in a rewriteStylesheet response, fetches the offscreen-doc
+// blob URL into a Blob so it can be postMessage'd to the MAIN world.
+// Blobs survive structured-clone ref-counted (no byte copy in Chrome).
+async function resolveFontBlobs(responseData) {
+  const fonts = responseData?.fonts;
+  if (!fonts?.length) return;
+  await Promise.all(
+    fonts.map(async (font) => {
+      if (font.blobURL) {
+        font.blob = await fetch(font.blobURL).then((r) => r.blob());
+        delete font.blobURL;
+      }
+    })
+  );
+}
+
 // Listen for messages from the MAIN world script.
 window.addEventListener('message', async (event) => {
   // Only accept messages from the extension itself.
@@ -48,6 +64,7 @@ window.addEventListener('message', async (event) => {
             retryResponse.data.blobURL
           ).then((r) => r.blob());
         }
+        await resolveFontBlobs(retryResponse.data);
         window.postMessage(
           { source: 'cos-polyfill-isolated', id, data: retryResponse.data },
           event.origin
@@ -62,6 +79,7 @@ window.addEventListener('message', async (event) => {
         r.blob()
       );
     }
+    await resolveFontBlobs(response.data);
     window.postMessage(
       {
         source: 'cos-polyfill-isolated',

@@ -142,6 +142,77 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           responseData = { showPrompt: !!result.showPrompt };
           break;
         }
+        case 'rewriteStylesheet': {
+          let { cssText, url, origin } = data;
+          if (!cssText && url) {
+            try {
+              const resp = await fetch(url, { cache: 'no-cache' });
+              if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+              cssText = await resp.text();
+            } catch (e) {
+              responseData = { cssText: null, error: e.message };
+              break;
+            }
+          }
+          if (!cssText || !cssText.includes('cross-origin-storage')) {
+            responseData = { cssText: cssText || null, changed: false };
+            break;
+          }
+          const matches = findCOSMatches(cssText);
+          await resourceManager.loadManagerFromStorage();
+          let rewritten = cssText;
+          const fonts = [];
+          let fontIdx = 0;
+          for (const fm of matches) {
+            const trimmed = fm.originsStr.trim();
+            let allowed = trimmed === '*' ? '*' : [];
+            if (allowed !== '*') {
+              const oRe = /["']([^"']+)["']/g;
+              let om;
+              while ((om = oRe.exec(trimmed)) !== null) allowed.push(om[1]);
+            }
+            if (allowed !== '*' && !allowed.includes(origin)) {
+              rewritten = rewritten.replace(fm.full, `url("${fm.fontUrl}")`);
+              continue;
+            }
+            const hash = sriToHashObj(fm.sriHash);
+            let blobURL = await getFileData(hash);
+            if (!blobURL) {
+              try {
+                const fontResp = await fetch(fm.fontUrl);
+                if (!fontResp.ok) throw new Error(`HTTP ${fontResp.status}`);
+                const fontBlob = await fontResp.blob();
+                const mimeType =
+                  fontResp.headers.get('content-type') || 'font/woff2';
+                await storeFileData(hash, fontBlob, { 'content-type': mimeType });
+                resourceManager.recordSize(hash.value, fontBlob.size);
+                resourceManager.recordMimeType(hash.value, mimeType);
+                await resourceManager.saveManagerToStorage();
+                blobURL = await getFileData(hash);
+              } catch (e) {
+                rewritten = rewritten.replace(fm.full, `url("${fm.fontUrl}")`);
+                continue;
+              }
+            }
+            if (blobURL) {
+              const placeholder = `__COS_FONT_${fontIdx++}__`;
+              rewritten = rewritten.replace(fm.full, `url("${placeholder}")`);
+              fonts.push({ placeholder, blobURL });
+              resourceManager.recordAccess(origin, hash.value);
+            } else {
+              rewritten = rewritten.replace(fm.full, `url("${fm.fontUrl}")`);
+            }
+          }
+          if (fonts.length) {
+            await resourceManager.saveManagerToStorage();
+          }
+          responseData = {
+            cssText: rewritten,
+            fonts,
+            changed: rewritten !== cssText,
+          };
+          break;
+        }
         default:
           console.warn('Unknown action:', action);
           responseData = { error: `Unknown action: ${action}` };
@@ -163,6 +234,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 function generateCacheKey(hash) {
   return `https://cos.example.com/${hash.algorithm}_${hash.value}`;
 }
+
+// Returns all url() blocks in cssText that carry both integrity() and
+// cross-origin-storage() modifiers, normalized to { full, fontUrl, sriHash,
+// originsStr } regardless of which modifier appears first.
+function findCOSMatches(cssText) {
+  const matches = [];
+  // integrity() before cross-origin-storage()
+  const RE_INT_FIRST =
+    /url\s*\(\s*["']([^"']+)["']\s+integrity\s*\(\s*["'](sha(?:256|384|512)-[A-Za-z0-9+/=]+)["']\s*\)\s+cross-origin-storage\s*\(\s*([^)]*?)\s*\)\s*\)/g;
+  // cross-origin-storage() before integrity()
+  const RE_COS_FIRST =
+    /url\s*\(\s*["']([^"']+)["']\s+cross-origin-storage\s*\(\s*([^)]*?)\s*\)\s+integrity\s*\(\s*["'](sha(?:256|384|512)-[A-Za-z0-9+/=]+)["']\s*\)\s*\)/g;
+  let m;
+  while ((m = RE_INT_FIRST.exec(cssText)) !== null)
+    matches.push({ full: m[0], fontUrl: m[1], sriHash: m[2], originsStr: m[3] });
+  while ((m = RE_COS_FIRST.exec(cssText)) !== null)
+    matches.push({ full: m[0], fontUrl: m[1], sriHash: m[3], originsStr: m[2] });
+  return matches;
+}
+
+function sriToHashObj(sriHash) {
+  const dashIdx = sriHash.indexOf('-');
+  const algo = sriHash.slice(0, dashIdx);
+  const b64 = sriHash.slice(dashIdx + 1);
+  const algorithm =
+    { sha256: 'SHA-256', sha384: 'SHA-384', sha512: 'SHA-512' }[algo] ||
+    'SHA-256';
+  const binary = atob(b64);
+  let hex = '';
+  for (let i = 0; i < binary.length; i++)
+    hex += binary.charCodeAt(i).toString(16).padStart(2, '0');
+  return { algorithm, value: hex };
+}
+
 
 async function storeFileData(hash, blob, mimeType) {
   const key = generateCacheKey(hash);

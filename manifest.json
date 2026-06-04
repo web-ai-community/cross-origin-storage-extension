@@ -4,7 +4,16 @@
   "version": "0.0.17",
   "description": "Implements the proposed Cross-Origin Storage API, letting sites share files with your consent for a faster and more efficient web.",
   "options_page": "options.html",
-  "permissions": ["storage", "unlimitedStorage", "offscreen", "tabs"],
+  "permissions": ["storage", "unlimitedStorage", "offscreen", "tabs", "declarativeNetRequest"],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "block_gstatic_fonts",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  },
   "background": {
     "service_worker": "background.js",
     "type": "module"

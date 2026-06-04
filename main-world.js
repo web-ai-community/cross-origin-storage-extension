@@ -1149,4 +1149,76 @@ self.addEventListener('message', function __cosBufferFn(e) {
     };
     window.Worker.prototype = OriginalWorker.prototype;
   }
+
+  // CSS cross-origin-storage() polyfill.
+  // Intercepts <style> and <link rel="stylesheet" data-cos> elements that use
+  // the proposed url("…" integrity("sha256-…") cross-origin-storage(…)) syntax,
+  // rewrites them via the COS cache, and re-injects the resolved CSS.
+
+  // Replaces __COS_FONT_N__ placeholders in rewritten CSS with page-origin
+  // blob URLs.  URL.createObjectURL() must run in the MAIN world so the
+  // resulting blob: URL carries the page's origin and is accessible to the
+  // browser's font-loading pipeline.
+  function applyFontBlobs(cssText, fonts) {
+    let resolved = cssText;
+    for (const { placeholder, blob } of fonts || []) {
+      const blobUrl = URL.createObjectURL(blob);
+      resolved = resolved.replace(`"${placeholder}"`, `"${blobUrl}"`);
+    }
+    return resolved;
+  }
+
+  function processStyleForCOS(styleEl) {
+    if (styleEl._cosProcessed) return;
+    const text = styleEl.textContent;
+    if (!text.includes('cross-origin-storage')) return;
+    styleEl._cosProcessed = true;
+    talkToBridge('rewriteStylesheet', {
+      cssText: text,
+      origin: location.origin,
+    }).then(({ cssText, fonts }) => {
+      if (cssText) styleEl.textContent = applyFontBlobs(cssText, fonts);
+    });
+  }
+
+  function processLinkForCOS(linkEl) {
+    if (linkEl._cosProcessed) return;
+    if (linkEl.rel !== 'stylesheet' || !linkEl.hasAttribute('data-cos')) return;
+    linkEl._cosProcessed = true;
+    const href = linkEl.href;
+    linkEl.removeAttribute('href');
+    talkToBridge('rewriteStylesheet', { url: href, origin: location.origin })
+      .then(({ cssText, fonts }) => {
+        if (!cssText) {
+          linkEl.href = href;
+          return;
+        }
+        const style = document.createElement('style');
+        style.textContent = applyFontBlobs(cssText, fonts);
+        linkEl.parentNode?.insertBefore(style, linkEl.nextSibling);
+      })
+      .catch(() => {
+        linkEl.href = href;
+      });
+  }
+
+  const cosStyleObserver = new MutationObserver((mutations) => {
+    for (const mut of mutations) {
+      for (const node of mut.addedNodes) {
+        if (node.nodeType !== Node.ELEMENT_NODE) continue;
+        if (node.tagName === 'STYLE') processStyleForCOS(node);
+        else if (node.tagName === 'LINK') processLinkForCOS(node);
+        if (node.querySelectorAll) {
+          node.querySelectorAll('style').forEach(processStyleForCOS);
+          node
+            .querySelectorAll('link[rel="stylesheet"][data-cos]')
+            .forEach(processLinkForCOS);
+        }
+      }
+    }
+  });
+  cosStyleObserver.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+  });
 })();

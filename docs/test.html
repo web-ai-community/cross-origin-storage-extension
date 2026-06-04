@@ -12,7 +12,11 @@
       rel="icon"
       href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧪</text></svg>"
     />
-    <title>Cross-Origin Storage — Test Page</title>
+    <!--
+      The `data-cos` attribute tells the COS extension polyfill to intercept this stylesheet.    
+    -->
+    <link rel="stylesheet" data-cos href="test-cos-fonts.css">
+    <title>Cross-Origin Storage — Test Page</title>    
     <style>
       :root {
         color-scheme: dark light;
@@ -287,6 +291,41 @@
         </tr>
       </thead>
       <tbody id="stress-results">
+        <!-- rows injected by JS -->
+      </tbody>
+    </table>
+
+    <h2>CSS <code>cross-origin-storage()</code> Polyfill Tests</h2>
+    <p>
+      Tests the CSS <code>cross-origin-storage()</code> modifier polyfill. A
+      <code>&lt;link rel="stylesheet" data-cos&gt;</code> in this page's
+      <code>&lt;head&gt;</code> points to <code>test-cos-fonts.css</code>, which
+      uses the proposed
+      <code>url("…" integrity("sha256-…") cross-origin-storage(*))</code> syntax.
+      The extension intercepts the link, serves the font bytes from COS (fetching
+      from the network and caching on first run), creates a page-origin blob URL,
+      and re-injects the rewritten rule so the browser can load it normally.
+    </p>
+    <h3>Should render in Noto Color Emoji and be served from COS</h3>
+    <p style="font-family: 'Noto Color Emoji COS', sans-serif; font-size: 2rem;">
+      🥰💀✌️🌴🐢🐐🍄⚽🍻👑📸😬👀🚨🏡🕊️🏆😻🌟🧿🍀🎨🍜
+    </p>
+    <h3>Should render in the system emoji font</h3>
+    <p style="font-size: 2rem;">
+      🥰💀✌️🌴🐢🐐🍄⚽🍻👑📸😬👀🚨🏡🕊️🏆😻🌟🧿🍀🎨🍜
+    </p>
+    <button class="run-all" id="run-all-css">Run CSS polyfill tests</button>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Scenario</th>
+          <th>Status</th>
+          <th>Run</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody id="css-results">
         <!-- rows injected by JS -->
       </tbody>
     </table>
@@ -1112,6 +1151,216 @@
         }
         for (let i = 0; i < STRESS_TESTS.length; i++) {
           await runStressTest(STRESS_TESTS[i], stressRows[i]);
+        }
+        for (let i = 0; i < CSS_TESTS.length; i++) {
+          await runCSSTest(CSS_TESTS[i], cssRows[i]);
+        }
+      });
+
+      // -------------------------------------------------------------------------
+      // CSS cross-origin-storage() polyfill tests
+      // -------------------------------------------------------------------------
+
+      // The font family declared in test-cos-fonts.css.
+      const COS_FONT_FAMILY = 'Noto Color Emoji COS';
+
+      // Waits for the COS polyfill to rewrite a stylesheet element and for the
+      // declared font to become loadable, or rejects after `ms` milliseconds.
+      async function waitForCOSFont(ms = 20000) {
+        await Promise.race([
+          document.fonts.load(`16px "${COS_FONT_FAMILY}"`),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`timeout after ${ms} ms`)), ms)
+          ),
+        ]);
+      }
+
+      // Returns a summary object describing how a <link data-cos> was processed.
+      function linkAudit(linkEl) {
+        const hrefRemoved = linkEl.getAttribute('href') === null;
+        // Positive signal: the polyfill replaced the src with a blob: URL.
+        // Checking for absence of 'cross-origin-storage' is wrong because the
+        // CSS comment block also contains that string.
+        const injectedStyle = [...document.head.querySelectorAll('style')].find(
+          (s) =>
+            s.textContent.includes(COS_FONT_FAMILY) &&
+            s.textContent.includes('blob:')
+        );
+        const hasBlobURL = !!injectedStyle?.textContent.includes('blob:');
+        const fontLoaded = [...document.fonts].some(
+          (f) => f.family === `"${COS_FONT_FAMILY}"` || f.family === COS_FONT_FAMILY
+        );
+        return { hrefRemoved, injectedStyle: !!injectedStyle, hasBlobURL, fontLoaded };
+      }
+
+      const CSS_TESTS = [
+        {
+          id: 'css-cos-static-link',
+          label:
+            'Static <link data-cos href="test-cos-fonts.css"> — polyfill intercepts at parse time',
+          async run() {
+            // The <link> is already in <head> from the static HTML.
+            const linkEl = document.querySelector(
+              'link[data-cos][href="test-cos-fonts.css"], link[data-cos]:not([href])'
+            );
+            if (!linkEl) {
+              return {
+                pass: false,
+                detail: 'No <link data-cos> found in DOM — check the page source.',
+              };
+            }
+
+            log('CSS COS static: waiting for polyfill to load font from COS…');
+            try {
+              await waitForCOSFont();
+            } catch (e) {
+              return {
+                pass: false,
+                detail:
+                  `${e.message} — is the extension installed and enabled?\n` +
+                  `Link href still present: ${linkEl.getAttribute('href') !== null}`,
+              };
+            }
+
+            const { hrefRemoved, injectedStyle, hasBlobURL, fontLoaded } =
+              linkAudit(linkEl);
+            const pass = hrefRemoved && injectedStyle && fontLoaded;
+            return {
+              pass,
+              detail: [
+                `Font loaded: ${fontLoaded}`,
+                `Link href removed by polyfill: ${hrefRemoved}`,
+                `Rewritten <style> injected: ${injectedStyle}`,
+                `src replaced with blob URL: ${hasBlobURL}`,
+              ].join('\n'),
+            };
+          },
+        },
+        {
+          id: 'css-cos-dynamic-link',
+          label:
+            'Dynamic <link data-cos> insertion — polyfill intercepts MutationObserver event',
+          async run() {
+            // Remove any pre-existing 'Noto Color Emoji COS' font faces so the
+            // dynamic insertion is a fresh test.
+            const toDelete = [...document.fonts].filter(
+              (f) =>
+                f.family === `"${COS_FONT_FAMILY} Dynamic"` ||
+                f.family === `${COS_FONT_FAMILY} Dynamic`
+            );
+            for (const f of toDelete) document.fonts.delete(f);
+
+            // Build CSS that declares a distinct family name so we can tell it
+            // apart from the static-link test's font face.
+            const dynamicFamily = `${COS_FONT_FAMILY} Dynamic`;
+            const styleEl = document.createElement('style');
+            styleEl.textContent =
+              `@font-face { font-family: "${dynamicFamily}"; ` +
+              `src: url("https://fonts.gstatic.com/s/notocoloremoji/v39/Yq6P-KqIXTD0t4D9z1ESnKM3-HpFabts6diysYTngZPnMC1MfLd4gw.9.woff2" ` +
+              `integrity("sha256-pQWQqAumWJOI9KUdRj+FPvOC3L6x47Ai3G7WAUdnbKI=") ` +
+              `cross-origin-storage(*)) format('woff2'); }`;
+
+            // Watch for the polyfill to rewrite styleEl.textContent.
+            const polyfillDone = new Promise((resolve) => {
+              const obs = new MutationObserver(() => {
+                obs.disconnect();
+                resolve();
+              });
+              obs.observe(styleEl, { childList: true, subtree: true });
+              setTimeout(() => {
+                obs.disconnect();
+                resolve();
+              }, 20000);
+            });
+
+            log('CSS COS dynamic: injecting <style> with cross-origin-storage() modifier…');
+            document.head.appendChild(styleEl);
+            await polyfillDone;
+
+            const rewritten = !styleEl.textContent.includes('cross-origin-storage');
+            if (!rewritten) {
+              return {
+                pass: false,
+                detail:
+                  'Polyfill did not rewrite the <style> — cross-origin-storage() still present.\n' +
+                  'Is the extension installed and enabled?',
+              };
+            }
+            log('CSS COS dynamic: polyfill rewrote the CSS ✓ — waiting for font…');
+
+            try {
+              await Promise.race([
+                document.fonts.load(`16px "${dynamicFamily}"`),
+                new Promise((_, reject) =>
+                  setTimeout(() => reject(new Error('timeout after 10000 ms')), 10000)
+                ),
+              ]);
+            } catch (e) {
+              return { pass: false, detail: `Font load failed: ${e.message}` };
+            }
+
+            const fontLoaded = [...document.fonts].some(
+              (f) =>
+                f.family === `"${dynamicFamily}"` || f.family === dynamicFamily
+            );
+            const hasDataURI = styleEl.textContent.includes('data:');
+            return {
+              pass: fontLoaded,
+              detail: [
+                `Font loaded: ${fontLoaded}`,
+                `src replaced with data URI: ${hasDataURI}`,
+                `Polyfill rewrote CSS: ${rewritten}`,
+              ].join('\n'),
+            };
+          },
+        },
+      ];
+
+      const cssTbody = document.getElementById('css-results');
+      const cssRows = CSS_TESTS.map((test, idx) => {
+        const tr = document.createElement('tr');
+        tr.id = `css-row-${test.id}`;
+        tr.innerHTML = `
+          <td>${idx + 1}</td>
+          <td>${test.label}</td>
+          <td class="status-cell"><span class="badge badge-pending">pending</span></td>
+          <td><button class="run-btn">Run</button></td>
+          <td><pre class="detail"></pre></td>
+        `;
+        cssTbody.append(tr);
+        return tr;
+      });
+
+      async function runCSSTest(test, rowEl) {
+        const btn = rowEl.querySelector('.run-btn');
+        btn.disabled = true;
+        setRowStatus(rowEl, 'running', '');
+        log(`--- CSS Polyfill: ${test.label} ---`);
+        try {
+          const { pass, detail } = await test.run();
+          setRowStatus(rowEl, pass ? 'pass' : 'fail', detail);
+          log(
+            `CSS Result: ${pass ? 'PASS' : 'FAIL'}${detail ? ' — ' + detail.split('\n')[0] : ''}`,
+            !pass
+          );
+        } catch (err) {
+          const detail = `Uncaught ${err.name}: ${err.message}`;
+          setRowStatus(rowEl, 'fail', detail);
+          log(`CSS Result: FAIL — ${detail}`, true);
+        } finally {
+          btn.disabled = false;
+        }
+      }
+
+      cssRows.forEach((rowEl, idx) => {
+        rowEl.querySelector('.run-btn').addEventListener('click', () => {
+          runCSSTest(CSS_TESTS[idx], rowEl);
+        });
+      });
+
+      document.getElementById('run-all-css').addEventListener('click', async () => {
+        for (let i = 0; i < CSS_TESTS.length; i++) {
+          await runCSSTest(CSS_TESTS[i], cssRows[i]);
         }
       });
     </script>
