@@ -5,7 +5,8 @@
     "action": { "type": "block" },
     "condition": {
       "urlFilter": "||fonts.gstatic.com/",
-      "resourceTypes": ["font"]
+      "resourceTypes": ["font"],
+      "initiatorDomains": ["localhost", "web-ai-community.github.io"]
     }
   }
 ]
