@@ -875,6 +875,9 @@ ${xhr.responseText}`;
       // "worker-src 'self'" which does not cover the blob: scheme).  The
       // securitypolicyviolation event fires synchronously during worker creation
       // in Chrome, so we can detect and fall back in the same call stack.
+      //
+      // NOTE: same as makeCOSWorker — these violations appear as harmless noise
+      // in chrome://extensions/?errors= and cannot be suppressed from JS.
       let cspBlocked = false;
       const cspListener = (e) => {
         if (e.blockedURI === 'blob' || e.blockedURI.startsWith('blob:')) {
@@ -1037,6 +1040,14 @@ self.addEventListener('message', function __cosBufferFn(e) {
       // "worker-src 'self'" which does not cover the blob: scheme).  The
       // securitypolicyviolation event fires synchronously during worker creation
       // in Chrome, so we can detect and fall back in the same call stack.
+      //
+      // NOTE: Chrome logs CSP violations at the engine level before dispatching
+      // the securitypolicyviolation event, so these violations will appear in
+      // chrome://extensions/?errors= as harmless noise even though the fallback
+      // below handles them correctly.  There is no way to suppress that log
+      // entry from JavaScript: the blob: URL is scoped to the page origin (MAIN
+      // world), and HTTP-header-based CSP cannot be read from a content script
+      // to pre-check allowance.
       let cspBlocked = false;
       const cspListener = (e) => {
         if (e.blockedURI === 'blob' || e.blockedURI.startsWith('blob:')) {
