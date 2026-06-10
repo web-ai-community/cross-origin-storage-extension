@@ -100,28 +100,30 @@ ul {
   margin-bottom: 0.5em;
 }
 
+.access-times-details {
+  margin-top: 0.25em;
+}
+
+.access-times-details summary {
+  font-size: 0.85em;
+  color: light-dark(#555, #ccc);
+  cursor: pointer;
+}
+
 .resource-item .access-times {
-  list-style-type: disc;
-  margin-left: 20px;
-  padding-left: 5px;
+  list-style-type: none;
+  margin: 0.15em 0 0 0.75em;
+  padding: 0;
 }
 
 .resource-item .access-times li {
   font-family: sans-serif;
   font-size: 0.85em;
   color: light-dark(#555, #ccc);
-  padding: 0.2em 0;
+  padding: 0.15em 0;
   margin: 0;
 }
 
-#origins-list li {
-  background-color: light-dark(#e9efff, #2a3b55);
-  padding: 0.75em;
-  margin-bottom: 0.5em;
-  border-radius: 4px;
-  font-family: ui-monospace, monospace;
-  word-break: break-all;
-}
 
 button {
   cursor: pointer;
@@ -182,15 +184,58 @@ button {
   cursor: not-allowed;
 }
 
-.hash-actions {
+.sort-control {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  margin-bottom: 0.75em;
+}
+
+.sort-control label {
+  font-size: 0.85em;
+  color: light-dark(#555, #ccc);
+  white-space: nowrap;
+}
+
+.sort-control select {
+  flex: 1;
+  width: auto;
+  margin: 0;
+  padding: 0.4em 0.6em;
+  font-size: 0.85em;
+}
+
+.origin-actions {
   display: flex;
   gap: 0.5em;
   margin-bottom: 1em;
+  flex-wrap: wrap;
 }
 
 .actions-container {
   margin-top: 2em;
   text-align: center;
+}
+
+.search-panel {
+  margin-top: 2em;
+}
+
+.search-panel input[type='search'] {
+  width: 100%;
+  padding: 0.8em;
+  margin: 1em 0;
+  border: 1px solid light-dark(#ccc, #666);
+  border-radius: 4px;
+  background-color: light-dark(#fff, #2c2c2c);
+  color: light-dark(#000, #f0f0f0);
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+}
+
+.search-no-result {
+  font-size: 0.9em;
+  color: light-dark(#888, #aaa);
 }
 
 .add-resource-panel {
@@ -251,7 +296,9 @@ dialog {
   color: light-dark(#000000, #f0f0f0);
   box-shadow: 0 4px 6px light-dark(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.6));
   min-width: 300px;
-  max-width: 500px;
+  max-width: 560px;
+  max-height: min(80vh, 600px);
+  overflow-y: auto;
 }
 
 dialog::backdrop {
@@ -337,4 +384,85 @@ dialog footer {
 #toast.show {
   opacity: 1;
   bottom: 3em;
+}
+
+.checklist {
+  list-style: none;
+  padding: 0;
+  margin: 0.5em 0 0;
+}
+
+.checklist li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+  padding: 0.3em 0;
+  border-bottom: 1px solid light-dark(#eee, #333);
+}
+
+.checklist li:last-child {
+  border-bottom: none;
+}
+
+.checklist label {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+  cursor: pointer;
+}
+
+.checklist input[type='checkbox'] {
+  margin-top: 0.15em;
+  flex-shrink: 0;
+}
+
+.checklist-sublabel {
+  display: block;
+  color: light-dark(#888, #aaa);
+  font-size: 0.8em;
+  margin-left: 1.4em;
+}
+
+.never-accessed-note {
+  font-size: 0.85em;
+  color: light-dark(#888, #aaa);
+  font-style: italic;
+  margin: 0.25em 0 0;
+}
+
+.other-origins-details {
+  margin-top: 0.25em;
+}
+
+.other-origins-details summary {
+  font-size: 0.85em;
+  color: light-dark(#555, #ccc);
+  cursor: pointer;
+}
+
+.other-origins-details ul {
+  list-style-type: none;
+  margin: 0.15em 0 0 0.75em;
+  padding: 0;
+}
+
+.other-origins-details li {
+  padding: 0.1em 0;
+}
+
+.origin-link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: light-dark(#1a73e8, #89b4fa);
+  font-family: ui-monospace, monospace;
+  font-size: 0.82em;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.origin-link-btn:hover {
+  color: light-dark(#0d47a1, #aac4f5);
 }

@@ -1,7 +1,7 @@
 // Copyright 2025 Google LLC.
 // SPDX-License-Identifier: Apache-2.0
 
-const HISTORY_LIMIT = 3;
+const HISTORY_LIMIT = 10;
 const STORAGE_KEY = 'resourceManagerData';
 
 class ResourceManager {

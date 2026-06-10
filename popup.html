@@ -26,23 +26,50 @@
           Select an origin to see its shared resources and last access times.
         </p>
         <select id="origin-select"></select>
+        <div class="origin-actions">
+          <button id="delete-exclusive-btn" class="delete-btn" disabled>
+            Delete resources exclusively used here
+          </button>
+          <button id="delete-origin-btn" class="delete-btn" disabled>
+            Delete resources used here and elsewhere
+          </button>
+        </div>
+        <div class="sort-control">
+          <label for="sort-select">Sort by</label>
+          <select id="sort-select">
+            <optgroup label="Size">
+              <option value="size-desc">Largest first</option>
+              <option value="size-asc">Smallest first</option>
+            </optgroup>
+            <optgroup label="Origins">
+              <option value="origins-desc">Most origins</option>
+              <option value="origins-asc">Fewest origins</option>
+            </optgroup>
+            <optgroup label="Access time">
+              <option value="recent-desc">Most recently accessed</option>
+              <option value="recent-asc">Least recently accessed</option>
+            </optgroup>
+            <optgroup label="Access count">
+              <option value="freq-desc">Most frequently accessed</option>
+              <option value="freq-asc">Least frequently accessed</option>
+            </optgroup>
+          </select>
+        </div>
         <ul id="hashes-list"></ul>
       </div>
       <div class="panel">
         <h2>View by Resource</h2>
         <p>Select a resource to see which origins use it.</p>
         <select id="hash-select"></select>
-        <div class="hash-actions">
-          <button id="hash-copy-btn" class="copy-btn" disabled>
-            Copy hash
-          </button>
-          <button id="hash-save-btn" class="save-btn" disabled>Save</button>
-          <button id="hash-delete-btn" class="delete-btn" disabled>
-            Delete
-          </button>
-        </div>
         <ul id="origins-list"></ul>
       </div>
+    </div>
+
+    <div class="panel search-panel">
+      <h2>Search for Resource</h2>
+      <p>Paste a SHA-256 hash to look up a resource and its access statistics.</p>
+      <input type="search" id="hash-search" placeholder="SHA-256 hash…">
+      <div id="hash-search-result"></div>
     </div>
 
     <div class="actions-container">
@@ -65,7 +92,7 @@
 
     <dialog id="confirmation-dialog">
       <form method="dialog">
-        <p id="confirmation-message"></p>
+        <div id="confirmation-message"></div>
         <footer>
           <button type="submit" value="cancel">Cancel</button>
           <button type="submit" value="confirm" id="dialog-confirm-btn">

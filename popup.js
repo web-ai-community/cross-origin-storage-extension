@@ -13,15 +13,17 @@ async function initializePopup() {
   const hashesList = document.getElementById('hashes-list');
   const originsList = document.getElementById('origins-list');
   const deleteAllBtn = document.getElementById('delete-all-btn');
-  const hashCopyBtn = document.getElementById('hash-copy-btn');
-  const hashSaveBtn = document.getElementById('hash-save-btn');
-  const hashDeleteBtn = document.getElementById('hash-delete-btn');
   const pickFileBtn = document.getElementById('pick-file-btn');
   const addResourceStatus = document.getElementById('add-resource-status');
   const toast = document.getElementById('toast');
   const confirmationDialog = document.getElementById('confirmation-dialog');
   const confirmationMessage = document.getElementById('confirmation-message');
   const dialogConfirmBtn = document.getElementById('dialog-confirm-btn');
+  const deleteExclusiveBtn = document.getElementById('delete-exclusive-btn');
+  const deleteOriginBtn = document.getElementById('delete-origin-btn');
+  const sortSelect = document.getElementById('sort-select');
+  const hashSearch = document.getElementById('hash-search');
+  const hashSearchResult = document.getElementById('hash-search-result');
 
   let toastTimer;
   function showToast(message) {
@@ -54,12 +56,137 @@ async function initializePopup() {
     });
   }
 
+  function showChecklistDialog(title, subtitle, items, confirmText = 'Delete Selected') {
+    return new Promise((resolve) => {
+      confirmationMessage.innerHTML = '';
+
+      const h1 = document.createElement('h1');
+      h1.textContent = title;
+      confirmationMessage.append(h1);
+
+      const sub = document.createElement('p');
+      sub.textContent = subtitle;
+      confirmationMessage.append(sub);
+
+      const ul = document.createElement('ul');
+      ul.className = 'checklist';
+      for (const { value, label, sublabel } of items) {
+        const li = document.createElement('li');
+        const labelEl = document.createElement('label');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = value;
+        checkbox.checked = true;
+        const span = document.createElement('span');
+        span.textContent = label;
+        labelEl.append(checkbox, ' ', span);
+        if (sublabel) {
+          const small = document.createElement('small');
+          small.className = 'checklist-sublabel';
+          small.textContent = sublabel;
+          labelEl.append(document.createElement('br'), small);
+        }
+        const copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.textContent = 'Copy hash';
+        copyBtn.className = 'copy-btn';
+        copyBtn.addEventListener('click', async () => {
+          await navigator.clipboard.writeText(value);
+          showToast('Hash copied to clipboard.');
+        });
+        li.append(labelEl, copyBtn);
+        ul.append(li);
+      }
+      confirmationMessage.append(ul);
+
+      dialogConfirmBtn.textContent = confirmText;
+
+      const closeListener = () => {
+        confirmationDialog.removeEventListener('close', closeListener);
+        if (confirmationDialog.returnValue !== 'confirm') {
+          resolve(null);
+          return;
+        }
+        const checked = [
+          ...confirmationMessage.querySelectorAll(
+            'input[type="checkbox"]:checked',
+          ),
+        ].map((cb) => cb.value);
+        resolve(checked);
+      };
+
+      confirmationDialog.addEventListener('close', closeListener);
+      confirmationDialog.showModal();
+    });
+  }
+
+  function showSingleDeleteDialog(resourceName, hash, origins) {
+    return new Promise((resolve) => {
+      confirmationMessage.innerHTML = '';
+
+      const h1 = document.createElement('h1');
+      h1.textContent = `Are you sure you want to delete ${resourceName}?`;
+      confirmationMessage.append(h1);
+
+      if (origins.length > 0) {
+        const p = document.createElement('p');
+        p.textContent = `This resource is used on the following ${origins.length === 1 ? 'origin' : 'origins'}:`;
+        const ul = document.createElement('ul');
+        for (const origin of origins) {
+          const li = document.createElement('li');
+          li.textContent = origin;
+          ul.append(li);
+        }
+        confirmationMessage.append(p, ul);
+      } else {
+        const p = document.createElement('p');
+        p.textContent = 'No origins on record.';
+        confirmationMessage.append(p);
+      }
+
+      const hashLine = document.createElement('p');
+      const code = document.createElement('code');
+      code.textContent = `${hash.slice(0, 8)}…`;
+      const copyBtn = document.createElement('button');
+      copyBtn.type = 'button';
+      copyBtn.textContent = 'Copy hash';
+      copyBtn.className = 'copy-btn';
+      copyBtn.addEventListener('click', async () => {
+        await navigator.clipboard.writeText(hash);
+        showToast('Hash copied to clipboard.');
+      });
+      hashLine.append('Hash: ', code, ' ', copyBtn);
+      confirmationMessage.append(hashLine);
+
+      dialogConfirmBtn.textContent = 'Delete';
+
+      const closeListener = () => {
+        confirmationDialog.removeEventListener('close', closeListener);
+        resolve(confirmationDialog.returnValue === 'confirm');
+      };
+      confirmationDialog.addEventListener('close', closeListener);
+      confirmationDialog.showModal();
+    });
+  }
+
   /**
    * Formats bytes into a human-readable string (KB, MB, GB, etc.).
    * @param {number} bytes The number of bytes.
    * @param {number} [decimals=2] The number of decimal places.
    * @returns {string} The formatted file size.
    */
+  function formatTimestamp(tsString) {
+    return new Date(tsString).toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+  }
+
   function formatBytes(bytes, decimals = 2) {
     if (bytes === 0) return '0 Bytes';
     if (bytes === undefined || bytes === null) return '';
@@ -142,15 +269,194 @@ async function initializePopup() {
     }
   }
 
+  async function getResourcesWithMetadata(hashes) {
+    return Promise.all(
+      hashes.map(async (hash) => {
+        let size = resourceManager.getSizeByHash(hash);
+        let mimeType = resourceManager.getMimeTypeByHash(hash);
+        if (size === undefined || mimeType === undefined) {
+          const response = await chrome.runtime.sendMessage({
+            action: 'getResourceMetadata',
+            target: 'offscreen-doc',
+            data: { hash },
+          });
+          size = response.data.size ?? size;
+          mimeType = response.data.mimeType ?? mimeType;
+          if (response.data.size !== undefined)
+            resourceManager.recordSize(hash, size);
+          if (response.data.mimeType !== undefined)
+            resourceManager.recordMimeType(hash, mimeType);
+        }
+        return { hash, size, mimeType };
+      }),
+    );
+  }
+
+  async function deleteHashesFromStorage(hashes) {
+    for (const hash of hashes) {
+      await new Promise((resolve) => {
+        chrome.runtime.sendMessage(
+          {
+            action: 'deleteResource',
+            target: 'offscreen-doc',
+            data: { hash },
+          },
+          resolve,
+        );
+      });
+    }
+    await resourceManager.deleteResourcesByHash(hashes);
+    await refreshUI();
+  }
+
+  function buildResourceItem(hash, size, mimeType, selectedOrigin, resourceName) {
+    const typeStr = (mimeType || 'unknown type').split(';')[0];
+    const label = resourceName
+      ? `${resourceName} (${typeStr}) - ${formatBytes(size)}`
+      : `${typeStr} — ${formatBytes(size)}`;
+
+    const li = document.createElement('li');
+    li.className = 'resource-item';
+    li.title = `Hash: ${hash}`;
+
+    const textContent = document.createElement('div');
+    textContent.className = 'resource-text';
+
+    const hashDiv = document.createElement('div');
+    hashDiv.className = 'hash-value';
+    hashDiv.textContent = label;
+    textContent.append(hashDiv);
+
+    if (selectedOrigin) {
+      const history = resourceManager.getAccessHistory(selectedOrigin, hash);
+      if (history.length > 0) {
+        const accessDetails = document.createElement('details');
+        accessDetails.className = 'access-times-details';
+        const accessSummary = document.createElement('summary');
+        const n = history.length;
+        accessSummary.textContent = `Accessed ${n} time${n !== 1 ? 's' : ''}`;
+        const timesUl = document.createElement('ul');
+        timesUl.className = 'access-times';
+        history.forEach((tsString) => {
+          const timeLi = document.createElement('li');
+          timeLi.textContent = `${formatTimestamp(tsString)} — ${selectedOrigin}`;
+          timesUl.append(timeLi);
+        });
+        accessDetails.append(accessSummary, timesUl);
+        textContent.append(accessDetails);
+      }
+    }
+
+    const allOrigins = resourceManager.getOriginsByHash(hash);
+    const displayOrigins = selectedOrigin
+      ? allOrigins.filter((o) => o !== selectedOrigin)
+      : allOrigins;
+    if (allOrigins.length === 0) {
+      const note = document.createElement('p');
+      note.className = 'never-accessed-note';
+      note.textContent = 'Manually added — no access recorded yet.';
+      textContent.append(note);
+    } else if (displayOrigins.length > 0) {
+      const n = displayOrigins.length;
+      const details = document.createElement('details');
+      details.className = 'other-origins-details';
+      const summary = document.createElement('summary');
+      summary.textContent = selectedOrigin
+        ? `Also used on ${n} other origin${n !== 1 ? 's' : ''}`
+        : `Used on ${n} origin${n !== 1 ? 's' : ''}`;
+      const originUl = document.createElement('ul');
+      for (const origin of displayOrigins) {
+        const originLi = document.createElement('li');
+        const originBtn = document.createElement('button');
+        originBtn.type = 'button';
+        originBtn.className = 'origin-link-btn';
+        originBtn.textContent = origin;
+        originBtn.addEventListener('click', () => {
+          originSelect.value = origin;
+          updateHashesDisplay();
+        });
+        originLi.append(originBtn);
+        const originHistory = resourceManager.getAccessHistory(origin, hash);
+        if (originHistory.length > 0) {
+          const tsList = document.createElement('ul');
+          tsList.className = 'access-times';
+          for (const tsString of originHistory) {
+            const tsLi = document.createElement('li');
+            tsLi.textContent = formatTimestamp(tsString);
+            tsList.append(tsLi);
+          }
+          originLi.append(tsList);
+        }
+        originUl.append(originLi);
+      }
+      details.append(summary, originUl);
+      textContent.append(details);
+    }
+
+    const copyBtn = document.createElement('button');
+    copyBtn.textContent = 'Copy hash';
+    copyBtn.className = 'copy-btn';
+    copyBtn.title = 'Copy SHA-256 hash to clipboard';
+    copyBtn.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(hash);
+      showToast('Hash copied to clipboard.');
+    });
+
+    const saveBtn = document.createElement('button');
+    saveBtn.textContent = 'Save';
+    saveBtn.className = 'save-btn';
+    saveBtn.title = 'Save resource to disk';
+    saveBtn.addEventListener('click', () => saveResourceToFile(hash));
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.className = 'delete-btn';
+    deleteBtn.title = 'Delete resource';
+    deleteBtn.addEventListener('click', async () => {
+      const confirmed = await showSingleDeleteDialog(
+        label,
+        hash,
+        resourceManager.getOriginsByHash(hash),
+      );
+      if (confirmed) {
+        chrome.runtime.sendMessage(
+          { action: 'deleteResource', target: 'offscreen-doc', data: { hash } },
+          async (response) => {
+            if (!response.data.success) {
+              console.error(`Deleting resource with hash ${hash} failed.`);
+              return;
+            }
+            await resourceManager.deleteResourcesByHash(hash);
+            await refreshUI();
+          },
+        );
+      }
+    });
+
+    const btnGroup = document.createElement('div');
+    btnGroup.className = 'item-actions';
+    btnGroup.append(copyBtn, saveBtn, deleteBtn);
+
+    li.append(textContent, btnGroup);
+    return li;
+  }
+
   /**
    * Updates the list of hashes based on the selected origin.
    */
   async function updateHashesDisplay() {
     const selectedOrigin = originSelect.value;
+    const isAllOrigins = selectedOrigin === '*';
+    deleteExclusiveBtn.disabled = !selectedOrigin || isAllOrigins;
+    deleteOriginBtn.disabled = !selectedOrigin || isAllOrigins;
     hashesList.innerHTML = '';
     if (!selectedOrigin) return;
 
-    const hashes = resourceManager.getHashesByOrigin(selectedOrigin);
+    const hashes = isAllOrigins
+      ? resourceManager.getAllHashes().filter(
+          (h) => resourceManager.getOriginsByHash(h).length > 0,
+        )
+      : resourceManager.getHashesByOrigin(selectedOrigin);
 
     // Create an array of objects with hash and size to facilitate sorting.
     const resourcesWithSize = await Promise.all(
@@ -176,165 +482,193 @@ async function initializePopup() {
       })
     );
 
-    // Sort resources by size in descending order.
-    resourcesWithSize.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
-
-    for (const [
-      index,
-      { hash, size, mimeType },
-    ] of resourcesWithSize.entries()) {
-      const history = resourceManager.getAccessHistory(selectedOrigin, hash);
-      const resourceName = `Resource #${index + 1}`;
-
-      const li = document.createElement('li');
-      li.className = 'resource-item';
-      li.title = `Hash: ${hash}`;
-
-      const copyBtn = document.createElement('button');
-      copyBtn.textContent = 'Copy hash';
-      copyBtn.className = 'copy-btn';
-      copyBtn.title = `Copy SHA-256 hash to clipboard`;
-      copyBtn.addEventListener('click', async () => {
-        await navigator.clipboard.writeText(hash);
-        showToast('Hash copied to clipboard.');
-      });
-
-      const deleteBtn = document.createElement('button');
-      deleteBtn.textContent = 'Delete';
-      deleteBtn.className = 'delete-btn';
-      deleteBtn.title = `Delete ${resourceName}`;
-      deleteBtn.addEventListener('click', async () => {
-        const originsUsingResource = resourceManager.getOriginsByHash(hash);
-        const message = `<h1>Are you sure you want to delete ${resourceName}?</h1><p>It's used by the following origins:<ul><li>${originsUsingResource.join('</li><li>')}</li></ul><p>Hash: <code>${hash}</code></p>`;
-
-        const confirmed = await showConfirmationDialog(message, 'Delete');
-        if (confirmed) {
-          chrome.runtime.sendMessage(
-            {
-              action: 'deleteResource',
-              target: 'offscreen-doc',
-              data: {
-                hash,
-              },
-            },
-            async (response) => {
-              if (!response.data.success) {
-                console.error(`Deleting resource with hash ${hash} failed.`);
-                return;
-              }
-              await resourceManager.deleteResourcesByHash(hash);
-              await refreshUI(); // Refresh the entire UI after deletion
-            }
-          );
-        }
-      });
-      const saveBtn = document.createElement('button');
-      saveBtn.textContent = 'Save';
-      saveBtn.className = 'save-btn';
-      saveBtn.title = 'Save resource to disk';
-      saveBtn.addEventListener('click', () => saveResourceToFile(hash));
-
-      const btnGroup = document.createElement('div');
-      btnGroup.className = 'item-actions';
-      btnGroup.append(copyBtn);
-      btnGroup.append(saveBtn);
-      btnGroup.append(deleteBtn);
-
-      const textContent = document.createElement('div');
-      textContent.className = 'resource-text';
-
-      const hashDiv = document.createElement('div');
-      hashDiv.className = 'hash-value';
-      hashDiv.textContent = `${resourceName} (${
-        (mimeType || 'unknown type').split(';')[0]
-      }) - ${formatBytes(size)}`;
-      textContent.append(hashDiv);
-
-      if (history.length > 0) {
-        const timesUl = document.createElement('ul');
-        timesUl.className = 'access-times';
-        history.forEach((tsString) => {
-          const timestamp = new Date(tsString);
-          const timeLi = document.createElement('li');
-          timeLi.textContent = `Accessed on: ${timestamp.toLocaleString(
-            'en-US',
-            {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit',
-              hour12: false,
-            }
-          )}`;
-          timesUl.append(timeLi);
-        });
-        textContent.append(timesUl);
-      }
-
-      li.append(textContent);
-      li.append(btnGroup);
-      hashesList.append(li);
-    }
-  }
-
-  /**
-   * Updates the list of origins based on the selected hash.
-   */
-  function updateOriginsDisplay() {
-    const selectedHash = hashSelect.value;
-    originsList.innerHTML = '';
-    const hasSelection = !!selectedHash;
-    hashCopyBtn.disabled = !hasSelection;
-    hashSaveBtn.disabled = !hasSelection;
-    hashDeleteBtn.disabled = !hasSelection;
-    if (!selectedHash) return;
-
-    const origins = resourceManager.getOriginsByHash(selectedHash);
-    origins.forEach((origin) => {
-      const li = document.createElement('li');
-      li.textContent = origin;
-      originsList.append(li);
-    });
-  }
-
-  hashCopyBtn.addEventListener('click', async () => {
-    await navigator.clipboard.writeText(hashSelect.value);
-    showToast('Hash copied to clipboard.');
-  });
-
-  hashSaveBtn.addEventListener('click', () =>
-    saveResourceToFile(hashSelect.value)
-  );
-
-  hashDeleteBtn.addEventListener('click', async () => {
-    const hash = hashSelect.value;
-    if (!hash) return;
-    const resourceName =
-      hashSelect.options[hashSelect.selectedIndex]?.text ?? 'this resource';
-    const originsUsingResource = resourceManager.getOriginsByHash(hash);
-    const originList =
-      originsUsingResource.length > 0
-        ? `<ul><li>${originsUsingResource.join('</li><li>')}</li></ul>`
-        : '<p>No origins on record.</p>';
-    const message = `<h1>Are you sure you want to delete ${resourceName}?</h1>${originList}<p>Hash: <code>${hash}</code></p>`;
-
-    const confirmed = await showConfirmationDialog(message, 'Delete');
-    if (confirmed) {
-      chrome.runtime.sendMessage(
-        { action: 'deleteResource', target: 'offscreen-doc', data: { hash } },
-        async (response) => {
-          if (!response.data.success) {
-            console.error(`Deleting resource with hash ${hash} failed.`);
-            return;
+    const getAccessData = (hash) => {
+      if (isAllOrigins) {
+        let mostRecent = null;
+        let totalCount = 0;
+        for (const origin of resourceManager.getOriginsByHash(hash)) {
+          const history = resourceManager.getAccessHistory(origin, hash);
+          totalCount += history.length;
+          if (history.length > 0) {
+            const ts = new Date(history[0]).getTime();
+            if (mostRecent === null || ts > mostRecent) mostRecent = ts;
           }
-          await resourceManager.deleteResourcesByHash(hash);
-          await refreshUI();
         }
+        return { mostRecent, totalCount };
+      }
+      const history = resourceManager.getAccessHistory(selectedOrigin, hash);
+      return {
+        mostRecent: history.length > 0 ? new Date(history[0]).getTime() : null,
+        totalCount: history.length,
+      };
+    };
+
+    switch (sortSelect.value) {
+      case 'size-asc':
+        resourcesWithSize.sort((a, b) => (a.size ?? 0) - (b.size ?? 0));
+        break;
+      case 'origins-desc':
+        resourcesWithSize.sort(
+          (a, b) =>
+            resourceManager.getOriginsByHash(b.hash).length -
+            resourceManager.getOriginsByHash(a.hash).length,
+        );
+        break;
+      case 'origins-asc':
+        resourcesWithSize.sort(
+          (a, b) =>
+            resourceManager.getOriginsByHash(a.hash).length -
+            resourceManager.getOriginsByHash(b.hash).length,
+        );
+        break;
+      case 'recent-desc':
+        resourcesWithSize.sort(
+          (a, b) =>
+            (getAccessData(b.hash).mostRecent ?? 0) -
+            (getAccessData(a.hash).mostRecent ?? 0),
+        );
+        break;
+      case 'recent-asc':
+        resourcesWithSize.sort(
+          (a, b) =>
+            (getAccessData(a.hash).mostRecent ?? Infinity) -
+            (getAccessData(b.hash).mostRecent ?? Infinity),
+        );
+        break;
+      case 'freq-desc':
+        resourcesWithSize.sort(
+          (a, b) =>
+            getAccessData(b.hash).totalCount - getAccessData(a.hash).totalCount,
+        );
+        break;
+      case 'freq-asc':
+        resourcesWithSize.sort(
+          (a, b) =>
+            getAccessData(a.hash).totalCount - getAccessData(b.hash).totalCount,
+        );
+        break;
+      default: // 'size-desc'
+        resourcesWithSize.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
+    }
+
+    for (const [index, { hash, size, mimeType }] of resourcesWithSize.entries()) {
+      hashesList.append(
+        buildResourceItem(
+          hash,
+          size,
+          mimeType,
+          isAllOrigins ? null : selectedOrigin,
+          `Resource #${index + 1}`,
+        ),
       );
     }
+  }
+
+  async function updateOriginsDisplay() {
+    const selectedHash = hashSelect.value;
+    originsList.innerHTML = '';
+    if (!selectedHash) return;
+
+    let size = resourceManager.getSizeByHash(selectedHash);
+    let mimeType = resourceManager.getMimeTypeByHash(selectedHash);
+    if (size === undefined || mimeType === undefined) {
+      const response = await chrome.runtime.sendMessage({
+        action: 'getResourceMetadata',
+        target: 'offscreen-doc',
+        data: { hash: selectedHash },
+      });
+      size = response.data.size ?? size;
+      mimeType = response.data.mimeType ?? mimeType;
+      if (response.data.size !== undefined)
+        resourceManager.recordSize(selectedHash, size);
+      if (response.data.mimeType !== undefined)
+        resourceManager.recordMimeType(selectedHash, mimeType);
+    }
+
+    originsList.append(buildResourceItem(selectedHash, size, mimeType, null, null));
+  }
+
+  deleteExclusiveBtn.addEventListener('click', async () => {
+    const selectedOrigin = originSelect.value;
+    if (!selectedOrigin) return;
+
+    const allHashes = resourceManager.getHashesByOrigin(selectedOrigin);
+    const exclusiveHashes = allHashes.filter(
+      (h) => resourceManager.getOriginsByHash(h).length === 1,
+    );
+
+    if (exclusiveHashes.length === 0) {
+      showToast('No resources are exclusively used by this origin.');
+      return;
+    }
+
+    const resourcesData = await getResourcesWithMetadata(exclusiveHashes);
+    resourcesData.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
+
+    const items = resourcesData.map(({ hash, size, mimeType }) => ({
+      value: hash,
+      label: `${(mimeType || 'unknown type').split(';')[0]} — ${formatBytes(size)} (${hash.slice(0, 8)}…)`,
+    }));
+
+    const hashesToDelete = await showChecklistDialog(
+      `Delete exclusive resources for ${selectedOrigin}?`,
+      'Uncheck resources you want to keep.',
+      items,
+      'Delete Selected',
+    );
+
+    if (!hashesToDelete || hashesToDelete.length === 0) {
+      if (hashesToDelete !== null) showToast('No resources selected for deletion.');
+      return;
+    }
+
+    await deleteHashesFromStorage(hashesToDelete);
+    showToast(
+      `${hashesToDelete.length} resource${hashesToDelete.length !== 1 ? 's' : ''} deleted.`,
+    );
+  });
+
+  deleteOriginBtn.addEventListener('click', async () => {
+    const selectedOrigin = originSelect.value;
+    if (!selectedOrigin) return;
+
+    const allHashes = resourceManager.getHashesByOrigin(selectedOrigin);
+    if (allHashes.length === 0) {
+      showToast('No resources for this origin.');
+      return;
+    }
+
+    const resourcesData = await getResourcesWithMetadata(allHashes);
+    resourcesData.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
+
+    const items = resourcesData.map(({ hash, size, mimeType }) => {
+      const otherOrigins = resourceManager
+        .getOriginsByHash(hash)
+        .filter((o) => o !== selectedOrigin);
+      const label = `${(mimeType || 'unknown type').split(';')[0]} — ${formatBytes(size)} (${hash.slice(0, 8)}…)`;
+      const sublabel =
+        otherOrigins.length > 0
+          ? `Also used by: ${otherOrigins.join(', ')}`
+          : 'Only used by this origin';
+      return { value: hash, label, sublabel };
+    });
+
+    const hashesToDelete = await showChecklistDialog(
+      `Delete resources for ${selectedOrigin}?`,
+      'Uncheck resources you want to keep.',
+      items,
+      'Delete Selected',
+    );
+
+    if (!hashesToDelete || hashesToDelete.length === 0) {
+      if (hashesToDelete !== null) showToast('No resources selected for deletion.');
+      return;
+    }
+
+    await deleteHashesFromStorage(hashesToDelete);
+    showToast(
+      `${hashesToDelete.length} resource${hashesToDelete.length !== 1 ? 's' : ''} deleted.`,
+    );
   });
 
   /**
@@ -361,6 +695,8 @@ async function initializePopup() {
     if (allOrigins.length === 0) {
       originSelect.add(new Option('No origins found', ''));
     } else {
+      originSelect.add(new Option('All origins', '*'));
+      originSelect.appendChild(document.createElement('hr'));
       allOrigins.forEach((origin) => {
         originSelect.add(new Option(origin, origin));
         if (origin === currentOrigin) {
@@ -423,7 +759,35 @@ async function initializePopup() {
 
     // Redraw the lists.
     updateHashesDisplay();
-    updateOriginsDisplay();
+    await updateOriginsDisplay();
+    await updateHashSearch();
+  }
+
+  async function updateHashSearch() {
+    const query = hashSearch.value.trim().toLowerCase();
+    hashSearchResult.innerHTML = '';
+    if (!query) return;
+
+    const matches = resourceManager.getAllHashes().filter((h) =>
+      h.startsWith(query),
+    );
+
+    if (matches.length === 0) {
+      const p = document.createElement('p');
+      p.className = 'search-no-result';
+      p.textContent = 'No resource found.';
+      hashSearchResult.append(p);
+      return;
+    }
+
+    const resourcesData = await getResourcesWithMetadata(matches);
+    resourcesData.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
+
+    const ul = document.createElement('ul');
+    for (const { hash, size, mimeType } of resourcesData) {
+      ul.append(buildResourceItem(hash, size, mimeType, null, null));
+    }
+    hashSearchResult.append(ul);
   }
 
   async function addResourcesFromFiles() {
@@ -520,7 +884,9 @@ async function initializePopup() {
   pickFileBtn.addEventListener('click', addResourcesFromFiles);
 
   originSelect.addEventListener('change', () => updateHashesDisplay());
+  sortSelect.addEventListener('change', () => updateHashesDisplay());
   hashSelect.addEventListener('change', updateOriginsDisplay);
+  hashSearch.addEventListener('input', updateHashSearch);
 
   deleteAllBtn.addEventListener('click', async () => {
     const allHashes = resourceManager.getAllHashes();
