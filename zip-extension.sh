@@ -25,6 +25,7 @@ FILES_TO_ZIP=(
   "content.js"
   "background.js"
   "sha256.js"
+  "rules.json"
 )
 
 # Check if an old zip file exists and remove it.
