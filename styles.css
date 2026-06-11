@@ -129,7 +129,6 @@ ul {
   margin: 0;
 }
 
-
 button {
   cursor: pointer;
   padding: 0.6em 1.2em;
@@ -268,15 +267,24 @@ button {
 }
 
 .mime-chart-heading {
+  grid-column: 1 / -1;
   font-size: 0.85em;
   font-weight: 600;
   color: light-dark(#444, #ddd);
-  margin: 0 0 0.6em;
+  margin: 1.2em 0 0.2em;
+  padding-top: 1em;
+  border-top: 1px solid light-dark(#e0e0e0, #333);
+}
+
+.mime-chart-heading:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
 }
 
 .mime-chart {
   display: grid;
-  grid-template-columns: minmax(0, 16ch) 1fr auto;
+  grid-template-columns: max-content 1fr max-content;
   gap: 0.3em 0.75em;
   align-items: center;
 }
@@ -309,6 +317,16 @@ button {
   white-space: nowrap;
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.mime-bar-header {
+  font-size: 0.75em;
+  color: light-dark(#999, #888);
+  white-space: nowrap;
+  text-align: right;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
 .text-btn {
@@ -351,7 +369,6 @@ button {
   font-size: 0.9em;
   color: light-dark(#888, #aaa);
 }
-
 
 .add-resource-panel {
   margin-top: 2em;

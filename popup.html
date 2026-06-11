@@ -71,8 +71,10 @@
 
     <div class="panel search-panel">
       <h2>Search for Resource</h2>
-      <p>Paste a SHA-256 hash to look up a resource and its access statistics.</p>
-      <input type="search" id="hash-search" placeholder="SHA-256 hash…">
+      <p>
+        Paste a SHA-256 hash to look up a resource and its access statistics.
+      </p>
+      <input type="search" id="hash-search" placeholder="SHA-256 hash…" />
       <div id="hash-search-result"></div>
     </div>
 
@@ -81,17 +83,8 @@
       <dl id="stats-dl" class="stats-dl"></dl>
       <button id="reset-stats-btn" class="text-btn">Reset statistics</button>
       <dl id="stats-dl-static" class="stats-dl stats-dl-static"></dl>
-      <div id="mime-chart-section" class="mime-chart-section" hidden>
-        <p class="mime-chart-heading">By MIME type</p>
-        <div id="mime-chart" class="mime-chart"></div>
-      </div>
-      <div id="size-chart-section" class="mime-chart-section" hidden>
-        <p class="mime-chart-heading">By size bucket</p>
-        <div id="size-chart" class="mime-chart"></div>
-      </div>
-      <div id="sharing-chart-section" class="mime-chart-section" hidden>
-        <p class="mime-chart-heading">By sharing factor (origins per resource)</p>
-        <div id="sharing-chart" class="mime-chart"></div>
+      <div id="charts-section" class="mime-chart-section" hidden>
+        <div id="charts-grid" class="mime-chart"></div>
       </div>
     </div>
 

@@ -188,7 +188,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 const fontBlob = await fontResp.blob();
                 const mimeType =
                   fontResp.headers.get('content-type') || 'font/woff2';
-                await storeFileData(hash, fontBlob, { 'content-type': mimeType });
+                await storeFileData(hash, fontBlob, {
+                  'content-type': mimeType,
+                });
                 resourceManager.recordSize(hash.value, fontBlob.size);
                 resourceManager.recordMimeType(hash.value, mimeType);
                 blobURL = await getFileData(hash);
@@ -225,30 +227,53 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             responseData = { error: 'Resource not found in cache' };
             break;
           }
-          const mimeType = (match.headers.get('content-type') || 'application/octet-stream')
-            .split(';')[0].trim();
+          const mimeType = (
+            match.headers.get('content-type') || 'application/octet-stream'
+          )
+            .split(';')[0]
+            .trim();
           const size = resourceManager.getSizeByHash(hash);
           const isText =
             mimeType.startsWith('text/') ||
-            ['application/javascript', 'application/json', 'application/xml',
-             'application/xhtml+xml'].includes(mimeType);
+            [
+              'application/javascript',
+              'application/json',
+              'application/xml',
+              'application/xhtml+xml',
+            ].includes(mimeType);
           const origins = resourceManager.getOriginsByHash(hash);
           const accessHistory = {};
           for (const origin of origins) {
-            accessHistory[origin] = resourceManager.accessHistory[`${origin}|${hash}`] || [];
+            accessHistory[origin] =
+              resourceManager.accessHistory[`${origin}|${hash}`] || [];
           }
           if (isText) {
             const text = await match.text();
-            responseData = { mimeType, text, size: size ?? null, origins, accessHistory };
+            responseData = {
+              mimeType,
+              text,
+              size: size ?? null,
+              origins,
+              accessHistory,
+            };
           } else {
             const ab = await match.arrayBuffer();
             const bytes = new Uint8Array(ab);
             const CHUNK = 0x8000;
             let binary = '';
             for (let i = 0; i < bytes.length; i += CHUNK) {
-              binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+              binary += String.fromCharCode.apply(
+                null,
+                bytes.subarray(i, i + CHUNK)
+              );
             }
-            responseData = { mimeType, dataURL: `data:${mimeType};base64,${btoa(binary)}`, size: size ?? ab.byteLength, origins, accessHistory };
+            responseData = {
+              mimeType,
+              dataURL: `data:${mimeType};base64,${btoa(binary)}`,
+              size: size ?? ab.byteLength,
+              origins,
+              accessHistory,
+            };
           }
           break;
         }
@@ -287,9 +312,19 @@ function findCOSMatches(cssText) {
     /url\s*\(\s*["']([^"']+)["']\s+cross-origin-storage\s*\(\s*([^)]*?)\s*\)\s+integrity\s*\(\s*["'](sha(?:256|384|512)-[A-Za-z0-9+/=]+)["']\s*\)\s*\)/g;
   let m;
   while ((m = RE_INT_FIRST.exec(cssText)) !== null)
-    matches.push({ full: m[0], fontUrl: m[1], sriHash: m[2], originsStr: m[3] });
+    matches.push({
+      full: m[0],
+      fontUrl: m[1],
+      sriHash: m[2],
+      originsStr: m[3],
+    });
   while ((m = RE_COS_FIRST.exec(cssText)) !== null)
-    matches.push({ full: m[0], fontUrl: m[1], sriHash: m[3], originsStr: m[2] });
+    matches.push({
+      full: m[0],
+      fontUrl: m[1],
+      sriHash: m[3],
+      originsStr: m[2],
+    });
   return matches;
 }
 
@@ -306,7 +341,6 @@ function sriToHashObj(sriHash) {
     hex += binary.charCodeAt(i).toString(16).padStart(2, '0');
   return { algorithm, value: hex };
 }
-
 
 async function storeFileData(hash, blob, mimeType) {
   const key = generateCacheKey(hash);

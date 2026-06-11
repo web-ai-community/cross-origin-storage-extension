@@ -138,21 +138,30 @@ async function renderFont(container, dataURL) {
   }
 
   // Large display: first covered chars across all groups
-  const displayChars = groups.flatMap((g) => g.covered).slice(0, 14).join('');
+  const displayChars = groups
+    .flatMap((g) => g.covered)
+    .slice(0, 14)
+    .join('');
   container.append(sampleRow(48, displayChars, ''));
 
   if (hasLatin) {
-    container.append(sampleRow(28, 'The quick brown fox jumps over the lazy dog', ''));
+    container.append(
+      sampleRow(28, 'The quick brown fox jumps over the lazy dog', '')
+    );
     container.append(sampleRow(20, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'Uppercase'));
     container.append(sampleRow(20, 'abcdefghijklmnopqrstuvwxyz', 'Lowercase'));
   }
   if (digitsGroup) {
-    container.append(sampleRow(20, digitsGroup.covered.join(''), 'Digits & Symbols'));
+    container.append(
+      sampleRow(20, digitsGroup.covered.join(''), 'Digits & Symbols')
+    );
   }
   for (const g of groups) {
     if (g.name === 'Basic Latin' || g.name === 'Digits & Symbols') continue;
     const dir = ['Arabic', 'Hebrew'].includes(g.name) ? 'rtl' : undefined;
-    container.append(sampleRow(24, g.covered.slice(0, 40).join(''), g.name, dir));
+    container.append(
+      sampleRow(24, g.covered.slice(0, 40).join(''), g.name, dir)
+    );
   }
 }
 
@@ -176,7 +185,10 @@ function formatBytes(bytes) {
   if (!bytes) return '';
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
+  const i = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(k)),
+    sizes.length - 1
+  );
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 }
 
@@ -292,7 +304,9 @@ function showToast(message) {
 
 async function saveResource(hash, mimeType) {
   const cosCache = await caches.open('cos-storage');
-  const response = await cosCache.match(`https://cos.example.com/SHA-256_${hash}`);
+  const response = await cosCache.match(
+    `https://cos.example.com/SHA-256_${hash}`
+  );
   if (!response) {
     showToast('Resource not found in cache.');
     return;
@@ -301,7 +315,9 @@ async function saveResource(hash, mimeType) {
   const ext = getExtensionFromMimeType(mimeType);
   const pickerOpts = { suggestedName: `resource-${hash.slice(0, 8)}${ext}` };
   if (ext) {
-    pickerOpts.types = [{ description: 'Resource file', accept: { [mimeType]: [ext] } }];
+    pickerOpts.types = [
+      { description: 'Resource file', accept: { [mimeType]: [ext] } },
+    ];
   }
   try {
     const fileHandle = await showSaveFilePicker(pickerOpts);
@@ -310,7 +326,8 @@ async function saveResource(hash, mimeType) {
     await writable.close();
     showToast('Resource saved to disk.');
   } catch (err) {
-    if (err.name !== 'AbortError') showToast(`Error saving file: ${err.message}`);
+    if (err.name !== 'AbortError')
+      showToast(`Error saving file: ${err.message}`);
   }
 }
 
@@ -346,7 +363,14 @@ async function saveResource(hash, mimeType) {
     return;
   }
 
-  const { mimeType, text, dataURL, size, origins = [], accessHistory = {} } = result.data;
+  const {
+    mimeType,
+    text,
+    dataURL,
+    size,
+    origins = [],
+    accessHistory = {},
+  } = result.data;
 
   document.title = `COS Viewer — ${mimeType || 'unknown'} (${hash.slice(0, 8)}…)`;
   loading.hidden = true;
@@ -379,7 +403,8 @@ async function saveResource(hash, mimeType) {
     if (resp?.data?.success) {
       showToast('Resource deleted.');
       [copyBtn, saveBtn, deleteBtn].forEach((b) => (b.disabled = true));
-      contentArea.innerHTML = '<p class="empty-state">This resource has been deleted.</p>';
+      contentArea.innerHTML =
+        '<p class="empty-state">This resource has been deleted.</p>';
     } else {
       showToast('Delete failed.');
     }

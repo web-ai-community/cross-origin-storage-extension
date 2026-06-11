@@ -103,7 +103,10 @@ class ResourceManager {
   }
 
   getStats() {
-    const totalHits = Object.values(this.hashToHitCount).reduce((s, n) => s + n, 0);
+    const totalHits = Object.values(this.hashToHitCount).reduce(
+      (s, n) => s + n,
+      0
+    );
     const totalMisses = this.totalMissCount;
     const totalRequests = totalHits + totalMisses;
 
@@ -118,7 +121,10 @@ class ResourceManager {
       if (n > 1) deduplicationSavings += (n - 1) * size;
     }
 
-    const totalStorage = Object.values(this.hashToSize).reduce((s, n) => s + n, 0);
+    const totalStorage = Object.values(this.hashToSize).reduce(
+      (s, n) => s + n,
+      0
+    );
 
     return {
       totalHits,

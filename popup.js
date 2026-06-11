@@ -27,12 +27,8 @@ async function initializePopup() {
   const statsDl = document.getElementById('stats-dl');
   const statsDlStatic = document.getElementById('stats-dl-static');
   const resetStatsBtn = document.getElementById('reset-stats-btn');
-  const mimeChart = document.getElementById('mime-chart');
-  const mimeChartSection = document.getElementById('mime-chart-section');
-  const sizeChart = document.getElementById('size-chart');
-  const sizeChartSection = document.getElementById('size-chart-section');
-  const sharingChart = document.getElementById('sharing-chart');
-  const sharingChartSection = document.getElementById('sharing-chart-section');
+  const chartsGrid = document.getElementById('charts-grid');
+  const chartsSection = document.getElementById('charts-section');
 
   let selectHighlightTimer;
   let toastTimer;
@@ -66,7 +62,12 @@ async function initializePopup() {
     });
   }
 
-  function showChecklistDialog(title, subtitle, items, confirmText = 'Delete Selected') {
+  function showChecklistDialog(
+    title,
+    subtitle,
+    items,
+    confirmText = 'Delete Selected'
+  ) {
     return new Promise((resolve) => {
       confirmationMessage.innerHTML = '';
 
@@ -119,7 +120,7 @@ async function initializePopup() {
         }
         const checked = [
           ...confirmationMessage.querySelectorAll(
-            'input[type="checkbox"]:checked',
+            'input[type="checkbox"]:checked'
           ),
         ].map((cb) => cb.value);
         resolve(checked);
@@ -208,6 +209,15 @@ async function initializePopup() {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
 
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+  }
+
+  // Decimal (SI) byte formatter for bucket boundary labels — keeps powers of 10
+  // as round numbers (e.g. 1 000 bytes → "1 kB", not "976.56 KB").
+  function formatBytesDecimal(bytes) {
+    if (bytes < 1_000) return `${bytes} B`;
+    if (bytes < 1_000_000) return `${bytes / 1_000} kB`;
+    if (bytes < 1_000_000_000) return `${bytes / 1_000_000} MB`;
+    return `${bytes / 1_000_000_000} GB`;
   }
 
   /**
@@ -318,7 +328,7 @@ async function initializePopup() {
             resourceManager.recordMimeType(hash, mimeType);
         }
         return { hash, size, mimeType };
-      }),
+      })
     );
   }
 
@@ -331,7 +341,7 @@ async function initializePopup() {
             target: 'offscreen-doc',
             data: { hash },
           },
-          resolve,
+          resolve
         );
       });
     }
@@ -339,7 +349,13 @@ async function initializePopup() {
     await refreshUI();
   }
 
-  function buildResourceItem(hash, size, mimeType, selectedOrigin, resourceName) {
+  function buildResourceItem(
+    hash,
+    size,
+    mimeType,
+    selectedOrigin,
+    resourceName
+  ) {
     const typeStr = (mimeType || 'unknown type').split(';')[0];
     const label = resourceName
       ? `${resourceName} (${typeStr}) - ${formatBytes(size)}`
@@ -375,10 +391,16 @@ async function initializePopup() {
           originBtn.textContent = selectedOrigin;
           originBtn.addEventListener('click', () => {
             originSelect.value = selectedOrigin;
-            originSelect.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            originSelect.scrollIntoView({
+              behavior: 'smooth',
+              block: 'nearest',
+            });
             originSelect.classList.add('select-highlight');
             clearTimeout(selectHighlightTimer);
-            selectHighlightTimer = setTimeout(() => originSelect.classList.remove('select-highlight'), 2000);
+            selectHighlightTimer = setTimeout(
+              () => originSelect.classList.remove('select-highlight'),
+              2000
+            );
             updateHashesDisplay();
           });
           timeLi.append(`${formatTimestamp(tsString)} — `, originBtn);
@@ -418,7 +440,10 @@ async function initializePopup() {
           originSelect.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
           originSelect.classList.add('select-highlight');
           clearTimeout(selectHighlightTimer);
-          selectHighlightTimer = setTimeout(() => originSelect.classList.remove('select-highlight'), 2000);
+          selectHighlightTimer = setTimeout(
+            () => originSelect.classList.remove('select-highlight'),
+            2000
+          );
           updateHashesDisplay();
         });
         originLi.append(originBtn);
@@ -462,7 +487,7 @@ async function initializePopup() {
       const confirmed = await showSingleDeleteDialog(
         label,
         hash,
-        resourceManager.getOriginsByHash(hash),
+        resourceManager.getOriginsByHash(hash)
       );
       if (confirmed) {
         chrome.runtime.sendMessage(
@@ -474,7 +499,7 @@ async function initializePopup() {
             }
             await resourceManager.deleteResourcesByHash(hash);
             await refreshUI();
-          },
+          }
         );
       }
     });
@@ -488,7 +513,9 @@ async function initializePopup() {
       viewBtn.className = 'view-btn';
       viewBtn.title = 'View resource in new tab';
       viewBtn.addEventListener('click', () => {
-        chrome.tabs.create({ url: chrome.runtime.getURL(`viewer.html?hash=${hash}`) });
+        chrome.tabs.create({
+          url: chrome.runtime.getURL(`viewer.html?hash=${hash}`),
+        });
       });
       buttons.unshift(viewBtn);
     }
@@ -513,9 +540,9 @@ async function initializePopup() {
     }
 
     const hashes = isAllOrigins
-      ? resourceManager.getAllHashes().filter(
-          (h) => resourceManager.getOriginsByHash(h).length > 0,
-        )
+      ? resourceManager
+          .getAllHashes()
+          .filter((h) => resourceManager.getOriginsByHash(h).length > 0)
       : resourceManager.getHashesByOrigin(selectedOrigin);
 
     const noResources = hashes.length === 0;
@@ -576,46 +603,46 @@ async function initializePopup() {
         resourcesWithSize.sort(
           (a, b) =>
             resourceManager.getOriginsByHash(b.hash).length -
-            resourceManager.getOriginsByHash(a.hash).length ||
-            (b.size ?? 0) - (a.size ?? 0),
+              resourceManager.getOriginsByHash(a.hash).length ||
+            (b.size ?? 0) - (a.size ?? 0)
         );
         break;
       case 'origins-asc':
         resourcesWithSize.sort(
           (a, b) =>
             resourceManager.getOriginsByHash(a.hash).length -
-            resourceManager.getOriginsByHash(b.hash).length ||
-            (b.size ?? 0) - (a.size ?? 0),
+              resourceManager.getOriginsByHash(b.hash).length ||
+            (b.size ?? 0) - (a.size ?? 0)
         );
         break;
       case 'recent-desc':
         resourcesWithSize.sort(
           (a, b) =>
             (getAccessData(b.hash).mostRecent ?? 0) -
-            (getAccessData(a.hash).mostRecent ?? 0) ||
-            (b.size ?? 0) - (a.size ?? 0),
+              (getAccessData(a.hash).mostRecent ?? 0) ||
+            (b.size ?? 0) - (a.size ?? 0)
         );
         break;
       case 'recent-asc':
         resourcesWithSize.sort(
           (a, b) =>
             (getAccessData(a.hash).mostRecent ?? Infinity) -
-            (getAccessData(b.hash).mostRecent ?? Infinity) ||
-            (b.size ?? 0) - (a.size ?? 0),
+              (getAccessData(b.hash).mostRecent ?? Infinity) ||
+            (b.size ?? 0) - (a.size ?? 0)
         );
         break;
       case 'freq-desc':
         resourcesWithSize.sort(
           (a, b) =>
-            getAccessData(b.hash).totalCount - getAccessData(a.hash).totalCount ||
-            (b.size ?? 0) - (a.size ?? 0),
+            getAccessData(b.hash).totalCount -
+              getAccessData(a.hash).totalCount || (b.size ?? 0) - (a.size ?? 0)
         );
         break;
       case 'freq-asc':
         resourcesWithSize.sort(
           (a, b) =>
-            getAccessData(a.hash).totalCount - getAccessData(b.hash).totalCount ||
-            (b.size ?? 0) - (a.size ?? 0),
+            getAccessData(a.hash).totalCount -
+              getAccessData(b.hash).totalCount || (b.size ?? 0) - (a.size ?? 0)
         );
         break;
       case 'mime-asc':
@@ -643,15 +670,18 @@ async function initializePopup() {
       hashesList.append(p);
     }
 
-    for (const [index, { hash, size, mimeType }] of resourcesWithSize.entries()) {
+    for (const [
+      index,
+      { hash, size, mimeType },
+    ] of resourcesWithSize.entries()) {
       hashesList.append(
         buildResourceItem(
           hash,
           size,
           mimeType,
           isAllOrigins ? null : selectedOrigin,
-          `Resource #${index + 1}`,
-        ),
+          `Resource #${index + 1}`
+        )
       );
     }
   }
@@ -677,7 +707,9 @@ async function initializePopup() {
         resourceManager.recordMimeType(selectedHash, mimeType);
     }
 
-    originsList.append(buildResourceItem(selectedHash, size, mimeType, null, null));
+    originsList.append(
+      buildResourceItem(selectedHash, size, mimeType, null, null)
+    );
   }
 
   deleteExclusiveBtn.addEventListener('click', async () => {
@@ -686,7 +718,7 @@ async function initializePopup() {
 
     const allHashes = resourceManager.getHashesByOrigin(selectedOrigin);
     const exclusiveHashes = allHashes.filter(
-      (h) => resourceManager.getOriginsByHash(h).length === 1,
+      (h) => resourceManager.getOriginsByHash(h).length === 1
     );
 
     if (exclusiveHashes.length === 0) {
@@ -706,17 +738,18 @@ async function initializePopup() {
       `Delete exclusive resources for ${selectedOrigin}?`,
       'Uncheck resources you want to keep.',
       items,
-      'Delete Selected',
+      'Delete Selected'
     );
 
     if (!hashesToDelete || hashesToDelete.length === 0) {
-      if (hashesToDelete !== null) showToast('No resources selected for deletion.');
+      if (hashesToDelete !== null)
+        showToast('No resources selected for deletion.');
       return;
     }
 
     await deleteHashesFromStorage(hashesToDelete);
     showToast(
-      `${hashesToDelete.length} resource${hashesToDelete.length !== 1 ? 's' : ''} deleted.`,
+      `${hashesToDelete.length} resource${hashesToDelete.length !== 1 ? 's' : ''} deleted.`
     );
   });
 
@@ -749,17 +782,18 @@ async function initializePopup() {
       `Delete resources for ${selectedOrigin}?`,
       'Uncheck resources you want to keep.',
       items,
-      'Delete Selected',
+      'Delete Selected'
     );
 
     if (!hashesToDelete || hashesToDelete.length === 0) {
-      if (hashesToDelete !== null) showToast('No resources selected for deletion.');
+      if (hashesToDelete !== null)
+        showToast('No resources selected for deletion.');
       return;
     }
 
     await deleteHashesFromStorage(hashesToDelete);
     showToast(
-      `${hashesToDelete.length} resource${hashesToDelete.length !== 1 ? 's' : ''} deleted.`,
+      `${hashesToDelete.length} resource${hashesToDelete.length !== 1 ? 's' : ''} deleted.`
     );
   });
 
@@ -789,7 +823,8 @@ async function initializePopup() {
 
     // Populate origin dropdown.
     const allOrigins = resourceManager.getAllOrigins();
-    const currentOriginHasResources = currentOrigin && allOrigins.includes(currentOrigin);
+    const currentOriginHasResources =
+      currentOrigin && allOrigins.includes(currentOrigin);
 
     if (!currentOrigin && allOrigins.length === 0) {
       originSelect.add(new Option('No origins found', ''));
@@ -883,14 +918,26 @@ async function initializePopup() {
     const s = resourceManager.getStats();
 
     const resettable = [
-      ['Cache hit ratio', s.hitRatio !== null ? `${(s.hitRatio * 100).toFixed(1)}%` : '—'],
+      [
+        'Cache hit ratio',
+        s.hitRatio !== null ? `${(s.hitRatio * 100).toFixed(1)}%` : '—',
+      ],
       ['Cache hits', s.totalHits.toLocaleString()],
       ['Cache misses', s.totalMisses.toLocaleString()],
-      ['Bytes served from cache', s.bytesServed > 0 ? formatBytes(s.bytesServed) : '—'],
+      [
+        'Bytes served from cache',
+        s.bytesServed > 0 ? formatBytes(s.bytesServed) : '—',
+      ],
     ];
     const permanent = [
-      ['Saved by deduplication', s.deduplicationSavings > 0 ? formatBytes(s.deduplicationSavings) : '—'],
-      ['COS cache used', s.totalStorage > 0 ? formatBytes(s.totalStorage) : '—'],
+      [
+        'Saved by deduplication',
+        s.deduplicationSavings > 0 ? formatBytes(s.deduplicationSavings) : '—',
+      ],
+      [
+        'COS cache used',
+        s.totalStorage > 0 ? formatBytes(s.totalStorage) : '—',
+      ],
       ['Unique resources', s.resourceCount.toLocaleString()],
       ['Unique origins', s.originCount.toLocaleString()],
     ];
@@ -909,45 +956,29 @@ async function initializePopup() {
     populate(statsDlStatic, permanent);
 
     // MIME type distribution bar chart
-    mimeChart.innerHTML = '';
     const mimeData = {};
     for (const hash of resourceManager.getAllHashes()) {
-      const mime = (resourceManager.getMimeTypeByHash(hash) || 'unknown').split(';')[0].trim();
+      const mime = (resourceManager.getMimeTypeByHash(hash) || 'unknown')
+        .split(';')[0]
+        .trim();
       const size = resourceManager.getSizeByHash(hash) || 0;
       if (!mimeData[mime]) mimeData[mime] = { count: 0, bytes: 0 };
       mimeData[mime].count++;
       mimeData[mime].bytes += size;
     }
-    const entries = Object.entries(mimeData).sort(
-      (a, b) => b[1].bytes - a[1].bytes || b[1].count - a[1].count,
-    );
-    mimeChartSection.hidden = entries.length === 0;
-    const maxBytes = entries[0]?.[1].bytes ?? 0;
-    for (const [mime, { count, bytes }] of entries) {
-      const label = document.createElement('span');
-      label.className = 'mime-bar-label';
-      label.textContent = mime;
-      label.title = mime;
+    const mimeEntries = Object.entries(mimeData)
+      .sort((a, b) => b[1].count - a[1].count || b[1].bytes - a[1].bytes)
+      .map(([mime, { count }]) => ({ label: mime, count, value: count }));
+    const maxMimeCount = mimeEntries[0]?.count ?? 0;
 
-      const track = document.createElement('div');
-      track.className = 'mime-bar-track';
-      const fill = document.createElement('div');
-      fill.className = 'mime-bar-fill';
-      fill.style.width = maxBytes > 0 ? `${(bytes / maxBytes) * 100}%` : '100%';
-      track.append(fill);
-
-      const value = document.createElement('span');
-      value.className = 'mime-bar-value';
-      value.textContent = `${count} · ${formatBytes(bytes) || '?'}`;
-
-      mimeChart.append(label, track, value);
-    }
+    chartsGrid.innerHTML = '';
 
     // Size distribution chart — buckets are derived dynamically from the data.
     // Boundaries follow a log₁₀ scale (powers of 10 in bytes), so the chart
     // stays readable whether the store holds tiny JSON configs or multi-GB
     // model weights. Only buckets that contain at least one resource are shown.
-    const allSizes = resourceManager.getAllHashes()
+    const allSizes = resourceManager
+      .getAllHashes()
       .map((h) => resourceManager.getSizeByHash(h) || 0)
       .filter((sz) => sz > 0);
     let sizeEntries = [];
@@ -962,30 +993,34 @@ async function initializePopup() {
       boundaries.push(Infinity);
       const sizeBuckets = boundaries.map((upper, i) => {
         const lower = i === 0 ? 0 : boundaries[i - 1];
-        const label = upper === Infinity
-          ? `≥ ${formatBytes(lower)}`
-          : lower === 0
-            ? `< ${formatBytes(upper)}`
-            : `${formatBytes(lower)} – ${formatBytes(upper)}`;
+        const label =
+          upper === Infinity
+            ? `≥ ${formatBytesDecimal(lower)}`
+            : lower === 0
+              ? `< ${formatBytesDecimal(upper)}`
+              : `${formatBytesDecimal(lower)} – ${formatBytesDecimal(upper)}`;
         return { label, lower, upper, count: 0, bytes: 0 };
       });
       for (const sz of allSizes) {
-        const bucket = sizeBuckets.find((b) => sz < b.upper) ?? sizeBuckets[sizeBuckets.length - 1];
+        const bucket =
+          sizeBuckets.find((b) => sz < b.upper) ??
+          sizeBuckets[sizeBuckets.length - 1];
         bucket.count++;
         bucket.bytes += sz;
       }
       // Also bucket the zero-size resources in a leading "0 B" bin if any exist.
       const zeroCount = resourceManager.getAllHashes().length - allSizes.length;
-      if (zeroCount > 0) sizeBuckets.unshift({ label: '0 B', count: zeroCount, bytes: 0 });
+      if (zeroCount > 0)
+        sizeBuckets.unshift({ label: '0 B', count: zeroCount, bytes: 0 });
       const activeSizeBuckets = sizeBuckets.filter((b) => b.count > 0);
-      const maxSizeBytes = Math.max(...activeSizeBuckets.map((b) => b.bytes), 0);
       sizeEntries = activeSizeBuckets.map((b) => ({
-        label: b.label, count: b.count, bytes: b.bytes, value: b.bytes,
+        label: b.label,
+        count: b.count,
+        value: b.count,
       }));
-      renderBarChart(sizeChart, sizeChartSection, sizeEntries, maxSizeBytes);
-    } else {
-      sizeChartSection.hidden = true;
     }
+    const maxSizeCount =
+      sizeEntries.length > 0 ? Math.max(...sizeEntries.map((e) => e.count)) : 0;
 
     // Sharing factor chart — also derived dynamically.
     // When the max sharing count is low (≤ 10) every value gets its own row.
@@ -1003,24 +1038,37 @@ async function initializePopup() {
       sharingEntries = Object.entries(sharingCounts)
         .sort(([a], [b]) => Number(a) - Number(b))
         .map(([n, count]) => ({
-          label: Number(n) === 0 ? 'No origins' : Number(n) === 1 ? '1 origin' : `${n} origins`,
+          label:
+            Number(n) === 0
+              ? 'No origins'
+              : Number(n) === 1
+                ? '1 origin'
+                : `${n} origins`,
           count,
           value: count,
         }));
     } else {
       // Log₂ buckets: 0, 1, 2, 3–4, 5–8, 9–16, …
-      const logBuckets = [{ lower: 0, upper: 0, label: 'No origins', count: 0 }];
+      const logBuckets = [
+        { lower: 0, upper: 0, label: 'No origins', count: 0 },
+      ];
       for (let exp = 0; Math.pow(2, exp) <= maxSharing; exp++) {
         const lower = Math.pow(2, exp);
         const upper = Math.pow(2, exp + 1) - 1;
-        const label = lower === upper ? `${lower} origin${lower === 1 ? '' : 's'}` : `${lower}–${upper} origins`;
+        const label =
+          lower === upper
+            ? `${lower} origin${lower === 1 ? '' : 's'}`
+            : `${lower}–${upper} origins`;
         logBuckets.push({ lower, upper, label, count: 0 });
       }
       for (const [n, count] of Object.entries(sharingCounts)) {
         const num = Number(n);
-        const bucket = num === 0
-          ? logBuckets[0]
-          : logBuckets.find((b) => b.lower !== 0 && num >= b.lower && num <= b.upper);
+        const bucket =
+          num === 0
+            ? logBuckets[0]
+            : logBuckets.find(
+                (b) => b.lower !== 0 && num >= b.lower && num <= b.upper
+              );
         if (bucket) bucket.count += count;
       }
       sharingEntries = logBuckets
@@ -1028,13 +1076,41 @@ async function initializePopup() {
         .map(({ label, count }) => ({ label, count, value: count }));
     }
     const maxSharingCount = Math.max(...sharingEntries.map((e) => e.count), 0);
-    renderBarChart(sharingChart, sharingChartSection, sharingEntries, maxSharingCount);
+
+    if (mimeEntries.length > 0)
+      appendChartSection(chartsGrid, 'By MIME type', mimeEntries, maxMimeCount);
+    if (sizeEntries.length > 0)
+      appendChartSection(
+        chartsGrid,
+        'By size bucket',
+        sizeEntries,
+        maxSizeCount
+      );
+    if (sharingEntries.length > 0)
+      appendChartSection(
+        chartsGrid,
+        'By origins per resource',
+        sharingEntries,
+        maxSharingCount
+      );
+
+    chartsSection.hidden = chartsGrid.children.length === 0;
   }
 
-  function renderBarChart(container, section, entries, maxValue) {
-    container.innerHTML = '';
-    section.hidden = entries.length === 0;
-    for (const { label, count, bytes, value } of entries) {
+  function appendChartSection(container, heading, entries, maxValue) {
+    const h = document.createElement('p');
+    h.className = 'mime-chart-heading';
+    h.textContent = heading;
+    container.append(h);
+
+    const hLabel = document.createElement('span');
+    const hBar = document.createElement('div');
+    const hRight = document.createElement('span');
+    hRight.className = 'mime-bar-header';
+    hRight.textContent = 'Resources';
+    container.append(hLabel, hBar, hRight);
+
+    for (const { label, count, value } of entries) {
       const barLabel = document.createElement('span');
       barLabel.className = 'mime-bar-label';
       barLabel.textContent = label;
@@ -1047,13 +1123,11 @@ async function initializePopup() {
       fill.style.width = maxValue > 0 ? `${(value / maxValue) * 100}%` : '100%';
       track.append(fill);
 
-      const val = document.createElement('span');
-      val.className = 'mime-bar-value';
-      val.textContent = bytes !== undefined
-        ? `${count} · ${formatBytes(bytes) || '?'}`
-        : `${count}`;
+      const rightVal = document.createElement('span');
+      rightVal.className = 'mime-bar-value';
+      rightVal.textContent = String(count);
 
-      container.append(barLabel, track, val);
+      container.append(barLabel, track, rightVal);
     }
   }
 
@@ -1062,9 +1136,9 @@ async function initializePopup() {
     hashSearchResult.innerHTML = '';
     if (!query) return;
 
-    const matches = resourceManager.getAllHashes().filter((h) =>
-      h.startsWith(query),
-    );
+    const matches = resourceManager
+      .getAllHashes()
+      .filter((h) => h.startsWith(query));
 
     if (matches.length === 0) {
       const p = document.createElement('p');
