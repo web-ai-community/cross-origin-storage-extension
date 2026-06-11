@@ -943,47 +943,90 @@ async function initializePopup() {
       mimeChart.append(label, track, value);
     }
 
-    // Size distribution chart
-    const sizeBuckets = [
-      { label: '< 1 KB',     max: 1_024,            count: 0, bytes: 0 },
-      { label: '1 – 100 KB', max: 100 * 1_024,       count: 0, bytes: 0 },
-      { label: '100 KB – 1 MB', max: 1_024 * 1_024,  count: 0, bytes: 0 },
-      { label: '1 – 10 MB',  max: 10 * 1_024 * 1_024, count: 0, bytes: 0 },
-      { label: '10 – 100 MB', max: 100 * 1_024 * 1_024, count: 0, bytes: 0 },
-      { label: '> 100 MB',   max: Infinity,           count: 0, bytes: 0 },
-    ];
-    for (const hash of resourceManager.getAllHashes()) {
-      const sz = resourceManager.getSizeByHash(hash) || 0;
-      const bucket = sizeBuckets.find((b) => sz < b.max) ?? sizeBuckets[sizeBuckets.length - 1];
-      bucket.count++;
-      bucket.bytes += sz;
+    // Size distribution chart — buckets are derived dynamically from the data.
+    // Boundaries follow a log₁₀ scale (powers of 10 in bytes), so the chart
+    // stays readable whether the store holds tiny JSON configs or multi-GB
+    // model weights. Only buckets that contain at least one resource are shown.
+    const allSizes = resourceManager.getAllHashes()
+      .map((h) => resourceManager.getSizeByHash(h) || 0)
+      .filter((sz) => sz > 0);
+    let sizeEntries = [];
+    if (allSizes.length > 0) {
+      const minExp = Math.floor(Math.log10(Math.min(...allSizes)));
+      const maxExp = Math.floor(Math.log10(Math.max(...allSizes)));
+      // Build one bucket per decade that the data actually spans.
+      const boundaries = [];
+      for (let e = minExp; e <= maxExp; e++) {
+        boundaries.push(Math.pow(10, e));
+      }
+      boundaries.push(Infinity);
+      const sizeBuckets = boundaries.map((upper, i) => {
+        const lower = i === 0 ? 0 : boundaries[i - 1];
+        const label = upper === Infinity
+          ? `≥ ${formatBytes(lower)}`
+          : lower === 0
+            ? `< ${formatBytes(upper)}`
+            : `${formatBytes(lower)} – ${formatBytes(upper)}`;
+        return { label, lower, upper, count: 0, bytes: 0 };
+      });
+      for (const sz of allSizes) {
+        const bucket = sizeBuckets.find((b) => sz < b.upper) ?? sizeBuckets[sizeBuckets.length - 1];
+        bucket.count++;
+        bucket.bytes += sz;
+      }
+      // Also bucket the zero-size resources in a leading "0 B" bin if any exist.
+      const zeroCount = resourceManager.getAllHashes().length - allSizes.length;
+      if (zeroCount > 0) sizeBuckets.unshift({ label: '0 B', count: zeroCount, bytes: 0 });
+      const activeSizeBuckets = sizeBuckets.filter((b) => b.count > 0);
+      const maxSizeBytes = Math.max(...activeSizeBuckets.map((b) => b.bytes), 0);
+      sizeEntries = activeSizeBuckets.map((b) => ({
+        label: b.label, count: b.count, bytes: b.bytes, value: b.bytes,
+      }));
+      renderBarChart(sizeChart, sizeChartSection, sizeEntries, maxSizeBytes);
+    } else {
+      sizeChartSection.hidden = true;
     }
-    const activeSizeBuckets = sizeBuckets.filter((b) => b.count > 0);
-    const maxSizeBytes = Math.max(...activeSizeBuckets.map((b) => b.bytes), 0);
-    renderBarChart(
-      sizeChart,
-      sizeChartSection,
-      activeSizeBuckets.map((b) => ({ label: b.label, count: b.count, bytes: b.bytes, value: b.bytes })),
-      maxSizeBytes,
-    );
 
-    // Sharing factor chart
-    const sharingBuckets = {};
+    // Sharing factor chart — also derived dynamically.
+    // When the max sharing count is low (≤ 10) every value gets its own row.
+    // Once it grows beyond that we switch to log₂ buckets (1, 2, 3–4, 5–8,
+    // 9–16, …) so a resource shared by 100 origins still fits neatly.
+    const sharingCounts = {};
     for (const hash of resourceManager.getAllHashes()) {
       const n = resourceManager.getOriginsByHash(hash).length;
-      const key = n === 0 ? 0 : n;
-      if (!sharingBuckets[key]) sharingBuckets[key] = { count: 0, bytes: 0 };
-      sharingBuckets[key].count++;
-      sharingBuckets[key].bytes += resourceManager.getSizeByHash(hash) || 0;
+      sharingCounts[n] = (sharingCounts[n] || 0) + 1;
     }
-    const sharingEntries = Object.entries(sharingBuckets)
-      .sort(([a], [b]) => Number(a) - Number(b))
-      .map(([n, { count, bytes }]) => ({
-        label: Number(n) === 0 ? 'No origins' : Number(n) === 1 ? '1 origin' : `${n} origins`,
-        count,
-        bytes,
-        value: count,
-      }));
+    const maxSharing = Math.max(...Object.keys(sharingCounts).map(Number), 0);
+    let sharingEntries;
+    if (maxSharing <= 10) {
+      // Discrete rows — one per exact origin count.
+      sharingEntries = Object.entries(sharingCounts)
+        .sort(([a], [b]) => Number(a) - Number(b))
+        .map(([n, count]) => ({
+          label: Number(n) === 0 ? 'No origins' : Number(n) === 1 ? '1 origin' : `${n} origins`,
+          count,
+          value: count,
+        }));
+    } else {
+      // Log₂ buckets: 0, 1, 2, 3–4, 5–8, 9–16, …
+      const logBuckets = [{ lower: 0, upper: 0, label: 'No origins', count: 0 }];
+      for (let exp = 0; Math.pow(2, exp) <= maxSharing; exp++) {
+        const lower = Math.pow(2, exp);
+        const upper = Math.pow(2, exp + 1) - 1;
+        const label = lower === upper ? `${lower} origin${lower === 1 ? '' : 's'}` : `${lower}–${upper} origins`;
+        logBuckets.push({ lower, upper, label, count: 0 });
+      }
+      for (const [n, count] of Object.entries(sharingCounts)) {
+        const num = Number(n);
+        const bucket = num === 0
+          ? logBuckets[0]
+          : logBuckets.find((b) => b.lower !== 0 && num >= b.lower && num <= b.upper);
+        if (bucket) bucket.count += count;
+      }
+      sharingEntries = logBuckets
+        .filter((b) => b.count > 0)
+        .map(({ label, count }) => ({ label, count, value: count }));
+    }
     const maxSharingCount = Math.max(...sharingEntries.map((e) => e.count), 0);
     renderBarChart(sharingChart, sharingChartSection, sharingEntries, maxSharingCount);
   }
