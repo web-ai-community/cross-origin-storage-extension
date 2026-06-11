@@ -24,7 +24,13 @@ async function initializePopup() {
   const sortSelect = document.getElementById('sort-select');
   const hashSearch = document.getElementById('hash-search');
   const hashSearchResult = document.getElementById('hash-search-result');
+  const statsDl = document.getElementById('stats-dl');
+  const statsDlStatic = document.getElementById('stats-dl-static');
+  const resetStatsBtn = document.getElementById('reset-stats-btn');
+  const mimeChart = document.getElementById('mime-chart');
+  const mimeChartSection = document.getElementById('mime-chart-section');
 
+  let selectHighlightTimer;
   let toastTimer;
   function showToast(message) {
     clearTimeout(toastTimer);
@@ -217,6 +223,26 @@ async function initializePopup() {
     return name.charAt(0).toUpperCase() + name.slice(1);
   }
 
+  function isViewable(mimeType) {
+    if (!mimeType) return false;
+    const base = mimeType.split(';')[0].trim().toLowerCase();
+    return (
+      base.startsWith('text/') ||
+      base.startsWith('image/') ||
+      base.startsWith('font/') ||
+      [
+        'application/javascript',
+        'application/json',
+        'application/xml',
+        'application/xhtml+xml',
+        'application/font-woff',
+        'application/font-woff2',
+        'application/x-font-ttf',
+        'application/x-font-otf',
+      ].includes(base)
+    );
+  }
+
   function getExtensionFromMimeType(mimeType) {
     const base = (mimeType || '').split(';')[0].trim().toLowerCase();
     const overrides = {
@@ -339,7 +365,19 @@ async function initializePopup() {
         timesUl.className = 'access-times';
         history.forEach((tsString) => {
           const timeLi = document.createElement('li');
-          timeLi.textContent = `${formatTimestamp(tsString)} — ${selectedOrigin}`;
+          const originBtn = document.createElement('button');
+          originBtn.type = 'button';
+          originBtn.className = 'origin-link-btn';
+          originBtn.textContent = selectedOrigin;
+          originBtn.addEventListener('click', () => {
+            originSelect.value = selectedOrigin;
+            originSelect.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            originSelect.classList.add('select-highlight');
+            clearTimeout(selectHighlightTimer);
+            selectHighlightTimer = setTimeout(() => originSelect.classList.remove('select-highlight'), 2000);
+            updateHashesDisplay();
+          });
+          timeLi.append(`${formatTimestamp(tsString)} — `, originBtn);
           timesUl.append(timeLi);
         });
         accessDetails.append(accessSummary, timesUl);
@@ -373,6 +411,10 @@ async function initializePopup() {
         originBtn.textContent = origin;
         originBtn.addEventListener('click', () => {
           originSelect.value = origin;
+          originSelect.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          originSelect.classList.add('select-highlight');
+          clearTimeout(selectHighlightTimer);
+          selectHighlightTimer = setTimeout(() => originSelect.classList.remove('select-highlight'), 2000);
           updateHashesDisplay();
         });
         originLi.append(originBtn);
@@ -435,7 +477,18 @@ async function initializePopup() {
 
     const btnGroup = document.createElement('div');
     btnGroup.className = 'item-actions';
-    btnGroup.append(copyBtn, saveBtn, deleteBtn);
+    const buttons = [copyBtn, saveBtn, deleteBtn];
+    if (isViewable(mimeType)) {
+      const viewBtn = document.createElement('button');
+      viewBtn.textContent = 'View';
+      viewBtn.className = 'view-btn';
+      viewBtn.title = 'View resource in new tab';
+      viewBtn.addEventListener('click', () => {
+        chrome.tabs.create({ url: chrome.runtime.getURL(`viewer.html?hash=${hash}`) });
+      });
+      buttons.unshift(viewBtn);
+    }
+    btnGroup.append(...buttons);
 
     li.append(textContent, btnGroup);
     return li;
@@ -447,16 +500,24 @@ async function initializePopup() {
   async function updateHashesDisplay() {
     const selectedOrigin = originSelect.value;
     const isAllOrigins = selectedOrigin === '*';
-    deleteExclusiveBtn.disabled = !selectedOrigin || isAllOrigins;
-    deleteOriginBtn.disabled = !selectedOrigin || isAllOrigins;
     hashesList.innerHTML = '';
-    if (!selectedOrigin) return;
+    if (!selectedOrigin) {
+      deleteExclusiveBtn.disabled = true;
+      deleteOriginBtn.disabled = true;
+      sortSelect.disabled = true;
+      return;
+    }
 
     const hashes = isAllOrigins
       ? resourceManager.getAllHashes().filter(
           (h) => resourceManager.getOriginsByHash(h).length > 0,
         )
       : resourceManager.getHashesByOrigin(selectedOrigin);
+
+    const noResources = hashes.length === 0;
+    deleteExclusiveBtn.disabled = isAllOrigins || noResources;
+    deleteOriginBtn.disabled = isAllOrigins || noResources;
+    sortSelect.disabled = noResources;
 
     // Create an array of objects with hash and size to facilitate sorting.
     const resourcesWithSize = await Promise.all(
@@ -511,44 +572,71 @@ async function initializePopup() {
         resourcesWithSize.sort(
           (a, b) =>
             resourceManager.getOriginsByHash(b.hash).length -
-            resourceManager.getOriginsByHash(a.hash).length,
+            resourceManager.getOriginsByHash(a.hash).length ||
+            (b.size ?? 0) - (a.size ?? 0),
         );
         break;
       case 'origins-asc':
         resourcesWithSize.sort(
           (a, b) =>
             resourceManager.getOriginsByHash(a.hash).length -
-            resourceManager.getOriginsByHash(b.hash).length,
+            resourceManager.getOriginsByHash(b.hash).length ||
+            (b.size ?? 0) - (a.size ?? 0),
         );
         break;
       case 'recent-desc':
         resourcesWithSize.sort(
           (a, b) =>
             (getAccessData(b.hash).mostRecent ?? 0) -
-            (getAccessData(a.hash).mostRecent ?? 0),
+            (getAccessData(a.hash).mostRecent ?? 0) ||
+            (b.size ?? 0) - (a.size ?? 0),
         );
         break;
       case 'recent-asc':
         resourcesWithSize.sort(
           (a, b) =>
             (getAccessData(a.hash).mostRecent ?? Infinity) -
-            (getAccessData(b.hash).mostRecent ?? Infinity),
+            (getAccessData(b.hash).mostRecent ?? Infinity) ||
+            (b.size ?? 0) - (a.size ?? 0),
         );
         break;
       case 'freq-desc':
         resourcesWithSize.sort(
           (a, b) =>
-            getAccessData(b.hash).totalCount - getAccessData(a.hash).totalCount,
+            getAccessData(b.hash).totalCount - getAccessData(a.hash).totalCount ||
+            (b.size ?? 0) - (a.size ?? 0),
         );
         break;
       case 'freq-asc':
         resourcesWithSize.sort(
           (a, b) =>
-            getAccessData(a.hash).totalCount - getAccessData(b.hash).totalCount,
+            getAccessData(a.hash).totalCount - getAccessData(b.hash).totalCount ||
+            (b.size ?? 0) - (a.size ?? 0),
         );
+        break;
+      case 'mime-asc':
+        resourcesWithSize.sort((a, b) => {
+          const ma = (a.mimeType || '').split(';')[0].trim();
+          const mb = (b.mimeType || '').split(';')[0].trim();
+          return ma.localeCompare(mb) || (b.size ?? 0) - (a.size ?? 0);
+        });
+        break;
+      case 'mime-desc':
+        resourcesWithSize.sort((a, b) => {
+          const ma = (a.mimeType || '').split(';')[0].trim();
+          const mb = (b.mimeType || '').split(';')[0].trim();
+          return mb.localeCompare(ma) || (b.size ?? 0) - (a.size ?? 0);
+        });
         break;
       default: // 'size-desc'
         resourcesWithSize.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
+    }
+
+    if (resourcesWithSize.length === 0) {
+      const p = document.createElement('p');
+      p.className = 'empty-state';
+      p.textContent = 'No resources from this origin are stored in COS.';
+      hashesList.append(p);
     }
 
     for (const [index, { hash, size, mimeType }] of resourcesWithSize.entries()) {
@@ -686,23 +774,46 @@ async function initializePopup() {
 
     const currentTab = await getCurrentTab();
     let currentOrigin;
-    if (currentTab) {
-      currentOrigin = new URL(currentTab.url).origin;
+    if (currentTab?.url) {
+      try {
+        const parsed = new URL(currentTab.url);
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+          currentOrigin = parsed.origin;
+        }
+      } catch (_) {}
     }
 
     // Populate origin dropdown.
     const allOrigins = resourceManager.getAllOrigins();
-    if (allOrigins.length === 0) {
+    const currentOriginHasResources = currentOrigin && allOrigins.includes(currentOrigin);
+
+    if (!currentOrigin && allOrigins.length === 0) {
       originSelect.add(new Option('No origins found', ''));
     } else {
-      originSelect.add(new Option('All origins', '*'));
-      originSelect.appendChild(document.createElement('hr'));
-      allOrigins.forEach((origin) => {
-        originSelect.add(new Option(origin, origin));
-        if (origin === currentOrigin) {
-          originSelect.value = origin;
+      // Pin the current HTTP/HTTPS origin at the top, whether or not it has
+      // stored resources. If it has none, label it so the user isn't confused.
+      if (currentOrigin) {
+        const label = currentOriginHasResources
+          ? currentOrigin
+          : `${currentOrigin} — no resources`;
+        originSelect.add(new Option(label, currentOrigin));
+        if (allOrigins.length > 0) {
+          originSelect.appendChild(document.createElement('hr'));
         }
-      });
+      }
+      if (allOrigins.length > 0) {
+        originSelect.add(new Option('All origins', '*'));
+        originSelect.appendChild(document.createElement('hr'));
+        // Omit the current origin from the alphabetical list — it's already pinned.
+        for (const origin of allOrigins) {
+          if (origin !== currentOrigin) {
+            originSelect.add(new Option(origin, origin));
+          }
+        }
+      }
+      if (currentOrigin) {
+        originSelect.value = currentOrigin;
+      }
     }
 
     // Populate hash dropdown.
@@ -761,6 +872,72 @@ async function initializePopup() {
     updateHashesDisplay();
     await updateOriginsDisplay();
     await updateHashSearch();
+    renderStats();
+  }
+
+  function renderStats() {
+    const s = resourceManager.getStats();
+
+    const resettable = [
+      ['Cache hit ratio', s.hitRatio !== null ? `${(s.hitRatio * 100).toFixed(1)}%` : '—'],
+      ['Cache hits', s.totalHits.toLocaleString()],
+      ['Cache misses', s.totalMisses.toLocaleString()],
+      ['Bytes served from cache', s.bytesServed > 0 ? formatBytes(s.bytesServed) : '—'],
+    ];
+    const permanent = [
+      ['Saved by deduplication', s.deduplicationSavings > 0 ? formatBytes(s.deduplicationSavings) : '—'],
+      ['COS cache used', s.totalStorage > 0 ? formatBytes(s.totalStorage) : '—'],
+      ['Unique resources', s.resourceCount.toLocaleString()],
+      ['Unique origins', s.originCount.toLocaleString()],
+    ];
+
+    const populate = (dl, rows) => {
+      dl.innerHTML = '';
+      for (const [label, value] of rows) {
+        const dt = document.createElement('dt');
+        dt.textContent = label;
+        const dd = document.createElement('dd');
+        dd.textContent = value;
+        dl.append(dt, dd);
+      }
+    };
+    populate(statsDl, resettable);
+    populate(statsDlStatic, permanent);
+
+    // MIME type distribution bar chart
+    mimeChart.innerHTML = '';
+    const mimeData = {};
+    for (const hash of resourceManager.getAllHashes()) {
+      const mime = (resourceManager.getMimeTypeByHash(hash) || 'unknown').split(';')[0].trim();
+      const size = resourceManager.getSizeByHash(hash) || 0;
+      if (!mimeData[mime]) mimeData[mime] = { count: 0, bytes: 0 };
+      mimeData[mime].count++;
+      mimeData[mime].bytes += size;
+    }
+    const entries = Object.entries(mimeData).sort(
+      (a, b) => b[1].bytes - a[1].bytes || b[1].count - a[1].count,
+    );
+    mimeChartSection.hidden = entries.length === 0;
+    const maxBytes = entries[0]?.[1].bytes ?? 0;
+    for (const [mime, { count, bytes }] of entries) {
+      const label = document.createElement('span');
+      label.className = 'mime-bar-label';
+      label.textContent = mime;
+      label.title = mime;
+
+      const track = document.createElement('div');
+      track.className = 'mime-bar-track';
+      const fill = document.createElement('div');
+      fill.className = 'mime-bar-fill';
+      fill.style.width = maxBytes > 0 ? `${(bytes / maxBytes) * 100}%` : '100%';
+      track.append(fill);
+
+      const value = document.createElement('span');
+      value.className = 'mime-bar-value';
+      value.textContent = `${count} · ${formatBytes(bytes) || '?'}`;
+
+      mimeChart.append(label, track, value);
+    }
   }
 
   async function updateHashSearch() {
@@ -774,7 +951,7 @@ async function initializePopup() {
 
     if (matches.length === 0) {
       const p = document.createElement('p');
-      p.className = 'search-no-result';
+      p.className = 'empty-state';
       p.textContent = 'No resource found.';
       hashSearchResult.append(p);
       return;
@@ -883,8 +1060,17 @@ async function initializePopup() {
 
   pickFileBtn.addEventListener('click', addResourcesFromFiles);
 
+  resetStatsBtn.addEventListener('click', async () => {
+    await resourceManager.resetStats();
+    renderStats();
+    showToast('Statistics reset.');
+  });
+
   originSelect.addEventListener('change', () => updateHashesDisplay());
-  sortSelect.addEventListener('change', () => updateHashesDisplay());
+  sortSelect.addEventListener('change', () => {
+    chrome.storage.local.set({ sortOrder: sortSelect.value });
+    updateHashesDisplay();
+  });
   hashSelect.addEventListener('change', updateOriginsDisplay);
   hashSearch.addEventListener('input', updateHashSearch);
 
@@ -919,6 +1105,10 @@ async function initializePopup() {
       );
     }
   });
+
+  // Restore saved sort order before first render.
+  const { sortOrder } = await chrome.storage.local.get('sortOrder');
+  if (sortOrder) sortSelect.value = sortOrder;
 
   // Initial population of the UI.
   await refreshUI();

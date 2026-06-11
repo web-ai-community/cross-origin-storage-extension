@@ -1,0 +1,215 @@
+<!--
+  Copyright 2026 Google LLC.
+  SPDX-License-Identifier: Apache-2.0
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark light">
+    <title>COS Resource Viewer</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+      html,
+      body {
+        height: 100%;
+      }
+
+      body {
+        display: flex;
+        flex-direction: column;
+        margin: 0 auto;
+        padding: 1.5rem 1rem;
+        max-width: 960px;
+        box-sizing: border-box;
+      }
+
+      /* Keeps img + h1 on the same line inside a flex-column body */
+      .page-header {
+        flex-shrink: 0;
+      }
+
+      #loading {
+        color: light-dark(#555, #ccc);
+        font-style: italic;
+      }
+
+      #viewer {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .resource-meta {
+        flex-shrink: 0;
+        font-size: 0.9em;
+        color: light-dark(#555, #ccc);
+        margin-bottom: 1em;
+        display: flex;
+        gap: 1.2em;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+
+      .resource-meta code {
+        font-family: ui-monospace, monospace;
+        color: light-dark(#335d9d, #89b4fa);
+      }
+
+      .viewer-actions {
+        flex-shrink: 0;
+        display: flex;
+        gap: 0.5em;
+        margin-bottom: 1em;
+        flex-wrap: wrap;
+      }
+
+      .usage-section {
+        flex-shrink: 0;
+        margin-bottom: 1em;
+        font-size: 0.9em;
+      }
+
+      .usage-section h3 {
+        font-size: 0.95em;
+        font-weight: 600;
+        color: light-dark(#444, #ddd);
+        margin: 0 0 0.5em;
+      }
+
+      .usage-origin {
+        margin-bottom: 0.75em;
+      }
+
+      .usage-origin-name {
+        font-family: ui-monospace, monospace;
+        color: light-dark(#335d9d, #89b4fa);
+        font-size: 0.9em;
+        font-weight: 600;
+      }
+
+      .usage-timestamps {
+        list-style: none;
+        margin: 0.2em 0 0 1em;
+        padding: 0;
+      }
+
+      .usage-timestamps li {
+        color: light-dark(#555, #ccc);
+        font-size: 0.85em;
+        padding: 0.1em 0;
+      }
+
+      /* Outer wrapper owns border-radius + overflow:hidden so the
+         inner scrollbar is clipped to the rounded corners */
+      .content-wrapper {
+        flex: 1;
+        min-height: 0;
+        border-radius: 8px;
+        overflow: hidden;
+        border: 1px solid light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.08));
+        background: light-dark(#f8f9fa, #1a1a1a);
+      }
+
+      .content-area {
+        height: 100%;
+        padding: 1.5em;
+        overflow: auto;
+        box-sizing: border-box;
+      }
+
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-all;
+        font-family: ui-monospace, monospace;
+        font-size: 0.85em;
+        line-height: 1.6;
+        color: light-dark(#1e1e1e, #f0f0f0);
+      }
+
+      .image-preview {
+        text-align: center;
+      }
+
+      .image-preview img {
+        max-width: 100%;
+        max-height: 70vh;
+        object-fit: contain;
+        border-radius: 4px;
+      }
+
+      .font-coverage {
+        font-size: 0.85em;
+        color: light-dark(#555, #ccc);
+        margin: 0 0 1.5em;
+      }
+
+      .font-sample-row {
+        margin-bottom: 1.2em;
+        display: flex;
+        align-items: baseline;
+        gap: 1em;
+      }
+
+      .font-sample-label {
+        font-size: 0.75em;
+        color: light-dark(#888, #aaa);
+        min-width: 7em;
+        flex-shrink: 0;
+        font-family: system-ui, sans-serif;
+      }
+
+      .font-sample-text {
+        line-height: 1.3;
+        color: light-dark(#1e1e1e, #f0f0f0);
+      }
+
+      .viewer-error {
+        color: light-dark(#c62828, #ffcdd2);
+      }
+    </style>
+  </head>
+  <body>
+    <header class="page-header">
+      <img class="logo" src="logo-cos.svg" alt="" width="512" height="512">
+      <h1>Cross-Origin Storage</h1>
+      <h2>Resource Viewer</h2>
+    </header>
+
+    <p id="loading">Loading resource…</p>
+
+    <div id="viewer" hidden>
+      <div class="resource-meta">
+        <span id="meta-mime"></span>
+        <span id="meta-size"></span>
+        <code id="meta-hash"></code>
+      </div>
+      <div class="viewer-actions">
+        <button id="copy-btn" class="copy-btn">Copy hash</button>
+        <button id="save-btn" class="save-btn">Save</button>
+        <button id="delete-btn" class="delete-btn">Delete</button>
+      </div>
+      <div id="usage-section" class="usage-section"></div>
+      <div class="content-wrapper">
+        <div class="content-area" id="content-area"></div>
+      </div>
+    </div>
+
+    <div id="toast"></div>
+
+    <dialog id="delete-dialog">
+      <form method="dialog">
+        <div id="dialog-message"></div>
+        <footer>
+          <button type="submit" value="cancel">Cancel</button>
+          <button type="submit" value="confirm" id="dialog-confirm-btn">Delete</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <script src="viewer.js"></script>
+  </body>
+</html>

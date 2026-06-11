@@ -53,6 +53,10 @@
               <option value="freq-desc">Most frequently accessed</option>
               <option value="freq-asc">Least frequently accessed</option>
             </optgroup>
+            <optgroup label="MIME type">
+              <option value="mime-asc">MIME type A → Z</option>
+              <option value="mime-desc">MIME type Z → A</option>
+            </optgroup>
           </select>
         </div>
         <ul id="hashes-list"></ul>
@@ -70,6 +74,17 @@
       <p>Paste a SHA-256 hash to look up a resource and its access statistics.</p>
       <input type="search" id="hash-search" placeholder="SHA-256 hash…">
       <div id="hash-search-result"></div>
+    </div>
+
+    <div class="panel stats-panel">
+      <h2>Statistics</h2>
+      <dl id="stats-dl" class="stats-dl"></dl>
+      <button id="reset-stats-btn" class="text-btn">Reset statistics</button>
+      <dl id="stats-dl-static" class="stats-dl stats-dl-static"></dl>
+      <div id="mime-chart-section" class="mime-chart-section" hidden>
+        <p class="mime-chart-heading">By MIME type</p>
+        <div id="mime-chart" class="mime-chart"></div>
+      </div>
     </div>
 
     <div class="actions-container">

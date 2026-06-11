@@ -12,6 +12,8 @@ class ResourceManager {
     this.accessHistory = {};
     this.hashToSize = {};
     this.hashToMimeType = {};
+    this.hashToHitCount = {};
+    this.totalMissCount = 0;
   }
 
   recordAccess(origin, hash, timestamp = new Date()) {
@@ -86,6 +88,50 @@ class ResourceManager {
     return this.hashToMimeType[hash];
   }
 
+  recordHit(hash) {
+    this.hashToHitCount[hash] = (this.hashToHitCount[hash] || 0) + 1;
+  }
+
+  recordMiss() {
+    this.totalMissCount++;
+  }
+
+  async resetStats() {
+    this.hashToHitCount = {};
+    this.totalMissCount = 0;
+    await this.saveManagerToStorage();
+  }
+
+  getStats() {
+    const totalHits = Object.values(this.hashToHitCount).reduce((s, n) => s + n, 0);
+    const totalMisses = this.totalMissCount;
+    const totalRequests = totalHits + totalMisses;
+
+    let bytesServed = 0;
+    for (const [hash, count] of Object.entries(this.hashToHitCount)) {
+      bytesServed += count * (this.hashToSize[hash] || 0);
+    }
+
+    let deduplicationSavings = 0;
+    for (const [hash, size] of Object.entries(this.hashToSize)) {
+      const n = (this.hashToOrigins[hash] || []).length;
+      if (n > 1) deduplicationSavings += (n - 1) * size;
+    }
+
+    const totalStorage = Object.values(this.hashToSize).reduce((s, n) => s + n, 0);
+
+    return {
+      totalHits,
+      totalMisses,
+      hitRatio: totalRequests > 0 ? totalHits / totalRequests : null,
+      bytesServed,
+      deduplicationSavings,
+      totalStorage,
+      resourceCount: this.getAllHashes().length,
+      originCount: this.getAllOrigins().length,
+    };
+  }
+
   /**
    * Deletes one or more resources based on their hash value(s).
    * @param {string|string[]} hashesToDelete - A single hash string or an array of hash strings.
@@ -121,11 +167,9 @@ class ResourceManager {
         delete this.hashToOrigins[hash];
       }
 
-      // Remove the size information for the hash.
       delete this.hashToSize[hash];
-
-      // Remove the MIME type information for the hash.
       delete this.hashToMimeType[hash];
+      delete this.hashToHitCount[hash];
     }
 
     // If any changes were made, persist them to storage.
@@ -144,6 +188,8 @@ class ResourceManager {
         this.accessHistory = stored.accessHistory || {};
         this.hashToSize = stored.hashToSize || {};
         this.hashToMimeType = stored.hashToMimeType || {};
+        this.hashToHitCount = stored.hashToHitCount || {};
+        this.totalMissCount = stored.totalMissCount || 0;
       }
     } catch (error) {
       console.error('Error loading resource manager from storage:', error);
@@ -159,6 +205,8 @@ class ResourceManager {
           accessHistory: this.accessHistory,
           hashToSize: this.hashToSize,
           hashToMimeType: this.hashToMimeType,
+          hashToHitCount: this.hashToHitCount,
+          totalMissCount: this.totalMissCount,
         },
       });
     } catch (error) {

@@ -65,17 +65,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'requestFileHandles': {
           const { origin, hashes, create } = data;
           const success = [];
-          // Log access statistics.
           await resourceManager.loadManagerFromStorage();
           for (const hash of hashes) {
             const handle = await getFileHandle(hash, create);
             if (!handle) {
+              if (!create) resourceManager.recordMiss();
+              await resourceManager.saveManagerToStorage();
               responseData = { hashes, success };
               sendResponse({ data: responseData });
               return;
             }
             success.push(handle);
             resourceManager.recordAccess(origin, hash.value);
+            if (!create) resourceManager.recordHit(hash.value);
           }
           await resourceManager.saveManagerToStorage();
           responseData = { hashes, success };
@@ -177,7 +179,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
             const hash = sriToHashObj(fm.sriHash);
             let blobURL = await getFileData(hash);
+            const alreadyCached = !!blobURL;
             if (!blobURL) {
+              resourceManager.recordMiss();
               try {
                 const fontResp = await fetch(fm.fontUrl);
                 if (!fontResp.ok) throw new Error(`HTTP ${fontResp.status}`);
@@ -187,7 +191,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 await storeFileData(hash, fontBlob, { 'content-type': mimeType });
                 resourceManager.recordSize(hash.value, fontBlob.size);
                 resourceManager.recordMimeType(hash.value, mimeType);
-                await resourceManager.saveManagerToStorage();
                 blobURL = await getFileData(hash);
               } catch (e) {
                 rewritten = rewritten.replace(fm.full, `url("${fm.fontUrl}")`);
@@ -195,6 +198,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               }
             }
             if (blobURL) {
+              if (alreadyCached) resourceManager.recordHit(hash.value);
               const placeholder = `__COS_FONT_${fontIdx++}__`;
               rewritten = rewritten.replace(fm.full, `url("${placeholder}")`);
               fonts.push({ placeholder, blobURL });
@@ -203,14 +207,49 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               rewritten = rewritten.replace(fm.full, `url("${fm.fontUrl}")`);
             }
           }
-          if (fonts.length) {
-            await resourceManager.saveManagerToStorage();
-          }
+          await resourceManager.saveManagerToStorage();
           responseData = {
             cssText: rewritten,
             fonts,
             changed: rewritten !== cssText,
           };
+          break;
+        }
+        case 'getResourceForViewer': {
+          const { hash } = data;
+          await resourceManager.loadManagerFromStorage();
+          const hashObj = { algorithm: 'SHA-256', value: hash };
+          const key = generateCacheKey(hashObj);
+          const match = await cache.match(key);
+          if (!match) {
+            responseData = { error: 'Resource not found in cache' };
+            break;
+          }
+          const mimeType = (match.headers.get('content-type') || 'application/octet-stream')
+            .split(';')[0].trim();
+          const size = resourceManager.getSizeByHash(hash);
+          const isText =
+            mimeType.startsWith('text/') ||
+            ['application/javascript', 'application/json', 'application/xml',
+             'application/xhtml+xml'].includes(mimeType);
+          const origins = resourceManager.getOriginsByHash(hash);
+          const accessHistory = {};
+          for (const origin of origins) {
+            accessHistory[origin] = resourceManager.accessHistory[`${origin}|${hash}`] || [];
+          }
+          if (isText) {
+            const text = await match.text();
+            responseData = { mimeType, text, size: size ?? null, origins, accessHistory };
+          } else {
+            const ab = await match.arrayBuffer();
+            const bytes = new Uint8Array(ab);
+            const CHUNK = 0x8000;
+            let binary = '';
+            for (let i = 0; i < bytes.length; i += CHUNK) {
+              binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+            }
+            responseData = { mimeType, dataURL: `data:${mimeType};base64,${btoa(binary)}`, size: size ?? ab.byteLength, origins, accessHistory };
+          }
           break;
         }
         default:
