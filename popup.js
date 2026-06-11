@@ -29,6 +29,10 @@ async function initializePopup() {
   const resetStatsBtn = document.getElementById('reset-stats-btn');
   const mimeChart = document.getElementById('mime-chart');
   const mimeChartSection = document.getElementById('mime-chart-section');
+  const sizeChart = document.getElementById('size-chart');
+  const sizeChartSection = document.getElementById('size-chart-section');
+  const sharingChart = document.getElementById('sharing-chart');
+  const sharingChartSection = document.getElementById('sharing-chart-section');
 
   let selectHighlightTimer;
   let toastTimer;
@@ -937,6 +941,76 @@ async function initializePopup() {
       value.textContent = `${count} · ${formatBytes(bytes) || '?'}`;
 
       mimeChart.append(label, track, value);
+    }
+
+    // Size distribution chart
+    const sizeBuckets = [
+      { label: '< 1 KB',     max: 1_024,            count: 0, bytes: 0 },
+      { label: '1 – 100 KB', max: 100 * 1_024,       count: 0, bytes: 0 },
+      { label: '100 KB – 1 MB', max: 1_024 * 1_024,  count: 0, bytes: 0 },
+      { label: '1 – 10 MB',  max: 10 * 1_024 * 1_024, count: 0, bytes: 0 },
+      { label: '10 – 100 MB', max: 100 * 1_024 * 1_024, count: 0, bytes: 0 },
+      { label: '> 100 MB',   max: Infinity,           count: 0, bytes: 0 },
+    ];
+    for (const hash of resourceManager.getAllHashes()) {
+      const sz = resourceManager.getSizeByHash(hash) || 0;
+      const bucket = sizeBuckets.find((b) => sz < b.max) ?? sizeBuckets[sizeBuckets.length - 1];
+      bucket.count++;
+      bucket.bytes += sz;
+    }
+    const activeSizeBuckets = sizeBuckets.filter((b) => b.count > 0);
+    const maxSizeBytes = Math.max(...activeSizeBuckets.map((b) => b.bytes), 0);
+    renderBarChart(
+      sizeChart,
+      sizeChartSection,
+      activeSizeBuckets.map((b) => ({ label: b.label, count: b.count, bytes: b.bytes, value: b.bytes })),
+      maxSizeBytes,
+    );
+
+    // Sharing factor chart
+    const sharingBuckets = {};
+    for (const hash of resourceManager.getAllHashes()) {
+      const n = resourceManager.getOriginsByHash(hash).length;
+      const key = n === 0 ? 0 : n;
+      if (!sharingBuckets[key]) sharingBuckets[key] = { count: 0, bytes: 0 };
+      sharingBuckets[key].count++;
+      sharingBuckets[key].bytes += resourceManager.getSizeByHash(hash) || 0;
+    }
+    const sharingEntries = Object.entries(sharingBuckets)
+      .sort(([a], [b]) => Number(a) - Number(b))
+      .map(([n, { count, bytes }]) => ({
+        label: Number(n) === 0 ? 'No origins' : Number(n) === 1 ? '1 origin' : `${n} origins`,
+        count,
+        bytes,
+        value: count,
+      }));
+    const maxSharingCount = Math.max(...sharingEntries.map((e) => e.count), 0);
+    renderBarChart(sharingChart, sharingChartSection, sharingEntries, maxSharingCount);
+  }
+
+  function renderBarChart(container, section, entries, maxValue) {
+    container.innerHTML = '';
+    section.hidden = entries.length === 0;
+    for (const { label, count, bytes, value } of entries) {
+      const barLabel = document.createElement('span');
+      barLabel.className = 'mime-bar-label';
+      barLabel.textContent = label;
+      barLabel.title = label;
+
+      const track = document.createElement('div');
+      track.className = 'mime-bar-track';
+      const fill = document.createElement('div');
+      fill.className = 'mime-bar-fill';
+      fill.style.width = maxValue > 0 ? `${(value / maxValue) * 100}%` : '100%';
+      track.append(fill);
+
+      const val = document.createElement('span');
+      val.className = 'mime-bar-value';
+      val.textContent = bytes !== undefined
+        ? `${count} · ${formatBytes(bytes) || '?'}`
+        : `${count}`;
+
+      container.append(barLabel, track, val);
     }
   }
 
