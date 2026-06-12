@@ -52,6 +52,73 @@ const resourceManager = new ResourceManager();
 const cachePromise = caches.open('cos-storage');
 let cache;
 
+// Per-tab COS hit/miss counters for the extension badge.
+const tabHits = {};
+const tabMisses = {};
+let cachedIconBitmap = null;
+
+async function getIconBitmap() {
+  if (!cachedIconBitmap) {
+    const resp = await fetch(chrome.runtime.getURL('logo-cos.png'));
+    const blob = await resp.blob();
+    cachedIconBitmap = await createImageBitmap(blob);
+  }
+  return cachedIconBitmap;
+}
+
+async function setTintedIcon(tabId, [r, g, b]) {
+  const icon = await getIconBitmap();
+  const imageData = {};
+  for (const size of [16, 32, 48, 128]) {
+    const canvas = new OffscreenCanvas(size, size);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(icon, 0, 0, size, size);
+    ctx.globalCompositeOperation = 'source-atop';
+    ctx.fillStyle = `rgba(${r},${g},${b},0.6)`;
+    ctx.fillRect(0, 0, size, size);
+    imageData[size] = ctx.getImageData(0, 0, size, size);
+  }
+  chrome.action.setIcon({ imageData, tabId });
+}
+
+function formatBadgeCount(n) {
+  return n < 1000 ? String(n) : `${Math.floor(n / 1000)}K`;
+}
+
+async function updateBadge(tabId) {
+  if (!tabId) return;
+  const hits = tabHits[tabId] || 0;
+  const misses = tabMisses[tabId] || 0;
+  if (hits > 0) {
+    chrome.action.setBadgeText({ text: formatBadgeCount(hits), tabId });
+    chrome.action.setBadgeBackgroundColor({ color: '#2e7d32', tabId });
+    await setTintedIcon(tabId, [46, 125, 50]);
+  } else if (misses > 0) {
+    chrome.action.setBadgeText({ text: formatBadgeCount(misses), tabId });
+    chrome.action.setBadgeBackgroundColor({ color: '#e65100', tabId });
+    await setTintedIcon(tabId, [230, 81, 0]);
+  } else {
+    chrome.action.setBadgeText({ text: '', tabId });
+    chrome.action.setIcon({ path: 'logo-cos.png', tabId });
+  }
+}
+
+function resetTabBadge(tabId) {
+  delete tabHits[tabId];
+  delete tabMisses[tabId];
+  chrome.action.setBadgeText({ text: '', tabId });
+  chrome.action.setIcon({ path: 'logo-cos.png', tabId });
+}
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === 'loading' && changeInfo.url) resetTabBadge(tabId);
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  delete tabHits[tabId];
+  delete tabMisses[tabId];
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     cache = await cachePromise;
@@ -64,12 +131,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       switch (action) {
         case 'requestFileHandles': {
           const { origin, hashes, create } = data;
+          const tabId = sender.tab?.id;
           const success = [];
           await resourceManager.loadManagerFromStorage();
           for (const hash of hashes) {
             const handle = await getFileHandle(hash, create);
             if (!handle) {
-              if (!create) resourceManager.recordMiss();
+              if (!create) {
+                resourceManager.recordMiss();
+                if (tabId) {
+                  tabMisses[tabId] = (tabMisses[tabId] || 0) + 1;
+                  updateBadge(tabId);
+                }
+              }
               await resourceManager.saveManagerToStorage();
               responseData = { hashes, success };
               sendResponse({ data: responseData });
@@ -77,7 +151,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
             success.push(handle);
             resourceManager.recordAccess(origin, hash.value);
-            if (!create) resourceManager.recordHit(hash.value);
+            if (!create) {
+              resourceManager.recordHit(hash.value);
+              if (tabId) {
+                tabHits[tabId] = (tabHits[tabId] || 0) + 1;
+                updateBadge(tabId);
+              }
+            }
           }
           await resourceManager.saveManagerToStorage();
           responseData = { hashes, success };
@@ -145,6 +225,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           break;
         }
         case 'rewriteStylesheet': {
+          const tabId = sender.tab?.id;
           let { cssText, url, origin } = data;
           if (!cssText && url) {
             try {
@@ -182,6 +263,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const alreadyCached = !!blobURL;
             if (!blobURL) {
               resourceManager.recordMiss();
+              if (tabId) {
+                tabMisses[tabId] = (tabMisses[tabId] || 0) + 1;
+                updateBadge(tabId);
+              }
               try {
                 const fontResp = await fetch(fm.fontUrl);
                 if (!fontResp.ok) throw new Error(`HTTP ${fontResp.status}`);
@@ -200,7 +285,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               }
             }
             if (blobURL) {
-              if (alreadyCached) resourceManager.recordHit(hash.value);
+              if (alreadyCached) {
+                resourceManager.recordHit(hash.value);
+                if (tabId) {
+                  tabHits[tabId] = (tabHits[tabId] || 0) + 1;
+                  updateBadge(tabId);
+                }
+              }
               const placeholder = `__COS_FONT_${fontIdx++}__`;
               rewritten = rewritten.replace(fm.full, `url("${placeholder}")`);
               fonts.push({ placeholder, blobURL });
