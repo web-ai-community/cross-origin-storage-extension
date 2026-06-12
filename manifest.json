@@ -9,7 +9,6 @@
     "unlimitedStorage",
     "offscreen",
     "tabs",
-    "webNavigation",
     "declarativeNetRequest"
   ],
   "declarative_net_request": {
