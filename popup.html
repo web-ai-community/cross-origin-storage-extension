@@ -22,9 +22,9 @@
     <div class="container">
       <div class="panel">
         <h2>View by Origin</h2>
-        <p>
+        <label for="origin-select" class="panel-desc">
           Select an origin to see its shared resources and last access times.
-        </p>
+        </label>
         <select id="origin-select"></select>
         <div class="origin-actions">
           <button id="delete-exclusive-btn" class="delete-btn" disabled>
@@ -59,11 +59,12 @@
             </optgroup>
           </select>
         </div>
+        <fieldset id="mime-filter" class="mime-filter-bar" hidden></fieldset>
         <ul id="hashes-list"></ul>
       </div>
       <div class="panel">
         <h2>View by Resource</h2>
-        <p>Select a resource to see which origins use it.</p>
+        <label for="hash-select" class="panel-desc">Select a resource to see which origins use it.</label>
         <select id="hash-select"></select>
         <ul id="origins-list"></ul>
       </div>
@@ -71,9 +72,9 @@
 
     <div class="panel search-panel">
       <h2>Search for Resource</h2>
-      <p>
+      <label for="hash-search" class="panel-desc">
         Paste a SHA-256 hash to look up a resource and its access statistics.
-      </p>
+      </label>
       <input type="search" id="hash-search" placeholder="SHA-256 hash…" />
       <div id="hash-search-result"></div>
     </div>

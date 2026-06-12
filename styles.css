@@ -57,8 +57,13 @@ h2 {
   padding-bottom: 0.5em;
 }
 
-p {
+p,
+label.panel-desc {
   color: light-dark(#666, #bbb);
+}
+
+label.panel-desc {
+  display: block;
 }
 
 select {
@@ -158,15 +163,15 @@ button {
 }
 
 .view-btn {
-  background-color: light-dark(#f3e8fd, #2d1b4e);
-  color: light-dark(#7b1fa2, #ce93d8);
-  border-color: light-dark(#9c27b0, #7b1fa2);
+  background-color: light-dark(#fef9e7, #3b3010);
+  color: light-dark(#7a6000, #f5d563);
+  border-color: light-dark(#c8a800, #a88a00);
   font-size: 0.8em;
   padding: 0.4em 0.8em;
 }
 
 .view-btn:hover {
-  background-color: light-dark(#e1bee7, #4a1f6b);
+  background-color: light-dark(#fdf0b0, #4e4015);
 }
 
 .copy-btn {
@@ -207,10 +212,23 @@ button {
   margin-bottom: 0.75em;
 }
 
-.sort-control label {
+.sort-control label,
+.mime-filter-bar legend {
   font-size: 0.85em;
   color: light-dark(#555, #ccc);
   white-space: nowrap;
+  margin-right: 0.1em;
+}
+
+.mime-filter-bar legend small {
+  font-size: 0.85em;
+  opacity: 0.75;
+}
+
+.mime-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35em;
 }
 
 .sort-control select {
@@ -226,10 +244,10 @@ button {
 }
 
 .origin-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 0.5em;
   margin-bottom: 1em;
-  flex-wrap: wrap;
 }
 
 .stats-dl {
@@ -327,6 +345,44 @@ button {
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
+}
+
+.mime-filter-bar {
+  margin: 0 0 0.75em;
+  border: 1px solid light-dark(#ccc, #666);
+  border-radius: 4px;
+}
+
+.mime-chip {
+  font-family: ui-monospace, monospace;
+  font-size: 0.75em;
+  padding: 0.25em 0.65em;
+  border-radius: 99px;
+  border: 1px solid light-dark(#bbb, #555);
+  background: transparent;
+  color: light-dark(#555, #aaa);
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    border-color 0.12s,
+    color 0.12s;
+}
+
+.mime-chip:hover {
+  border-color: light-dark(#888, #888);
+  color: light-dark(#222, #eee);
+}
+
+.mime-chip--active {
+  background: light-dark(#1a73e8, #89b4fa);
+  border-color: light-dark(#1a73e8, #89b4fa);
+  color: light-dark(#fff, #0d1117);
+  font-weight: 600;
+}
+
+.mime-chip--active:hover {
+  background: light-dark(#1557b0, #aac4f5);
+  border-color: light-dark(#1557b0, #aac4f5);
 }
 
 .resource-item--hit {

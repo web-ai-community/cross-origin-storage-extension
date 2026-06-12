@@ -29,12 +29,17 @@ async function initializePopup() {
   const resetStatsBtn = document.getElementById('reset-stats-btn');
   const chartsGrid = document.getElementById('charts-grid');
   const chartsSection = document.getElementById('charts-section');
+  const mimeFilterBar = document.getElementById('mime-filter');
 
   // Current-page hit/miss state — populated before the first render so
   // updateHashesDisplay can annotate and re-order resources immediately.
   let currentPageHitHashes = new Set();
   let currentPageMissHashes = new Set();
   let currentTabOrigin = null;
+
+  // Active MIME type filters. Empty = no filter (show all). Reset whenever
+  // the selected origin changes or the UI does a full refresh.
+  let activeMimeFilters = new Set();
 
   let selectHighlightTimer;
   let toastTimer;
@@ -591,6 +596,60 @@ async function initializePopup() {
       })
     );
 
+    // Build and render MIME filter chips from the discovered types.
+    const allMimeTypes = [
+      ...new Set(
+        resourcesWithSize.map((r) =>
+          (r.mimeType || 'application/octet-stream').split(';')[0].trim()
+        )
+      ),
+    ].sort();
+
+    mimeFilterBar.innerHTML = '';
+    if (allMimeTypes.length > 0) {
+      mimeFilterBar.hidden = false;
+      const legend = document.createElement('legend');
+      const hint = document.createElement('small');
+      hint.textContent = '(select multiple)';
+      legend.append('Resource filter ', hint);
+      mimeFilterBar.append(legend);
+      const chipsDiv = document.createElement('div');
+      chipsDiv.className = 'mime-chips';
+      for (const mime of allMimeTypes) {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.title = mime;
+        const subtype = mime.split('/')[1] || mime;
+        chip.textContent = subtype;
+        chip.className =
+          activeMimeFilters.size > 0 && activeMimeFilters.has(mime)
+            ? 'mime-chip mime-chip--active'
+            : 'mime-chip';
+        chip.addEventListener('click', () => {
+          if (activeMimeFilters.has(mime)) {
+            activeMimeFilters.delete(mime);
+          } else {
+            activeMimeFilters.add(mime);
+          }
+          updateHashesDisplay();
+        });
+        chipsDiv.append(chip);
+      }
+      mimeFilterBar.append(chipsDiv);
+    } else {
+      mimeFilterBar.hidden = true;
+    }
+
+    // Apply MIME filter (empty set = no filter = show all).
+    const visibleResources =
+      activeMimeFilters.size === 0
+        ? resourcesWithSize
+        : resourcesWithSize.filter((r) =>
+            activeMimeFilters.has(
+              (r.mimeType || 'application/octet-stream').split(';')[0].trim()
+            )
+          );
+
     const getAccessData = (hash) => {
       if (isAllOrigins) {
         let mostRecent = null;
@@ -614,10 +673,10 @@ async function initializePopup() {
 
     switch (sortSelect.value) {
       case 'size-asc':
-        resourcesWithSize.sort((a, b) => (a.size ?? 0) - (b.size ?? 0));
+        visibleResources.sort((a, b) => (a.size ?? 0) - (b.size ?? 0));
         break;
       case 'origins-desc':
-        resourcesWithSize.sort(
+        visibleResources.sort(
           (a, b) =>
             resourceManager.getOriginsByHash(b.hash).length -
               resourceManager.getOriginsByHash(a.hash).length ||
@@ -625,7 +684,7 @@ async function initializePopup() {
         );
         break;
       case 'origins-asc':
-        resourcesWithSize.sort(
+        visibleResources.sort(
           (a, b) =>
             resourceManager.getOriginsByHash(a.hash).length -
               resourceManager.getOriginsByHash(b.hash).length ||
@@ -633,7 +692,7 @@ async function initializePopup() {
         );
         break;
       case 'recent-desc':
-        resourcesWithSize.sort(
+        visibleResources.sort(
           (a, b) =>
             (getAccessData(b.hash).mostRecent ?? 0) -
               (getAccessData(a.hash).mostRecent ?? 0) ||
@@ -641,7 +700,7 @@ async function initializePopup() {
         );
         break;
       case 'recent-asc':
-        resourcesWithSize.sort(
+        visibleResources.sort(
           (a, b) =>
             (getAccessData(a.hash).mostRecent ?? Infinity) -
               (getAccessData(b.hash).mostRecent ?? Infinity) ||
@@ -649,35 +708,35 @@ async function initializePopup() {
         );
         break;
       case 'freq-desc':
-        resourcesWithSize.sort(
+        visibleResources.sort(
           (a, b) =>
             getAccessData(b.hash).totalCount -
               getAccessData(a.hash).totalCount || (b.size ?? 0) - (a.size ?? 0)
         );
         break;
       case 'freq-asc':
-        resourcesWithSize.sort(
+        visibleResources.sort(
           (a, b) =>
             getAccessData(a.hash).totalCount -
               getAccessData(b.hash).totalCount || (b.size ?? 0) - (a.size ?? 0)
         );
         break;
       case 'mime-asc':
-        resourcesWithSize.sort((a, b) => {
+        visibleResources.sort((a, b) => {
           const ma = (a.mimeType || '').split(';')[0].trim();
           const mb = (b.mimeType || '').split(';')[0].trim();
           return ma.localeCompare(mb) || (b.size ?? 0) - (a.size ?? 0);
         });
         break;
       case 'mime-desc':
-        resourcesWithSize.sort((a, b) => {
+        visibleResources.sort((a, b) => {
           const ma = (a.mimeType || '').split(';')[0].trim();
           const mb = (b.mimeType || '').split(';')[0].trim();
           return mb.localeCompare(ma) || (b.size ?? 0) - (a.size ?? 0);
         });
         break;
       default: // 'size-desc'
-        resourcesWithSize.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
+        visibleResources.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
     }
 
     // When viewing a specific origin that matches the current tab, float
@@ -688,34 +747,37 @@ async function initializePopup() {
       selectedOrigin === currentTabOrigin &&
       currentPageHitHashes.size + currentPageMissHashes.size > 0;
     if (showPageBadges) {
-      const active = resourcesWithSize.filter(
+      const active = visibleResources.filter(
         (r) =>
           currentPageHitHashes.has(r.hash) || currentPageMissHashes.has(r.hash)
       );
-      const inactive = resourcesWithSize.filter(
+      const inactive = visibleResources.filter(
         (r) =>
           !currentPageHitHashes.has(r.hash) &&
           !currentPageMissHashes.has(r.hash)
       );
-      resourcesWithSize.splice(
+      visibleResources.splice(
         0,
-        resourcesWithSize.length,
+        visibleResources.length,
         ...active,
         ...inactive
       );
     }
 
-    if (resourcesWithSize.length === 0) {
+    if (visibleResources.length === 0) {
       const p = document.createElement('p');
       p.className = 'empty-state';
-      p.textContent = 'No resources from this origin are stored in COS.';
+      p.textContent =
+        activeMimeFilters.size > 0
+          ? 'No resources match the selected MIME type filter.'
+          : 'No resources from this origin are stored in COS.';
       hashesList.append(p);
     }
 
     for (const [
       index,
       { hash, size, mimeType },
-    ] of resourcesWithSize.entries()) {
+    ] of visibleResources.entries()) {
       const pageBadge = showPageBadges
         ? currentPageHitHashes.has(hash)
           ? 'hit'
@@ -851,6 +913,8 @@ async function initializePopup() {
    * A central function to completely refresh the UI from storage data.
    */
   async function refreshUI() {
+    activeMimeFilters = new Set();
+
     // Reload the latest data from storage.
     await resourceManager.loadManagerFromStorage();
 
@@ -1307,7 +1371,10 @@ async function initializePopup() {
     showToast('Statistics reset.');
   });
 
-  originSelect.addEventListener('change', () => updateHashesDisplay());
+  originSelect.addEventListener('change', () => {
+    activeMimeFilters = new Set();
+    updateHashesDisplay();
+  });
   sortSelect.addEventListener('change', () => {
     chrome.storage.local.set({ sortOrder: sortSelect.value });
     updateHashesDisplay();
