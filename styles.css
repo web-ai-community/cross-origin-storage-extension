@@ -329,6 +329,37 @@ button {
   text-transform: uppercase;
 }
 
+.resource-item--hit {
+  border-left: 3px solid light-dark(#2e7d32, #66bb6a);
+}
+
+.resource-item--miss {
+  border-left: 3px solid light-dark(#e65100, #ffa726);
+}
+
+.resource-page-badge {
+  display: inline-block;
+  font-size: 0.7em;
+  font-weight: 600;
+  padding: 0.15em 0.45em;
+  border-radius: 3px;
+  vertical-align: middle;
+  font-family: system-ui, sans-serif;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  line-height: 1.4;
+}
+
+.resource-page-badge--hit {
+  color: light-dark(#1b5e20, #81c784);
+  background: light-dark(#e8f5e9, #1b4332);
+}
+
+.resource-page-badge--miss {
+  color: light-dark(#bf360c, #ffccbc);
+  background: light-dark(#fff3e0, #3e1c00);
+}
+
 .text-btn {
   background: none;
   border: none;

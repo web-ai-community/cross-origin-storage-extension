@@ -30,6 +30,12 @@ async function initializePopup() {
   const chartsGrid = document.getElementById('charts-grid');
   const chartsSection = document.getElementById('charts-section');
 
+  // Current-page hit/miss state — populated before the first render so
+  // updateHashesDisplay can annotate and re-order resources immediately.
+  let currentPageHitHashes = new Set();
+  let currentPageMissHashes = new Set();
+  let currentTabOrigin = null;
+
   let selectHighlightTimer;
   let toastTimer;
   function showToast(message) {
@@ -354,7 +360,8 @@ async function initializePopup() {
     size,
     mimeType,
     selectedOrigin,
-    resourceName
+    resourceName,
+    pageBadge = null
   ) {
     const typeStr = (mimeType || 'unknown type').split(';')[0];
     const label = resourceName
@@ -362,7 +369,9 @@ async function initializePopup() {
       : `${typeStr} — ${formatBytes(size)}`;
 
     const li = document.createElement('li');
-    li.className = 'resource-item';
+    li.className = pageBadge
+      ? `resource-item resource-item--${pageBadge}`
+      : 'resource-item';
     li.title = `Hash: ${hash}`;
 
     const textContent = document.createElement('div');
@@ -370,7 +379,15 @@ async function initializePopup() {
 
     const hashDiv = document.createElement('div');
     hashDiv.className = 'hash-value';
-    hashDiv.textContent = label;
+    if (pageBadge) {
+      hashDiv.append(label, ' ');
+      const badge = document.createElement('span');
+      badge.className = `resource-page-badge resource-page-badge--${pageBadge}`;
+      badge.textContent = pageBadge === 'hit' ? 'Cache hit' : 'Cache miss';
+      hashDiv.append(badge);
+    } else {
+      hashDiv.textContent = label;
+    }
     textContent.append(hashDiv);
 
     if (selectedOrigin) {
@@ -663,6 +680,31 @@ async function initializePopup() {
         resourcesWithSize.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
     }
 
+    // When viewing a specific origin that matches the current tab, float
+    // resources that had COS activity on this page load to the top (preserving
+    // their relative primary-sort order within each group).
+    const showPageBadges =
+      !isAllOrigins &&
+      selectedOrigin === currentTabOrigin &&
+      currentPageHitHashes.size + currentPageMissHashes.size > 0;
+    if (showPageBadges) {
+      const active = resourcesWithSize.filter(
+        (r) =>
+          currentPageHitHashes.has(r.hash) || currentPageMissHashes.has(r.hash)
+      );
+      const inactive = resourcesWithSize.filter(
+        (r) =>
+          !currentPageHitHashes.has(r.hash) &&
+          !currentPageMissHashes.has(r.hash)
+      );
+      resourcesWithSize.splice(
+        0,
+        resourcesWithSize.length,
+        ...active,
+        ...inactive
+      );
+    }
+
     if (resourcesWithSize.length === 0) {
       const p = document.createElement('p');
       p.className = 'empty-state';
@@ -674,13 +716,21 @@ async function initializePopup() {
       index,
       { hash, size, mimeType },
     ] of resourcesWithSize.entries()) {
+      const pageBadge = showPageBadges
+        ? currentPageHitHashes.has(hash)
+          ? 'hit'
+          : currentPageMissHashes.has(hash)
+            ? 'miss'
+            : null
+        : null;
       hashesList.append(
         buildResourceItem(
           hash,
           size,
           mimeType,
           isAllOrigins ? null : selectedOrigin,
-          `Resource #${index + 1}`
+          `Resource #${index + 1}`,
+          pageBadge
         )
       );
     }
@@ -1089,7 +1139,7 @@ async function initializePopup() {
     if (sharingEntries.length > 0)
       appendChartSection(
         chartsGrid,
-        'By origins per resource',
+        'By origins',
         sharingEntries,
         maxSharingCount
       );
@@ -1300,6 +1350,28 @@ async function initializePopup() {
   // Restore saved sort order before first render.
   const { sortOrder } = await chrome.storage.local.get('sortOrder');
   if (sortOrder) sortSelect.value = sortOrder;
+
+  // Fetch current-page hit/miss data BEFORE the first render so
+  // updateHashesDisplay can annotate and sort resources on first paint.
+  const activeTab = await getCurrentTab();
+  if (activeTab?.url) {
+    try {
+      const parsed = new URL(activeTab.url);
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        currentTabOrigin = parsed.origin;
+      }
+    } catch (_) {}
+  }
+  if (activeTab?.id) {
+    const resp = await chrome.runtime.sendMessage({
+      action: 'getTabStats',
+      data: { tabId: activeTab.id },
+    });
+    if (resp?.data) {
+      currentPageHitHashes = new Set(resp.data.hitHashes || []);
+      currentPageMissHashes = new Set(resp.data.missHashes || []);
+    }
+  }
 
   // Initial population of the UI.
   await refreshUI();

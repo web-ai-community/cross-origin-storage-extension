@@ -42,7 +42,9 @@ async function setupOffscreenDocument(path) {
 const resourceManager = new ResourceManager();
 
 // Create the offscreen document for Blob operations.
-(async () => {
+// Exposed as a module-level promise so getFileData can await it before sending
+// getBlobURL — the offscreen doc must exist before it can receive messages.
+const offscreenSetupPromise = (async () => {
   await setupOffscreenDocument('offscreen.html');
   // Load the initial state when the extension starts.
   await resourceManager.loadManagerFromStorage();
@@ -52,9 +54,25 @@ const resourceManager = new ResourceManager();
 const cachePromise = caches.open('cos-storage');
 let cache;
 
-// Per-tab COS hit/miss counters for the extension badge.
-const tabHits = {};
-const tabMisses = {};
+// Per-tab COS hit/miss tracking for the extension badge and popup annotations.
+// Each entry is a Set of hex hash strings so the popup knows which specific
+// resources were hit or missed, not just counts.
+// Reset is driven by sender.documentId — a unique ID per document context
+// that changes on every page load (including same-URL refreshes), avoiding
+// the race between navigation events and content-script messages.
+const tabHitHashes = {};
+const tabMissHashes = {};
+const tabDocumentIds = {};
+
+function maybeResetForNewPage(tabId, documentId) {
+  if (!tabId || !documentId) return;
+  if (tabDocumentIds[tabId] !== documentId) {
+    tabDocumentIds[tabId] = documentId;
+    delete tabHitHashes[tabId];
+    delete tabMissHashes[tabId];
+    chrome.action.setBadgeText({ text: '', tabId });
+  }
+}
 
 function formatBadgeCount(n) {
   return n < 1000 ? String(n) : `${Math.floor(n / 1000)}K`;
@@ -62,14 +80,14 @@ function formatBadgeCount(n) {
 
 function updateBadge(tabId) {
   if (!tabId) return;
-  const hits = tabHits[tabId] || 0;
-  const misses = tabMisses[tabId] || 0;
+  const hits = tabHitHashes[tabId]?.size || 0;
+  const misses = tabMissHashes[tabId]?.size || 0;
   if (hits > 0) {
-    chrome.action.setBadgeText({ text: `H${formatBadgeCount(hits)}`, tabId });
+    chrome.action.setBadgeText({ text: formatBadgeCount(hits), tabId });
     chrome.action.setBadgeBackgroundColor({ color: '#2e7d32', tabId });
     chrome.action.setBadgeTextColor({ color: '#ffffff', tabId });
   } else if (misses > 0) {
-    chrome.action.setBadgeText({ text: `M${formatBadgeCount(misses)}`, tabId });
+    chrome.action.setBadgeText({ text: formatBadgeCount(misses), tabId });
     chrome.action.setBadgeBackgroundColor({ color: '#e65100', tabId });
     chrome.action.setBadgeTextColor({ color: '#ffffff', tabId });
   } else {
@@ -77,22 +95,10 @@ function updateBadge(tabId) {
   }
 }
 
-function resetTabBadge(tabId) {
-  delete tabHits[tabId];
-  delete tabMisses[tabId];
-  chrome.action.setBadgeText({ text: '', tabId });
-}
-
-// webNavigation.onCommitted fires exactly once per main-frame navigation
-// (including same-URL refreshes), unlike tabs.onUpdated which can fire
-// multiple times per load and misses refreshes when the URL doesn't change.
-chrome.webNavigation.onCommitted.addListener(({ tabId, frameId }) => {
-  if (frameId === 0) resetTabBadge(tabId);
-});
-
 chrome.tabs.onRemoved.addListener((tabId) => {
-  delete tabHits[tabId];
-  delete tabMisses[tabId];
+  delete tabHitHashes[tabId];
+  delete tabMissHashes[tabId];
+  delete tabDocumentIds[tabId];
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -108,6 +114,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'requestFileHandles': {
           const { origin, hashes, create } = data;
           const tabId = sender.tab?.id;
+          maybeResetForNewPage(tabId, sender.documentId);
           const success = [];
           await resourceManager.loadManagerFromStorage();
           for (const hash of hashes) {
@@ -116,7 +123,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               if (!create) {
                 resourceManager.recordMiss();
                 if (tabId) {
-                  tabMisses[tabId] = (tabMisses[tabId] || 0) + 1;
+                  if (!tabMissHashes[tabId]) tabMissHashes[tabId] = new Set();
+                  tabMissHashes[tabId].add(hash.value);
                   updateBadge(tabId);
                 }
               }
@@ -130,7 +138,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             if (!create) {
               resourceManager.recordHit(hash.value);
               if (tabId) {
-                tabHits[tabId] = (tabHits[tabId] || 0) + 1;
+                if (!tabHitHashes[tabId]) tabHitHashes[tabId] = new Set();
+                tabHitHashes[tabId].add(hash.value);
                 updateBadge(tabId);
               }
             }
@@ -202,6 +211,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         case 'rewriteStylesheet': {
           const tabId = sender.tab?.id;
+          maybeResetForNewPage(tabId, sender.documentId);
           let { cssText, url, origin } = data;
           if (!cssText && url) {
             try {
@@ -240,7 +250,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             if (!blobURL) {
               resourceManager.recordMiss();
               if (tabId) {
-                tabMisses[tabId] = (tabMisses[tabId] || 0) + 1;
+                if (!tabMissHashes[tabId]) tabMissHashes[tabId] = new Set();
+                tabMissHashes[tabId].add(hash.value);
                 updateBadge(tabId);
               }
               try {
@@ -264,7 +275,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               if (alreadyCached) {
                 resourceManager.recordHit(hash.value);
                 if (tabId) {
-                  tabHits[tabId] = (tabHits[tabId] || 0) + 1;
+                  if (!tabHitHashes[tabId]) tabHitHashes[tabId] = new Set();
+                  tabHitHashes[tabId].add(hash.value);
                   updateBadge(tabId);
                 }
               }
@@ -342,6 +354,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               accessHistory,
             };
           }
+          break;
+        }
+        case 'getTabStats': {
+          const { tabId } = data;
+          responseData = {
+            hitHashes: [...(tabHitHashes[tabId] || [])],
+            missHashes: [...(tabMissHashes[tabId] || [])],
+          };
           break;
         }
         default:
@@ -427,6 +447,10 @@ async function getFileData(hash) {
   if (!match) {
     return false;
   }
+  // Wait for the offscreen document to be ready. When the service worker
+  // restarts after inactivity, setupOffscreenDocument runs asynchronously;
+  // sending getBlobURL before it completes would get no listener and hang.
+  await offscreenSetupPromise;
   return new Promise((resolve) => {
     // Data comes as Blob out of Cache, but send as Blob URL.
     chrome.runtime.sendMessage(
@@ -438,7 +462,7 @@ async function getFileData(hash) {
         },
       },
       (response) => {
-        resolve(response.data.blobURL);
+        resolve(response?.data?.blobURL ?? false);
       }
     );
   });
