@@ -65,11 +65,13 @@ function updateBadge(tabId) {
   const hits = tabHits[tabId] || 0;
   const misses = tabMisses[tabId] || 0;
   if (hits > 0) {
-    chrome.action.setBadgeText({ text: formatBadgeCount(hits), tabId });
+    chrome.action.setBadgeText({ text: `H${formatBadgeCount(hits)}`, tabId });
     chrome.action.setBadgeBackgroundColor({ color: '#2e7d32', tabId });
+    chrome.action.setBadgeTextColor({ color: '#ffffff', tabId });
   } else if (misses > 0) {
-    chrome.action.setBadgeText({ text: formatBadgeCount(misses), tabId });
+    chrome.action.setBadgeText({ text: `M${formatBadgeCount(misses)}`, tabId });
     chrome.action.setBadgeBackgroundColor({ color: '#e65100', tabId });
+    chrome.action.setBadgeTextColor({ color: '#ffffff', tabId });
   } else {
     chrome.action.setBadgeText({ text: '', tabId });
   }
@@ -81,9 +83,11 @@ function resetTabBadge(tabId) {
   chrome.action.setBadgeText({ text: '', tabId });
 }
 
-// Reset on every new page load, including same-URL refreshes.
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === 'loading') resetTabBadge(tabId);
+// webNavigation.onCommitted fires exactly once per main-frame navigation
+// (including same-URL refreshes), unlike tabs.onUpdated which can fire
+// multiple times per load and misses refreshes when the URL doesn't change.
+chrome.webNavigation.onCommitted.addListener(({ tabId, frameId }) => {
+  if (frameId === 0) resetTabBadge(tabId);
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
