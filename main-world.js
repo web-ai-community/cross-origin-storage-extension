@@ -720,6 +720,71 @@
       configurable: true,
     });
 
+    // Blob: workers have self.location pointing to the blob: URL, so relative
+    // fetch/XHR/importScripts calls fail to parse (new URL('/path', 'blob:…')
+    // is invalid per the WHATWG URL spec).  Patch these APIs to resolve
+    // relative URLs against __cosWorkerBaseURL — the original HTTP(S) script
+    // URL injected by the wrapper loader.  The inner try/catch handles the
+    // temporal dead zone when this polyfill executes before the loader's const
+    // is initialized, and the undeclared-variable case when running outside a
+    // COS blob wrapper.
+    if (typeof fetch !== 'undefined') {
+      const _nativeFetch = fetch;
+      self.fetch = function (input, init) {
+        if (typeof input === 'string') {
+          let base;
+          try {
+            base = __cosWorkerBaseURL;
+          } catch (_) {}
+          if (base) {
+            try {
+              input = new URL(input, base).href;
+            } catch (_) {}
+          }
+        }
+        return _nativeFetch.call(self, input, init);
+      };
+    }
+    if (typeof XMLHttpRequest !== 'undefined') {
+      const _open = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+        if (typeof url === 'string') {
+          let base;
+          try {
+            base = __cosWorkerBaseURL;
+          } catch (_) {}
+          if (base) {
+            try {
+              url = new URL(url, base).href;
+            } catch (_) {}
+          }
+        }
+        return _open.call(this, method, url, ...rest);
+      };
+    }
+    if (typeof importScripts !== 'undefined') {
+      const _importScripts = importScripts;
+      self.importScripts = function (...urls) {
+        let base;
+        try {
+          base = __cosWorkerBaseURL;
+        } catch (_) {}
+        if (base) {
+          urls = urls.map((url) => {
+            if (typeof url === 'string') {
+              try {
+                return new URL(url, base).href;
+              } catch (_) {
+                return url;
+              }
+            }
+            return url;
+          });
+        }
+        return _importScripts.apply(self, urls);
+      };
+    }
+
     // Sub-worker patching: dedicated workers only — SharedWorkers don't spawn
     // child workers through this relay in the current implementation.
     if (!isSharedWorker && typeof Worker !== 'undefined') {
