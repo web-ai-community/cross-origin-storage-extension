@@ -147,10 +147,14 @@
   <body>
     <h1>Cross-Origin Storage — Test Page</h1>
     <p>
-      This page tests
+      This page tests both
       <code>navigator.crossOriginStorage.requestFileHandles()</code>
-      for the five combinations of existing and non-existing resources. It
-      requires the Cross-Origin Storage extension to be installed and enabled.
+      (plural, deprecated — see
+      <a href="https://github.com/WICG/cross-origin-storage/issues/61">#61</a>)
+      and the new singular
+      <code>navigator.crossOriginStorage.requestFileHandle()</code>
+      API. It requires the Cross-Origin Storage extension to be installed and
+      enabled.
     </p>
     <p>
       Known issue under test: when requesting multiple resources and only
@@ -174,6 +178,33 @@
         </tr>
       </thead>
       <tbody id="results">
+        <!-- rows injected by JS -->
+      </tbody>
+    </table>
+
+
+    <h2>Singular <code>requestFileHandle()</code> Test Results</h2>
+    <p>
+      Tests for the new singular
+      <code>navigator.crossOriginStorage.requestFileHandle(hash, options)</code>
+      API, which takes a single hash object and returns a single
+      <code>FileSystemFileHandle</code> directly. See
+      <a href="https://github.com/WICG/cross-origin-storage/issues/61"
+        >WICG/cross-origin-storage#61</a
+      >.
+    </p>
+    <button class="run-all" id="run-singular-tests">Run singular tests</button>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Scenario</th>
+          <th>Status</th>
+          <th>Run</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody id="singular-results">
         <!-- rows injected by JS -->
       </tbody>
     </table>
@@ -361,8 +392,8 @@
         const blob = new Blob([content], { type: 'text/plain' });
         const hexValue = await sha256Hex(content);
         const hash = hashObj(hexValue);
-        const [handle] = await navigator.crossOriginStorage.requestFileHandles(
-          [hash],
+        const handle = await navigator.crossOriginStorage.requestFileHandle(
+          hash,
           { create: true }
         );
         const writable = await handle.createWritable();
@@ -405,7 +436,7 @@
       const TESTS = [
         {
           id: 'single-exists',
-          label: 'Single resource exists',
+          label: 'Single resource exists (plural — deprecated)',
           async run() {
             log('Test 1: storing file A…');
             const { hash, content } = await storeTextBlob('file-A');
@@ -429,7 +460,7 @@
 
         {
           id: 'single-missing',
-          label: 'Single resource does not exist',
+          label: 'Single resource does not exist (plural — deprecated)',
           async run() {
             log('Test 2: requesting non-existent hash…');
             try {
@@ -458,7 +489,7 @@
 
         {
           id: 'multi-all-exist',
-          label: 'Multiple resources — all exist',
+          label: 'Multiple resources — all exist (plural — deprecated)',
           async run() {
             log('Test 3: storing files B and C…');
             const a = await storeTextBlob('file-B');
@@ -492,7 +523,7 @@
 
         {
           id: 'multi-none-exist',
-          label: 'Multiple resources — none exist',
+          label: 'Multiple resources — none exist (plural — deprecated)',
           async run() {
             log('Test 4: requesting two non-existent hashes…');
             try {
@@ -522,7 +553,7 @@
 
         {
           id: 'multi-some-exist',
-          label: 'Multiple resources — only some exist',
+          label: 'Multiple resources — only some exist (plural — deprecated)',
           async run() {
             log(
               'Test 5: storing file D, then requesting it together with a missing hash…'
@@ -589,6 +620,102 @@
         },
       ];
 
+
+      // ---------------------------------------------------------------------------
+      // Singular requestFileHandle() tests
+      // ---------------------------------------------------------------------------
+
+      const SINGULAR_TESTS = [
+        {
+          id: 'singular-exists',
+          label: 'requestFileHandle() — resource exists',
+          async run() {
+            log('Singular test 1: storing file S-A…');
+            const content = 'cos-test-singular-A';
+            const blob = new Blob([content], { type: 'text/plain' });
+            const hexValue = await sha256Hex(content);
+            const hash = hashObj(hexValue);
+            const wh = await navigator.crossOriginStorage.requestFileHandle(
+              hash,
+              { create: true }
+            );
+            const writable = await wh.createWritable();
+            await writable.write(blob);
+            await writable.close();
+            log(`Singular test 1: stored with hash ${hash.value.slice(0, 16)}…`);
+            const handle = await navigator.crossOriginStorage.requestFileHandle(hash);
+            const file = await handle.getFile();
+            const text = await file.text();
+            if (text !== content) {
+              return {
+                pass: false,
+                detail: `Expected "${content}", got "${text}"`,
+              };
+            }
+            return {
+              pass: true,
+              detail: `Returned File with correct content: "${text}"`,
+            };
+          },
+        },
+
+        {
+          id: 'singular-missing',
+          label: 'requestFileHandle() — resource does not exist',
+          async run() {
+            log('Singular test 2: requesting non-existent hash…');
+            try {
+              await navigator.crossOriginStorage.requestFileHandle(MISSING_HASH_1);
+              return {
+                pass: false,
+                detail: 'Expected NotFoundError but call resolved without error.',
+              };
+            } catch (err) {
+              if (err.name === 'NotFoundError') {
+                return {
+                  pass: true,
+                  detail: `Correctly threw ${err.name}: ${err.message}`,
+                };
+              }
+              return {
+                pass: false,
+                detail: `Threw unexpected error ${err.name}: ${err.message}`,
+              };
+            }
+          },
+        },
+
+        {
+          id: 'singular-write-read',
+          label: 'requestFileHandle() — write then read roundtrip',
+          async run() {
+            log('Singular test 3: write+read roundtrip…');
+            const content = 'cos-test-singular-B';
+            const blob = new Blob([content], { type: 'text/plain' });
+            const hash = hashObj(await sha256Hex(content));
+            const wh = await navigator.crossOriginStorage.requestFileHandle(
+              hash,
+              { create: true }
+            );
+            const writable = await wh.createWritable();
+            await writable.write(blob);
+            await writable.close();
+            const rh = await navigator.crossOriginStorage.requestFileHandle(hash);
+            const text = await (await rh.getFile()).text();
+            if (text !== content) {
+              return {
+                pass: false,
+                detail: `Expected "${content}", got "${text}"`,
+              };
+            }
+            return {
+              pass: true,
+              detail: `Write+read roundtrip succeeded: "${text}"`,
+            };
+          },
+        },
+      ];
+
       // ---------------------------------------------------------------------------
       // UI
       // ---------------------------------------------------------------------------
@@ -648,6 +775,39 @@
         .addEventListener('click', async () => {
           for (let i = 0; i < TESTS.length; i++) {
             await runTest(TESTS[i], rows[i]);
+          }
+          for (let i = 0; i < SINGULAR_TESTS.length; i++) {
+            await runTest(SINGULAR_TESTS[i], singularRows[i]);
+          }
+        });
+
+
+      const singularTbody = document.getElementById('singular-results');
+      const singularRows = SINGULAR_TESTS.map((test, idx) => {
+        const tr = document.createElement('tr');
+        tr.id = `row-${test.id}`;
+        tr.innerHTML = `
+          <td>${idx + 1}</td>
+          <td>${test.label}</td>
+          <td class="status-cell"><span class="badge badge-pending">pending</span></td>
+          <td><button class="run-btn">Run</button></td>
+          <td><pre class="detail"></pre></td>
+        `;
+        singularTbody.append(tr);
+        return tr;
+      });
+
+      singularRows.forEach((rowEl, idx) => {
+        rowEl.querySelector('.run-btn').addEventListener('click', () => {
+          runTest(SINGULAR_TESTS[idx], rowEl);
+        });
+      });
+
+      document
+        .getElementById('run-singular-tests')
+        .addEventListener('click', async () => {
+          for (let i = 0; i < SINGULAR_TESTS.length; i++) {
+            await runTest(SINGULAR_TESTS[i], singularRows[i]);
           }
         });
 
@@ -1464,8 +1624,8 @@
         const blob = new Blob([content], { type: 'text/plain' });
         const hexValue = await sha256Hex(content);
         const hash = hashObj(hexValue);
-        const [handle] = await navigator.crossOriginStorage.requestFileHandles(
-          [hash],
+        const handle = await navigator.crossOriginStorage.requestFileHandle(
+          hash,
           { create: true }
         );
         const writable = await handle.createWritable();
@@ -1480,7 +1640,7 @@
       const TESTS = [
         {
           id: 'single-exists',
-          label: 'Single resource exists',
+          label: 'Single resource exists (plural — deprecated)',
           async run() {
             log('Worker Test 1: storing file A…');
             const { hash, content } = await storeTextBlob('file-A');
@@ -1504,7 +1664,7 @@
 
         {
           id: 'single-missing',
-          label: 'Single resource does not exist',
+          label: 'Single resource does not exist (plural — deprecated)',
           async run() {
             log('Worker Test 2: requesting non-existent hash…');
             try {
@@ -1532,7 +1692,7 @@
 
         {
           id: 'multi-all-exist',
-          label: 'Multiple resources — all exist',
+          label: 'Multiple resources — all exist (plural — deprecated)',
           async run() {
             log('Worker Test 3: storing files B and C…');
             const a = await storeTextBlob('file-B');
@@ -1566,7 +1726,7 @@
 
         {
           id: 'multi-none-exist',
-          label: 'Multiple resources — none exist',
+          label: 'Multiple resources — none exist (plural — deprecated)',
           async run() {
             log('Worker Test 4: requesting two non-existent hashes…');
             try {
@@ -1595,7 +1755,7 @@
 
         {
           id: 'multi-some-exist',
-          label: 'Multiple resources — only some exist',
+          label: 'Multiple resources — only some exist (plural — deprecated)',
           async run() {
             log(
               'Worker Test 5: storing file D, then requesting it together with a missing hash…'
