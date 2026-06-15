@@ -482,8 +482,57 @@
     });
   }
 
+  // Deprecation warning message for the plural requestFileHandles() method.
+  // Prepared here for future use; not yet logged to avoid breaking changes.
+  // See: https://github.com/WICG/cross-origin-storage/issues/61
+  const _requestFileHandlesDeprecationWarning =
+    `[Cross-Origin Storage] navigator.crossOriginStorage.requestFileHandles() ` +
+    `is deprecated and will be removed in a future version. ` +
+    `Use requestFileHandle() (singular) instead. ` +
+    `See https://github.com/WICG/cross-origin-storage/issues/61`;
+
+  function _validateHash(hash, methodName) {
+    if (!hash.value) {
+      throw new TypeError(
+        `Failed to execute '${methodName}': missing required 'hash.value'.`
+      );
+    }
+    if (!/^[0-9a-f]{64}$/.test(hash.value)) {
+      throw new TypeError(
+        `Failed to execute '${methodName}': 'hash.value' must be a valid lowercase hexadecimal string of length 64.`
+      );
+    }
+    if (!hash.algorithm) {
+      throw new TypeError(
+        `Failed to execute '${methodName}': missing required 'hash.algorithm'.`
+      );
+    }
+    if (!['SHA-1', 'SHA-256', 'SHA-384', 'SHA-512'].includes(hash.algorithm)) {
+      throw new TypeError(
+        `Failed to execute '${methodName}': 'hash.algorithm' must be a valid HashAlgorithmIdentifier (e.g. "SHA-256").`
+      );
+    }
+  }
+
   const crossOriginStorage = {
+    requestFileHandle: async (hash, options = {}) => {
+      if (!hash) {
+        throw new TypeError(
+          `Failed to execute 'requestFileHandle': first argument 'hash' is required.`
+        );
+      }
+      _validateHash(hash, 'requestFileHandle');
+      const { create = false } = options;
+      const [handle] = await requestFileHandlesWithOptionalPrompt(
+        [hash],
+        create
+      );
+      return handle;
+    },
+
     requestFileHandles: async (hashes, options = {}) => {
+      // TODO: uncomment once implementations have migrated to requestFileHandle():
+      // console.warn(_requestFileHandlesDeprecationWarning);
       if (!hashes) {
         throw new TypeError(
           `Failed to execute 'requestFileHandles': first argument 'hashes' is required.`
@@ -495,28 +544,7 @@
         );
       }
       for (const hash of hashes) {
-        if (!hash.value) {
-          throw new TypeError(
-            `Failed to execute 'requestFileHandles': missing required 'hash.value'.`
-          );
-        }
-        if (!/^[0-9a-f]{64}$/.test(hash.value)) {
-          throw new TypeError(
-            `Failed to execute 'requestFileHandles': 'hash.value' must be a valid lowercase hexadecimal string of length 64.`
-          );
-        }
-        if (!hash.algorithm) {
-          throw new TypeError(
-            `Failed to execute 'requestFileHandles': missing required 'hash.algorithm'.`
-          );
-        }
-        if (
-          !['SHA-1', 'SHA-256', 'SHA-384', 'SHA-512'].includes(hash.algorithm)
-        ) {
-          throw new TypeError(
-            `Failed to execute 'requestFileHandles': 'hash.algorithm' must be a valid HashAlgorithmIdentifier (e.g. "SHA-256").`
-          );
-        }
+        _validateHash(hash, 'requestFileHandles');
       }
       const { create = false } = options;
       return requestFileHandlesWithOptionalPrompt(hashes, create);
@@ -629,49 +657,45 @@
       });
     }
 
-    const workerCrossOriginStorage = {
-      requestFileHandles: async (hashes, options = {}) => {
-        if (!hashes) {
-          throw new TypeError(
-            `Failed to execute 'requestFileHandles': first argument 'hashes' is required.`
-          );
-        }
-        if (!Array.isArray(hashes)) {
-          throw new TypeError(
-            `Failed to execute 'requestFileHandles': first argument 'hashes' must be an array.`
-          );
-        }
-        for (const hash of hashes) {
-          if (!hash.value) {
-            throw new TypeError(
-              `Failed to execute 'requestFileHandles': missing required 'hash.value'.`
-            );
-          }
-          if (!/^[0-9a-f]{64}$/.test(hash.value)) {
-            throw new TypeError(
-              `Failed to execute 'requestFileHandles': 'hash.value' must be a valid lowercase hexadecimal string of length 64.`
-            );
-          }
-          if (!hash.algorithm) {
-            throw new TypeError(
-              `Failed to execute 'requestFileHandles': missing required 'hash.algorithm'.`
-            );
-          }
-          if (
-            !['SHA-1', 'SHA-256', 'SHA-384', 'SHA-512'].includes(hash.algorithm)
-          ) {
-            throw new TypeError(
-              `Failed to execute 'requestFileHandles': 'hash.algorithm' must be a valid HashAlgorithmIdentifier (e.g. "SHA-256").`
-            );
-          }
-        }
-        const { create = false } = options;
-        const { handleIds } = await cosRelay('requestFileHandles', {
-          hashes,
-          create,
-          origin: self.location.origin,
-        });
-        return handleIds.map((handleId, i) => ({
+    // Deprecation warning message for the plural requestFileHandles() method.
+    // Prepared here for future use; not yet logged to avoid breaking changes.
+    // See: https://github.com/WICG/cross-origin-storage/issues/61
+    const _requestFileHandlesDeprecationWarning =
+      `[Cross-Origin Storage] navigator.crossOriginStorage.requestFileHandles() ` +
+      `is deprecated and will be removed in a future version. ` +
+      `Use requestFileHandle() (singular) instead. ` +
+      `See https://github.com/WICG/cross-origin-storage/issues/61`;
+
+    function _validateHash(hash, methodName) {
+      if (!hash.value) {
+        throw new TypeError(
+          `Failed to execute '${methodName}': missing required 'hash.value'.`
+        );
+      }
+      if (!/^[0-9a-f]{64}$/.test(hash.value)) {
+        throw new TypeError(
+          `Failed to execute '${methodName}': 'hash.value' must be a valid lowercase hexadecimal string of length 64.`
+        );
+      }
+      if (!hash.algorithm) {
+        throw new TypeError(
+          `Failed to execute '${methodName}': missing required 'hash.algorithm'.`
+        );
+      }
+      if (!['SHA-1', 'SHA-256', 'SHA-384', 'SHA-512'].includes(hash.algorithm)) {
+        throw new TypeError(
+          `Failed to execute '${methodName}': 'hash.algorithm' must be a valid HashAlgorithmIdentifier (e.g. "SHA-256").`
+        );
+      }
+    }
+
+    async function _cosRequestFileHandles(hashes, create) {
+      const { handleIds } = await cosRelay('requestFileHandles', {
+        hashes,
+        create,
+        origin: self.location.origin,
+      });
+      return handleIds.map((handleId, i) => ({
           getFile: async () => {
             const result = await cosRelay('getFileData', { handleId });
             return new File([result.data], 'file', {
@@ -711,6 +735,39 @@
             close: async () => {},
           }),
         }));
+    }
+
+    const workerCrossOriginStorage = {
+      requestFileHandle: async (hash, options = {}) => {
+        if (!hash) {
+          throw new TypeError(
+            `Failed to execute 'requestFileHandle': first argument 'hash' is required.`
+          );
+        }
+        _validateHash(hash, 'requestFileHandle');
+        const { create = false } = options;
+        const [handle] = await _cosRequestFileHandles([hash], create);
+        return handle;
+      },
+
+      requestFileHandles: async (hashes, options = {}) => {
+        // TODO: uncomment once implementations have migrated to requestFileHandle():
+        // console.warn(_requestFileHandlesDeprecationWarning);
+        if (!hashes) {
+          throw new TypeError(
+            `Failed to execute 'requestFileHandles': first argument 'hashes' is required.`
+          );
+        }
+        if (!Array.isArray(hashes)) {
+          throw new TypeError(
+            `Failed to execute 'requestFileHandles': first argument 'hashes' must be an array.`
+          );
+        }
+        for (const hash of hashes) {
+          _validateHash(hash, 'requestFileHandles');
+        }
+        const { create = false } = options;
+        return _cosRequestFileHandles(hashes, create);
       },
     };
 
