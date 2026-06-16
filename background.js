@@ -375,10 +375,10 @@ function findCOSMatches(cssText) {
   const matches = [];
   // integrity() before cross-origin-storage()
   const RE_INT_FIRST =
-    /url\s*\(\s*["']([^"']+)["']\s+integrity\s*\(\s*["'](sha(?:256|384|512)-[A-Za-z0-9+/=]+)["']\s*\)\s+cross-origin-storage\s*\(\s*([^)]*?)\s*\)\s*\)/g;
+    /url\s*\(\s*["']([^"']+)["']\s*integrity\s*\(\s*["'](sha(?:256|384|512)-[A-Za-z0-9+/=]+)["']\s*\)\s*cross-origin-storage\s*\(\s*([^)]*?)\s*\)\s*\)/g;
   // cross-origin-storage() before integrity()
   const RE_COS_FIRST =
-    /url\s*\(\s*["']([^"']+)["']\s+cross-origin-storage\s*\(\s*([^)]*?)\s*\)\s+integrity\s*\(\s*["'](sha(?:256|384|512)-[A-Za-z0-9+/=]+)["']\s*\)\s*\)/g;
+    /url\s*\(\s*["']([^"']+)["']\s*cross-origin-storage\s*\(\s*([^)]*?)\s*\)\s*integrity\s*\(\s*["'](sha(?:256|384|512)-[A-Za-z0-9+/=]+)["']\s*\)\s*\)/g;
   let m;
   while ((m = RE_INT_FIRST.exec(cssText)) !== null)
     matches.push({
