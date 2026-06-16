@@ -142,6 +142,22 @@
       .run-all:hover {
         background-color: #2a9a2a;
       }
+
+      .worker-cos-notice {
+        border-left: 4px solid #f0a500;
+        padding: 0.6em 1em;
+        border-radius: 0 4px 4px 0;
+        font-size: 0.9em;
+        margin-block: 0.5em;
+        background-color: #3d2b00;
+      }
+
+      @media (prefers-color-scheme: light) {
+        .worker-cos-notice {
+          background-color: #fff3e0;
+          color: #3e2c00;
+        }
+      }
     </style>
   </head>
   <body>
@@ -214,6 +230,15 @@
       <code>navigator.crossOriginStorage</code> is also available on worker
       threads.
     </p>
+    <p class="worker-cos-notice" hidden>
+      ⚠️ <code>navigator.crossOriginStorage</code> is not available in Workers
+      on this page. Enable
+      <strong
+        >Enable the COS API in <code>Worker</code> and
+        <code>SharedWorker</code></strong
+      >
+      in the extension options to run these tests.
+    </p>
     <button class="run-all" id="run-all-worker">Run all worker tests</button>
 
     <table>
@@ -284,6 +309,15 @@
         implementation.
       </li>
     </ul>
+    <p class="worker-cos-notice" hidden>
+      ⚠️ <code>navigator.crossOriginStorage</code> is not available in Workers
+      on this page. Enable
+      <strong
+        >Enable the COS API in <code>Worker</code> and
+        <code>SharedWorker</code></strong
+      >
+      in the extension options to run these tests.
+    </p>
     <button class="run-all" id="run-all-variants">Run all variant tests</button>
 
     <table>
@@ -422,6 +456,50 @@
           logEl.append(line);
         }
         logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      // ---------------------------------------------------------------------------
+      // Worker COS feature detection
+      // ---------------------------------------------------------------------------
+
+      let cosInWorker = false;
+
+      // Spawns a minimal Worker that polls for navigator.crossOriginStorage
+      // (injected asynchronously by the extension after the cos-setup handshake).
+      // Returns true if the extension has patched Worker and COS is available.
+      async function probeWorkerCOS() {
+        return new Promise((resolve) => {
+          const code =
+            '(async()=>{' +
+            'const d=Date.now();' +
+            'while(!navigator.crossOriginStorage&&Date.now()-d<2000)' +
+            'await new Promise(r=>setTimeout(r,50));' +
+            'self.postMessage(!!navigator.crossOriginStorage);' +
+            'self.close();' +
+            '})();';
+          let w;
+          try {
+            const blob = new Blob([code], { type: 'text/javascript' });
+            const url = URL.createObjectURL(blob);
+            w = new Worker(url);
+            URL.revokeObjectURL(url);
+          } catch {
+            resolve(false);
+            return;
+          }
+          const t = setTimeout(() => {
+            w.terminate();
+            resolve(false);
+          }, 5000);
+          w.onmessage = ({ data }) => {
+            clearTimeout(t);
+            resolve(!!data);
+          };
+          w.onerror = () => {
+            clearTimeout(t);
+            resolve(false);
+          };
+        });
       }
 
       // ---------------------------------------------------------------------------
@@ -1308,11 +1386,13 @@
         for (let i = 0; i < TESTS.length; i++) {
           await runTest(TESTS[i], rows[i]);
         }
-        for (let i = 0; i < TESTS.length; i++) {
-          await runWorkerTest(i, workerRows[i]);
-        }
-        for (let i = 0; i < WORKER_VARIANTS.length; i++) {
-          await runVariantTest(WORKER_VARIANTS[i], variantRows[i]);
+        if (cosInWorker) {
+          for (let i = 0; i < TESTS.length; i++) {
+            await runWorkerTest(i, workerRows[i]);
+          }
+          for (let i = 0; i < WORKER_VARIANTS.length; i++) {
+            await runVariantTest(WORKER_VARIANTS[i], variantRows[i]);
+          }
         }
         for (let i = 0; i < STRESS_TESTS.length; i++) {
           await runStressTest(STRESS_TESTS[i], stressRows[i]);
@@ -1320,6 +1400,29 @@
         for (let i = 0; i < CSS_TESTS.length; i++) {
           await runCSSTest(CSS_TESTS[i], cssRows[i]);
         }
+      });
+
+      // Probe for COS-in-Worker support and disable affected UI if unavailable.
+      probeWorkerCOS().then((available) => {
+        cosInWorker = available;
+        if (available) return;
+        document
+          .querySelectorAll('.worker-cos-notice')
+          .forEach((el) => (el.hidden = false));
+        document.getElementById('run-all-worker').disabled = true;
+        document.getElementById('run-all-variants').disabled = true;
+        workerRows.forEach((rowEl) => {
+          rowEl.querySelector('.run-btn').disabled = true;
+          const badge = rowEl.querySelector('.badge');
+          badge.className = 'badge badge-pending';
+          badge.textContent = 'n/a';
+        });
+        variantRows.forEach((rowEl) => {
+          rowEl.querySelector('.run-btn').disabled = true;
+          const badge = rowEl.querySelector('.badge');
+          badge.className = 'badge badge-pending';
+          badge.textContent = 'n/a';
+        });
       });
 
       // -------------------------------------------------------------------------

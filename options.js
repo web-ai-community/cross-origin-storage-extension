@@ -3,7 +3,6 @@
 
 import './input-switch-polyfill.js';
 
-const showPromptCheckbox = document.getElementById('show-prompt');
 const workerPatchCheckbox = document.getElementById('worker-patch');
 const toast = document.getElementById('toast');
 
@@ -14,24 +13,12 @@ function showToast() {
   }, 3000);
 }
 
-// Load settings.
-chrome.storage.local.get(['showPrompt', 'workerPatchEnabled'], (result) => {
-  showPromptCheckbox.checked = !!result.showPrompt;
-  workerPatchCheckbox.checked = !!result.workerPatchEnabled;
+// Load setting.
+chrome.storage.local.get('workerPatchEnabled', ({ workerPatchEnabled }) => {
+  workerPatchCheckbox.checked = !!workerPatchEnabled;
 });
 
-// Save showPrompt setting.
-showPromptCheckbox.addEventListener('change', () => {
-  const showPrompt = showPromptCheckbox.checked;
-  chrome.storage.local.set({ showPrompt }, () => {
-    showToast();
-  });
-  if (!showPrompt) {
-    chrome.storage.local.remove('cosPermissions');
-  }
-});
-
-// Save workerPatchEnabled setting.
+// Save setting.
 workerPatchCheckbox.addEventListener('change', () => {
   chrome.storage.local.set(
     { workerPatchEnabled: workerPatchCheckbox.checked },

@@ -6,10 +6,6 @@ import ResourceManager from './resource-manager.js';
 let creating; // A global promise to avoid concurrency issues
 
 chrome.runtime.onInstalled.addListener(async ({ reason }) => {
-  if (reason === 'install' || reason === 'update') {
-    await chrome.storage.local.set({ showPrompt: false });
-    await chrome.storage.local.remove('cosPermissions');
-  }
   if (reason === 'install') {
     await chrome.storage.local.set({ workerPatchEnabled: false });
   }
@@ -188,28 +184,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             await resourceManager.deleteResourcesByHash(hash.value);
           }
           responseData = { success: !!offscreenResp?.data?.success };
-          break;
-        }
-        case 'getPermission': {
-          const { origin } = data;
-          const permissions = await chrome.storage.local.get('cosPermissions');
-          const hostPermission =
-            (permissions.cosPermissions || {})[origin] || false;
-          responseData = { permission: hostPermission };
-          break;
-        }
-        case 'storePermission': {
-          const { origin, permission } = data;
-          const result = await chrome.storage.local.get('cosPermissions');
-          const permissions = result.cosPermissions || {};
-          permissions[origin] = permission;
-          await chrome.storage.local.set({ cosPermissions: permissions });
-          responseData = { success: true };
-          break;
-        }
-        case 'getShowPromptSetting': {
-          const result = await chrome.storage.local.get('showPrompt');
-          responseData = { showPrompt: !!result.showPrompt };
           break;
         }
         case 'getWorkerPatchSetting': {
