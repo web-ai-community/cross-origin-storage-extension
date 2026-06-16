@@ -232,12 +232,12 @@
     </p>
     <p class="worker-cos-notice" hidden>
       ⚠️ <code>navigator.crossOriginStorage</code> is not available in Workers
-      on this page. Enable
+      on this page. Toggle
       <strong
         >Enable the COS API in <code>Worker</code> and
         <code>SharedWorker</code></strong
       >
-      in the extension options to run these tests.
+      in the extension options on to run these tests.
     </p>
     <button class="run-all" id="run-all-worker">Run all worker tests</button>
 
@@ -311,12 +311,12 @@
     </ul>
     <p class="worker-cos-notice" hidden>
       ⚠️ <code>navigator.crossOriginStorage</code> is not available in Workers
-      on this page. Enable
+      on this page. Toggle
       <strong
         >Enable the COS API in <code>Worker</code> and
         <code>SharedWorker</code></strong
       >
-      in the extension options to run these tests.
+      in the extension options on to run these tests.
     </p>
     <button class="run-all" id="run-all-variants">Run all variant tests</button>
 
@@ -1434,13 +1434,21 @@
 
       // Waits for the COS polyfill to rewrite a stylesheet element and for the
       // declared font to become loadable, or rejects after `ms` milliseconds.
+      // document.fonts.load() resolves immediately with [] when the @font-face
+      // hasn't been declared yet, so we poll until the entry appears first.
       async function waitForCOSFont(ms = 20000) {
-        await Promise.race([
-          document.fonts.load(`16px "${COS_FONT_FAMILY}"`),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error(`timeout after ${ms} ms`)), ms)
-          ),
-        ]);
+        const inFontSet = () =>
+          [...document.fonts].some(
+            (f) =>
+              f.family === `"${COS_FONT_FAMILY}"` ||
+              f.family === COS_FONT_FAMILY
+          );
+        const deadline = Date.now() + ms;
+        while (!inFontSet()) {
+          if (Date.now() >= deadline) throw new Error(`timeout after ${ms} ms`);
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        await document.fonts.load(`16px "${COS_FONT_FAMILY}"`);
       }
 
       // Returns a summary object describing how a <link data-cos> was processed.
