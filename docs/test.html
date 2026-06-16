@@ -182,7 +182,6 @@
       </tbody>
     </table>
 
-
     <h2>Singular <code>requestFileHandle()</code> Test Results</h2>
     <p>
       Tests for the new singular
@@ -620,7 +619,6 @@
         },
       ];
 
-
       // ---------------------------------------------------------------------------
       // Singular requestFileHandle() tests
       // ---------------------------------------------------------------------------
@@ -642,8 +640,11 @@
             const writable = await wh.createWritable();
             await writable.write(blob);
             await writable.close();
-            log(`Singular test 1: stored with hash ${hash.value.slice(0, 16)}…`);
-            const handle = await navigator.crossOriginStorage.requestFileHandle(hash);
+            log(
+              `Singular test 1: stored with hash ${hash.value.slice(0, 16)}…`
+            );
+            const handle =
+              await navigator.crossOriginStorage.requestFileHandle(hash);
             const file = await handle.getFile();
             const text = await file.text();
             if (text !== content) {
@@ -665,10 +666,13 @@
           async run() {
             log('Singular test 2: requesting non-existent hash…');
             try {
-              await navigator.crossOriginStorage.requestFileHandle(MISSING_HASH_1);
+              await navigator.crossOriginStorage.requestFileHandle(
+                MISSING_HASH_1
+              );
               return {
                 pass: false,
-                detail: 'Expected NotFoundError but call resolved without error.',
+                detail:
+                  'Expected NotFoundError but call resolved without error.',
               };
             } catch (err) {
               if (err.name === 'NotFoundError') {
@@ -700,7 +704,8 @@
             const writable = await wh.createWritable();
             await writable.write(blob);
             await writable.close();
-            const rh = await navigator.crossOriginStorage.requestFileHandle(hash);
+            const rh =
+              await navigator.crossOriginStorage.requestFileHandle(hash);
             const text = await (await rh.getFile()).text();
             if (text !== content) {
               return {
@@ -780,7 +785,6 @@
             await runTest(SINGULAR_TESTS[i], singularRows[i]);
           }
         });
-
 
       const singularTbody = document.getElementById('singular-results');
       const singularRows = SINGULAR_TESTS.map((test, idx) => {

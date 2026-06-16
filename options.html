@@ -24,12 +24,31 @@
     <div class="panel">
       <h2>Options</h2>
       <div class="option-item">
-        <input type="checkbox" id="show-prompt" />
+        <input type="checkbox" switch id="show-prompt" />
         <label for="show-prompt">Show simulated permission prompt</label>
       </div>
       <p>
         If enabled, the extension will show a simulated permission prompt when a
         site requests access to cross-origin storage for the first time.
+      </p>
+      <div class="option-item">
+        <!-- switch attribute is required by the input-switch-polyfill -->
+        <!-- prettier-ignore -->
+        <input type="checkbox" switch id="worker-patch">
+        <label for="worker-patch"
+          >Enable the COS API in <code>Worker</code> and
+          <code>SharedWorker</code></label
+        >
+      </div>
+      <p class="option-warning">
+        ⚠️ Enabling this may break some sites. Bot-detection systems such as
+        Cloudflare Turnstile inspect the <code>Worker</code> and
+        <code>SharedWorker</code> globals; patching them can trigger false
+        positives.
+      </p>
+      <p>
+        If enabled, workers spawned by pages will have access to the COS API
+        (<code>navigator.crossOriginStorage</code>).
       </p>
     </div>
     <div id="toast">Settings saved</div>

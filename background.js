@@ -10,6 +10,9 @@ chrome.runtime.onInstalled.addListener(async ({ reason }) => {
     await chrome.storage.local.set({ showPrompt: false });
     await chrome.storage.local.remove('cosPermissions');
   }
+  if (reason === 'install') {
+    await chrome.storage.local.set({ workerPatchEnabled: false });
+  }
 });
 
 async function setupOffscreenDocument(path) {
@@ -207,6 +210,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'getShowPromptSetting': {
           const result = await chrome.storage.local.get('showPrompt');
           responseData = { showPrompt: !!result.showPrompt };
+          break;
+        }
+        case 'getWorkerPatchSetting': {
+          const result = await chrome.storage.local.get('workerPatchEnabled');
+          responseData = { workerPatchEnabled: !!result.workerPatchEnabled };
           break;
         }
         case 'rewriteStylesheet': {

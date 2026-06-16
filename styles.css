@@ -569,6 +569,10 @@ dialog footer {
 }
 
 /* Options page specific styles */
+.option-warning {
+  color: light-dark(#c62828, #ffcdd2);
+}
+
 .option-item {
   display: flex;
   align-items: center;
@@ -576,8 +580,7 @@ dialog footer {
   margin-bottom: 1em;
 }
 
-.option-item input[type='checkbox'] {
-  width: auto;
+.option-item input[type='checkbox'] {  
   margin: 0;
 }
 

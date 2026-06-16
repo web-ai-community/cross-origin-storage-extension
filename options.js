@@ -1,7 +1,10 @@
 // Copyright 2026 Google LLC.
 // SPDX-License-Identifier: Apache-2.0
 
+import './input-switch-polyfill.js';
+
 const showPromptCheckbox = document.getElementById('show-prompt');
+const workerPatchCheckbox = document.getElementById('worker-patch');
 const toast = document.getElementById('toast');
 
 function showToast() {
@@ -11,13 +14,13 @@ function showToast() {
   }, 3000);
 }
 
-// Load setting.
-chrome.storage.local.get('showPrompt', ({ showPrompt }) => {
-  // Default to false (not showing).
-  showPromptCheckbox.checked = !!showPrompt;
+// Load settings.
+chrome.storage.local.get(['showPrompt', 'workerPatchEnabled'], (result) => {
+  showPromptCheckbox.checked = !!result.showPrompt;
+  workerPatchCheckbox.checked = !!result.workerPatchEnabled;
 });
 
-// Save setting.
+// Save showPrompt setting.
 showPromptCheckbox.addEventListener('change', () => {
   const showPrompt = showPromptCheckbox.checked;
   chrome.storage.local.set({ showPrompt }, () => {
@@ -26,4 +29,14 @@ showPromptCheckbox.addEventListener('change', () => {
   if (!showPrompt) {
     chrome.storage.local.remove('cosPermissions');
   }
+});
+
+// Save workerPatchEnabled setting.
+workerPatchCheckbox.addEventListener('change', () => {
+  chrome.storage.local.set(
+    { workerPatchEnabled: workerPatchCheckbox.checked },
+    () => {
+      showToast();
+    }
+  );
 });

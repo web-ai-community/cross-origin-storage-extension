@@ -28,6 +28,8 @@ FILES_TO_ZIP=(
   "rules.json"
   "viewer.html"
   "viewer.js"
+  "input-switch-polyfill.js"
+  "input-switch-polyfill.css"
 )
 
 # Check if an old zip file exists and remove it.

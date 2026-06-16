@@ -50,7 +50,9 @@ self.onmessage = async ({ data }) => {
       const writable = await wh.createWritable();
       await writable.write(blob);
       await writable.close();
-      const [rh] = await navigator.crossOriginStorage.requestFileHandles([hash]);
+      const [rh] = await navigator.crossOriginStorage.requestFileHandles([
+        hash,
+      ]);
       const text = await (await rh.getFile()).text();
       const pass = text === content;
       self.postMessage({
