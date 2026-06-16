@@ -1432,23 +1432,24 @@
       // The font family declared in test-cos-fonts.css.
       const COS_FONT_FAMILY = 'Noto Color Emoji COS';
 
-      // Waits for the COS polyfill to rewrite a stylesheet element and for the
-      // declared font to become loadable, or rejects after `ms` milliseconds.
-      // document.fonts.load() resolves immediately with [] when the @font-face
-      // hasn't been declared yet, so we poll until the entry appears first.
-      async function waitForCOSFont(ms = 20000) {
-        const inFontSet = () =>
-          [...document.fonts].some(
-            (f) =>
-              f.family === `"${COS_FONT_FAMILY}"` ||
-              f.family === COS_FONT_FAMILY
+      // Waits for the COS polyfill to rewrite a stylesheet and inject a <style>
+      // containing a blob: URL for the font, then triggers an actual font load.
+      // Polling for the injected <style> (not just any font face in document.fonts)
+      // avoids a race where the browser loads the original stylesheet before the
+      // polyfill removes the <link> href, causing document.fonts to contain the
+      // un-rewritten font face prematurely.
+      async function waitForCOSFont(ms = 20000, family = COS_FONT_FAMILY) {
+        const hasInjectedStyle = () =>
+          [...document.head.querySelectorAll('style')].some(
+            (s) =>
+              s.textContent.includes(family) && s.textContent.includes('blob:')
           );
         const deadline = Date.now() + ms;
-        while (!inFontSet()) {
+        while (!hasInjectedStyle()) {
           if (Date.now() >= deadline) throw new Error(`timeout after ${ms} ms`);
           await new Promise((r) => setTimeout(r, 100));
         }
-        await document.fonts.load(`16px "${COS_FONT_FAMILY}"`);
+        await document.fonts.load(`16px "${family}"`);
       }
 
       // Returns a summary object describing how a <link data-cos> was processed.
