@@ -25,7 +25,6 @@ FILES_TO_ZIP=(
   "content.js"
   "background.js"
   "sha256.js"
-  "rules.json"
   "viewer.html"
   "viewer.js"
   "input-switch-polyfill.js"

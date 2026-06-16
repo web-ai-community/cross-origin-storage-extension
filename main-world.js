@@ -1101,6 +1101,11 @@ self.addEventListener('message', function __cosBufferFn(e) {
     });
   }
 
+  // Fonts inside a data-cos stylesheet may be fetched twice: once by the browser
+  // before the href is removed, and once by the background script to populate the
+  // COS cache on first encounter.  Blocking those browser requests via
+  // declarativeNetRequest to avoid the double-fetch would also block the background
+  // script's own cache-seeding fetches, so no request blocking is applied.
   function processLinkForCOS(linkEl) {
     if (linkEl._cosProcessed) return;
     if (linkEl.rel !== 'stylesheet' || !linkEl.hasAttribute('data-cos')) return;
