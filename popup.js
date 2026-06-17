@@ -610,9 +610,14 @@ async function initializePopup() {
       mimeFilterBar.hidden = false;
       const legend = document.createElement('legend');
       const hint = document.createElement('small');
-      hint.textContent = '(select multiple)';
-      legend.append('Resource filter ', hint);
+      const div = document.createElement('div');
+      div.ariaHidden = 'true';
+      div.classList.add('mime-filter-label');
+      legend.append('Resource filter (select multiple)');
       mimeFilterBar.append(legend);
+      hint.textContent = ' (select multiple)';
+      div.append('Resource filter', hint);
+      mimeFilterBar.append(div);
       const chipsDiv = document.createElement('div');
       chipsDiv.className = 'mime-chips';
       for (const mime of allMimeTypes) {

@@ -212,20 +212,31 @@ button {
   margin-bottom: 0.75em;
 }
 
+.mime-filter-bar legend:not(:focus):not(:active) {
+  position: absolute;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  width: 1px;
+  height: 1px;
+  white-space: nowrap;
+}
+
 .sort-control label,
-.mime-filter-bar legend {
+.mime-filter-label {
   font-size: 0.85em;
   color: light-dark(#555, #ccc);
   white-space: nowrap;
   margin-right: 0.1em;
 }
 
-.mime-filter-bar legend small {
+.mime-filter-label small {
   font-size: 0.85em;
   opacity: 0.75;
 }
 
 .mime-chips {
+  margin-block-start: 0.6em;
   display: flex;
   flex-wrap: wrap;
   gap: 0.35em;
@@ -348,9 +359,8 @@ button {
 }
 
 .mime-filter-bar {
-  margin: 0 0 0.75em;
-  border: 1px solid light-dark(#ccc, #666);
-  border-radius: 4px;
+  padding: 0;
+  border: none;
 }
 
 .mime-chip {
