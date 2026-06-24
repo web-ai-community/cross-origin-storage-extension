@@ -1,0 +1,31 @@
+{
+  "name": "cross-origin-storage-extension",
+  "version": "1.0.0",
+  "description": "<img src=\"https://raw.githubusercontent.com/web-ai-community/cross-origin-storage-extension/refs/heads/main/logo-cos.svg\" alt=\"Cross-Origin Storage API logo\" width=\"60\" height=\"60\">",
+  "main": "background.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "node e2e-test.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/web-ai-community/cross-origin-storage-extension.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/web-ai-community/cross-origin-storage-extension/issues"
+  },
+  "homepage": "https://github.com/web-ai-community/cross-origin-storage-extension#readme",
+  "devDependencies": {
+    "playwright": "^1.61.1",
+    "puppeteer": "^25.2.1"
+  },
+  "allowScripts": {
+    "puppeteer@25.2.1": true
+  }
+}

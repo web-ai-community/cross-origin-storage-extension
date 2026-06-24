@@ -1,3 +1,4 @@
 *.zip
 .claude/
 _metadata/
+node_modules/
