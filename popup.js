@@ -8,6 +8,7 @@ async function initializePopup() {
   const resourceManager = new ResourceManager();
 
   // Get references to DOM elements.
+  const originSelectLabel = document.getElementById('origin-select-label');
   const originSelect = document.getElementById('origin-select');
   const hashSelect = document.getElementById('hash-select');
   const hashesList = document.getElementById('hashes-list');
@@ -35,6 +36,9 @@ async function initializePopup() {
   // updateHashesDisplay can annotate and re-order resources immediately.
   let currentPageHitHashes = new Set();
   let currentPageMissHashes = new Set();
+  // Origins (including iframe origins) that triggered COS activity this page load.
+  let currentPageHitOrigins = new Set();
+  let currentPageMissOrigins = new Set();
   let currentTabOrigin = null;
 
   // Active MIME type filters. Empty = no filter (show all). Reset whenever
@@ -547,14 +551,30 @@ async function initializePopup() {
     return li;
   }
 
+  function getSelectedOriginValues() {
+    if (originSelect.multiple) {
+      return Array.from(originSelect.selectedOptions)
+        .map((o) => o.value)
+        .filter((v) => v && v !== '*');
+    }
+    const val = originSelect.value;
+    return val ? [val] : [];
+  }
+
   /**
-   * Updates the list of hashes based on the selected origin.
+   * Updates the list of hashes based on the selected origin(s).
    */
   async function updateHashesDisplay() {
-    const selectedOrigin = originSelect.value;
-    const isAllOrigins = selectedOrigin === '*';
+    const selectedValues = getSelectedOriginValues();
+    const isAllOrigins = !originSelect.multiple && originSelect.value === '*';
+    const isMultiOrigin = originSelect.multiple && selectedValues.length > 1;
+    const selectedOrigin =
+      !isAllOrigins && !isMultiOrigin && selectedValues.length === 1
+        ? selectedValues[0]
+        : null;
+
     hashesList.innerHTML = '';
-    if (!selectedOrigin) {
+    if (!isAllOrigins && selectedValues.length === 0) {
       deleteExclusiveBtn.disabled = true;
       deleteOriginBtn.disabled = true;
       sortSelect.disabled = true;
@@ -565,11 +585,19 @@ async function initializePopup() {
       ? resourceManager
           .getAllHashes()
           .filter((h) => resourceManager.getOriginsByHash(h).length > 0)
-      : resourceManager.getHashesByOrigin(selectedOrigin);
+      : isMultiOrigin
+        ? [
+            ...new Set(
+              selectedValues.flatMap((o) =>
+                resourceManager.getHashesByOrigin(o)
+              )
+            ),
+          ]
+        : resourceManager.getHashesByOrigin(selectedValues[0]);
 
     const noResources = hashes.length === 0;
-    deleteExclusiveBtn.disabled = isAllOrigins || noResources;
-    deleteOriginBtn.disabled = isAllOrigins || noResources;
+    deleteExclusiveBtn.disabled = isAllOrigins || isMultiOrigin || noResources;
+    deleteOriginBtn.disabled = isAllOrigins || isMultiOrigin || noResources;
     sortSelect.disabled = noResources;
 
     // Create an array of objects with hash and size to facilitate sorting.
@@ -656,10 +684,15 @@ async function initializePopup() {
           );
 
     const getAccessData = (hash) => {
-      if (isAllOrigins) {
+      if (isAllOrigins || isMultiOrigin) {
+        const originsForHash = isAllOrigins
+          ? resourceManager.getOriginsByHash(hash)
+          : selectedValues.filter((o) =>
+              resourceManager.getOriginsByHash(hash).includes(o)
+            );
         let mostRecent = null;
         let totalCount = 0;
-        for (const origin of resourceManager.getOriginsByHash(hash)) {
+        for (const origin of originsForHash) {
           const history = resourceManager.getAccessHistory(origin, hash);
           totalCount += history.length;
           if (history.length > 0) {
@@ -744,13 +777,21 @@ async function initializePopup() {
         visibleResources.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
     }
 
-    // When viewing a specific origin that matches the current tab, float
-    // resources that had COS activity on this page load to the top (preserving
-    // their relative primary-sort order within each group).
+    // When the selected origin(s) overlap with the origins that had COS
+    // activity on this page load, float hit/miss resources to the top and
+    // annotate them with Cache hit / Cache miss badges.
+    const pageOriginSet = new Set([
+      ...currentPageHitOrigins,
+      ...currentPageMissOrigins,
+    ]);
     const showPageBadges =
       !isAllOrigins &&
-      selectedOrigin === currentTabOrigin &&
-      currentPageHitHashes.size + currentPageMissHashes.size > 0;
+      currentPageHitHashes.size + currentPageMissHashes.size > 0 &&
+      (isMultiOrigin
+        ? selectedValues.some((o) => pageOriginSet.has(o))
+        : pageOriginSet.size > 0
+          ? pageOriginSet.has(selectedOrigin)
+          : selectedOrigin === currentTabOrigin);
     if (showPageBadges) {
       const active = visibleResources.filter(
         (r) =>
@@ -775,7 +816,9 @@ async function initializePopup() {
       p.textContent =
         activeMimeFilters.size > 0
           ? 'No resources match the selected MIME type filter.'
-          : 'No resources from this origin are stored in COS.';
+          : isMultiOrigin
+            ? 'No resources from the selected origins are stored in COS.'
+            : 'No resources from this origin are stored in COS.';
       hashesList.append(p);
     }
 
@@ -945,6 +988,26 @@ async function initializePopup() {
     const currentOriginHasResources =
       currentOrigin && allOrigins.includes(currentOrigin);
 
+    // Detect iframe scenario: COS activity from origins other than (or in
+    // addition to) the top-level tab URL. When this happens we switch the
+    // select to multi-select and pre-select all active iframe origins so the
+    // popup immediately shows the right resources instead of showing "no
+    // resources" for the hosting origin.
+    const pageActiveOrigins = new Set([
+      ...currentPageHitOrigins,
+      ...currentPageMissOrigins,
+    ]);
+    const knownActiveOrigins = [...pageActiveOrigins].filter((o) =>
+      allOrigins.includes(o)
+    );
+    // Use multi-select unless the only active origin is the top-level URL itself.
+    const useMultiSelect =
+      knownActiveOrigins.length > 0 &&
+      !(
+        knownActiveOrigins.length === 1 &&
+        knownActiveOrigins[0] === currentTabOrigin
+      );
+
     if (!currentOrigin && allOrigins.length === 0) {
       originSelect.add(new Option('No origins found', ''));
     } else {
@@ -960,8 +1023,11 @@ async function initializePopup() {
         }
       }
       if (allOrigins.length > 0) {
-        originSelect.add(new Option('All origins', '*'));
-        originSelect.appendChild(document.createElement('hr'));
+        if (!useMultiSelect) {
+          // "All origins" only makes sense in single-select mode.
+          originSelect.add(new Option('All origins', '*'));
+          originSelect.appendChild(document.createElement('hr'));
+        }
         // Omit the current origin from the alphabetical list — it's already pinned.
         for (const origin of allOrigins) {
           if (origin !== currentOrigin) {
@@ -969,8 +1035,24 @@ async function initializePopup() {
           }
         }
       }
-      if (currentOrigin) {
-        originSelect.value = currentOrigin;
+
+      if (useMultiSelect) {
+        originSelect.multiple = true;
+        originSelect.size = Math.min(originSelect.options.length, 8);
+        // Pre-select every origin that had COS activity on this page load.
+        for (const option of originSelect.options) {
+          option.selected = knownActiveOrigins.includes(option.value);
+        }
+        originSelectLabel.textContent =
+          'Iframe origins with COS activity detected. Select one or more to inspect.';
+      } else {
+        originSelect.multiple = false;
+        originSelect.removeAttribute('size');
+        if (currentOrigin) {
+          originSelect.value = currentOrigin;
+        }
+        originSelectLabel.textContent =
+          'Select an origin to see its shared resources and last access times.';
       }
     }
 
@@ -1442,6 +1524,8 @@ async function initializePopup() {
     if (resp?.data) {
       currentPageHitHashes = new Set(resp.data.hitHashes || []);
       currentPageMissHashes = new Set(resp.data.missHashes || []);
+      currentPageHitOrigins = new Set(resp.data.hitOrigins || []);
+      currentPageMissOrigins = new Set(resp.data.missOrigins || []);
     }
   }
 

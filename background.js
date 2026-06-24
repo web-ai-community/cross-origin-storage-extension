@@ -61,6 +61,10 @@ let cache;
 // the race between navigation events and content-script messages.
 const tabHitHashes = {};
 const tabMissHashes = {};
+// Per-tab origin tracking — which origins (including iframe origins) triggered
+// COS hits or misses. Used by the popup to detect and pre-select iframe origins.
+const tabHitOrigins = {};
+const tabMissOrigins = {};
 const tabDocumentIds = {};
 
 function maybeResetForNewPage(tabId, documentId) {
@@ -69,6 +73,8 @@ function maybeResetForNewPage(tabId, documentId) {
     tabDocumentIds[tabId] = documentId;
     delete tabHitHashes[tabId];
     delete tabMissHashes[tabId];
+    delete tabHitOrigins[tabId];
+    delete tabMissOrigins[tabId];
     chrome.action.setBadgeText({ text: '', tabId });
   }
 }
@@ -97,6 +103,8 @@ function updateBadge(tabId) {
 chrome.tabs.onRemoved.addListener((tabId) => {
   delete tabHitHashes[tabId];
   delete tabMissHashes[tabId];
+  delete tabHitOrigins[tabId];
+  delete tabMissOrigins[tabId];
   delete tabDocumentIds[tabId];
 });
 
@@ -124,6 +132,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 if (tabId) {
                   if (!tabMissHashes[tabId]) tabMissHashes[tabId] = new Set();
                   tabMissHashes[tabId].add(hash.value);
+                  if (!tabMissOrigins[tabId]) tabMissOrigins[tabId] = new Set();
+                  tabMissOrigins[tabId].add(origin);
                   updateBadge(tabId);
                 }
               }
@@ -139,6 +149,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               if (tabId) {
                 if (!tabHitHashes[tabId]) tabHitHashes[tabId] = new Set();
                 tabHitHashes[tabId].add(hash.value);
+                if (!tabHitOrigins[tabId]) tabHitOrigins[tabId] = new Set();
+                tabHitOrigins[tabId].add(origin);
                 updateBadge(tabId);
               }
             }
@@ -234,6 +246,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               if (tabId) {
                 if (!tabMissHashes[tabId]) tabMissHashes[tabId] = new Set();
                 tabMissHashes[tabId].add(hash.value);
+                if (!tabMissOrigins[tabId]) tabMissOrigins[tabId] = new Set();
+                tabMissOrigins[tabId].add(origin);
                 updateBadge(tabId);
               }
               try {
@@ -259,6 +273,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 if (tabId) {
                   if (!tabHitHashes[tabId]) tabHitHashes[tabId] = new Set();
                   tabHitHashes[tabId].add(hash.value);
+                  if (!tabHitOrigins[tabId]) tabHitOrigins[tabId] = new Set();
+                  tabHitOrigins[tabId].add(origin);
                   updateBadge(tabId);
                 }
               }
@@ -343,6 +359,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           responseData = {
             hitHashes: [...(tabHitHashes[tabId] || [])],
             missHashes: [...(tabMissHashes[tabId] || [])],
+            hitOrigins: [...(tabHitOrigins[tabId] || [])],
+            missOrigins: [...(tabMissOrigins[tabId] || [])],
           };
           break;
         }
