@@ -2,14 +2,44 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import ResourceManager from './resource-manager.js';
+import { PublicHashList } from './public-hash-list.js';
 
 let creating; // A global promise to avoid concurrency issues
 
 chrome.runtime.onInstalled.addListener(async ({ reason }) => {
   if (reason === 'install') {
-    await chrome.storage.local.set({ workerPatchEnabled: false });
+    await chrome.storage.local.set({
+      workerPatchEnabled: false,
+      // Public Hash List gating is opt-in: off by default so existing
+      // COS availability behavior doesn't change unless a user
+      // explicitly enables it in options.html.
+      publicHashListEnabled: false,
+    });
   }
 });
+
+const publicHashList = new PublicHashList();
+
+/**
+ * Returns true if the PHL gate should block this hash: the setting is
+ * enabled AND the hash is not on the Public Hash List. Logs the reason
+ * when blocking so the decision is debuggable from the service worker's
+ * console.
+ */
+async function isBlockedByPublicHashList(hashValue) {
+  const { publicHashListEnabled } = await chrome.storage.local.get(
+    'publicHashListEnabled'
+  );
+  if (!publicHashListEnabled) return false;
+  const allowed = await publicHashList.has(hashValue);
+  if (!allowed) {
+    console.warn(
+      `[COS] Blocked: hash ${hashValue} not in Public Hash List`
+    );
+    return true;
+  }
+  return false;
+}
 
 async function setupOffscreenDocument(path) {
   // Check all windows controlled by the service worker to see if one
@@ -125,6 +155,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const success = [];
           await resourceManager.loadManagerFromStorage();
           for (const hash of hashes) {
+            // Public Hash List gate: when enabled, a hash that isn't on
+            // the allowlist is treated as unavailable before the COS
+            // cache is even queried, regardless of what's actually
+            // cached locally.
+            if (!create && (await isBlockedByPublicHashList(hash.value))) {
+              resourceManager.recordMiss();
+              if (tabId) {
+                if (!tabMissHashes[tabId]) tabMissHashes[tabId] = new Set();
+                tabMissHashes[tabId].add(hash.value);
+                if (!tabMissOrigins[tabId]) tabMissOrigins[tabId] = new Set();
+                tabMissOrigins[tabId].add(origin);
+                updateBadge(tabId);
+              }
+              await resourceManager.saveManagerToStorage();
+              responseData = { hashes, success };
+              sendResponse({ data: responseData });
+              return;
+            }
             const handle = await getFileHandle(hash, create);
             if (!handle) {
               if (!create) {
@@ -203,6 +251,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           responseData = { workerPatchEnabled: !!result.workerPatchEnabled };
           break;
         }
+        case 'getPublicHashListSetting': {
+          const result = await chrome.storage.local.get(
+            'publicHashListEnabled'
+          );
+          responseData = {
+            publicHashListEnabled: !!result.publicHashListEnabled,
+          };
+          break;
+        }
         case 'rewriteStylesheet': {
           const tabId = sender.tab?.id;
           maybeResetForNewPage(tabId, sender.documentId);
@@ -239,8 +296,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               continue;
             }
             const hash = sriToHashObj(fm.sriHash);
-            let blobURL = await getFileData(hash);
-            const alreadyCached = !!blobURL;
+            // Public Hash List gate: if this hash isn't allowlisted,
+            // treat it as not available in the COS cache — even if it
+            // actually is — and fall through to the normal network-fetch
+            // path below, same as a genuine cache miss.
+            const phlBlocked = await isBlockedByPublicHashList(hash.value);
+            let blobURL = phlBlocked ? false : await getFileData(hash);
+            const alreadyCached = !phlBlocked && !!blobURL;
             if (!blobURL) {
               resourceManager.recordMiss();
               if (tabId) {
