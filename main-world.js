@@ -247,9 +247,8 @@
     return handleRequestFileHandlesResponse(responseData);
   }
 
-  // Deprecation warning message for the plural requestFileHandles() method.
-  // Prepared here for future use; not yet logged to avoid breaking changes.
-  // See: https://github.com/WICG/cross-origin-storage/issues/61
+  // Deprecation warning for the plural requestFileHandles() method, logged
+  // on every call. See: https://github.com/WICG/cross-origin-storage/issues/61
   const _requestFileHandlesDeprecationWarning =
     `[Cross-Origin Storage] navigator.crossOriginStorage.requestFileHandles() ` +
     `is deprecated and will be removed in a future version. ` +
@@ -296,8 +295,7 @@
     },
 
     requestFileHandles: async (hashes, options = {}) => {
-      // TODO: uncomment once implementations have migrated to requestFileHandle():
-      // console.warn(_requestFileHandlesDeprecationWarning);
+      console.warn(_requestFileHandlesDeprecationWarning);
       if (!hashes) {
         throw new TypeError(
           `Failed to execute 'requestFileHandles': first argument 'hashes' is required.`
@@ -422,9 +420,8 @@
       });
     }
 
-    // Deprecation warning message for the plural requestFileHandles() method.
-    // Prepared here for future use; not yet logged to avoid breaking changes.
-    // See: https://github.com/WICG/cross-origin-storage/issues/61
+    // Deprecation warning for the plural requestFileHandles() method, logged
+    // on every call. See: https://github.com/WICG/cross-origin-storage/issues/61
     const _requestFileHandlesDeprecationWarning =
       `[Cross-Origin Storage] navigator.crossOriginStorage.requestFileHandles() ` +
       `is deprecated and will be removed in a future version. ` +
@@ -518,8 +515,7 @@
       },
 
       requestFileHandles: async (hashes, options = {}) => {
-        // TODO: uncomment once implementations have migrated to requestFileHandle():
-        // console.warn(_requestFileHandlesDeprecationWarning);
+        console.warn(_requestFileHandlesDeprecationWarning);
         if (!hashes) {
           throw new TypeError(
             `Failed to execute 'requestFileHandles': first argument 'hashes' is required.`
