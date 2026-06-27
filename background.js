@@ -3,6 +3,7 @@
 
 import ResourceManager from './resource-manager.js';
 import { PublicHashList } from './public-hash-list.js';
+import { isSameSite } from './same-site.js';
 
 let creating; // A global promise to avoid concurrency issues
 
@@ -21,16 +22,75 @@ chrome.runtime.onInstalled.addListener(async ({ reason }) => {
 const publicHashList = new PublicHashList();
 
 /**
- * Returns true if the PHL gate should block this hash: the setting is
- * enabled AND the hash is not on the Public Hash List. Logs the reason
- * when blocking so the decision is debuggable from the service worker's
- * console.
+ * Resolves whether `requestingOrigin` may learn about a stored hash at
+ * all, and -- separately -- whether that resolution counts as
+ * "globally reachable" for the purposes of Public Hash List gating.
+ *
+ * Per https://wicg.github.io/cross-origin-storage/#resource-visibility-upgrades
+ * a resource's visibility is one of three tiers, set at creation time:
+ *   - 'global'    (origins: '*')      reachable by any origin
+ *   - 'list'      (origins: [...])    reachable only by listed origins
+ *   - 'same-site' (origins omitted)   reachable only by same-site origins
+ *
+ * The Public Hash List exists to stop a hash from being globally
+ * "probeable" by an arbitrary site. A 'list' or 'same-site' resource is
+ * already not globally probeable by construction -- only origins the
+ * storer explicitly chose (or same-site siblings) can ever get a hit,
+ * regardless of PHL membership. So the PHL gate only needs to apply to
+ * the 'global' tier; gating 'list'/'same-site' resources too would add
+ * no privacy benefit while breaking legitimate restricted-sharing use
+ * cases (e.g. a company's own proprietary, same-site-shared model).
+ *
+ * @param {string} hash
+ * @param {string} requestingOrigin
+ * @returns {{reachable: boolean, isGlobal: boolean}}
  */
-async function isBlockedByPublicHashList(hashValue) {
+function resolveVisibility(hash, requestingOrigin) {
+  const visibility = resourceManager.getVisibility(hash);
+  const tier = ResourceManager.classifyVisibility(visibility);
+
+  if (tier === 'global') {
+    return { reachable: true, isGlobal: true };
+  }
+  if (tier === 'list') {
+    const allowed = Array.isArray(visibility)
+      ? visibility.includes(requestingOrigin)
+      : false;
+    return { reachable: allowed, isGlobal: false };
+  }
+  // 'same-site': no explicit storer recorded yet (hash never stored
+  // with create:true through this gate), or stored same-site-only.
+  // Without a recorded storer origin we can't compute same-siteness, so
+  // fall back to the access-history origins already tracked for this
+  // hash and check same-site against any of them.
+  const knownOrigins = resourceManager.getOriginsByHash(hash);
+  const allowed = knownOrigins.some((origin) =>
+    isSameSite(origin, requestingOrigin)
+  );
+  return { reachable: allowed, isGlobal: false };
+}
+
+/**
+ * Returns true if the PHL gate should block this hash: the setting is
+ * enabled, the resolved visibility for this (hash, requestingOrigin)
+ * pair is 'global', AND the hash is not on the Public Hash List. Logs
+ * the reason when blocking so the decision is debuggable from the
+ * service worker's console.
+ */
+async function isBlockedByPublicHashList(hashValue, requestingOrigin) {
   const { publicHashListEnabled } = await chrome.storage.local.get(
     'publicHashListEnabled'
   );
   if (!publicHashListEnabled) return false;
+
+  const { isGlobal } = resolveVisibility(hashValue, requestingOrigin);
+  if (!isGlobal) {
+    // Restricted (list or same-site) resources are not globally
+    // probeable by construction -- the origins check below in the
+    // caller already governs access, independent of the PHL.
+    return false;
+  }
+
   const allowed = await publicHashList.has(hashValue);
   if (!allowed) {
     console.warn(
@@ -149,7 +209,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
       switch (action) {
         case 'requestFileHandles': {
-          const { origin, hashes, create } = data;
+          const { origin, hashes, create, origins: requestedOrigins } = data;
           const tabId = sender.tab?.id;
           maybeResetForNewPage(tabId, sender.documentId);
           const success = [];
@@ -158,8 +218,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // Public Hash List gate: when enabled, a hash that isn't on
             // the allowlist is treated as unavailable before the COS
             // cache is even queried, regardless of what's actually
-            // cached locally.
-            if (!create && (await isBlockedByPublicHashList(hash.value))) {
+            // cached locally. Only applies to 'global' resources --
+            // see resolveVisibility() for why list/same-site resources
+            // are exempt.
+            if (
+              !create &&
+              (await isBlockedByPublicHashList(hash.value, origin))
+            ) {
               resourceManager.recordMiss();
               if (tabId) {
                 if (!tabMissHashes[tabId]) tabMissHashes[tabId] = new Set();
@@ -172,6 +237,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               responseData = { hashes, success };
               sendResponse({ data: responseData });
               return;
+            }
+            // For reads (create is falsy), a non-global resource must
+            // also pass the origins/same-site check before being
+            // revealed -- a hash not on the PHL was already rejected
+            // above, but a hash that IS allowed past the PHL gate (or
+            // isn't gated because it's 'list'/'same-site') still needs
+            // this check, since resolveVisibility() determines whether
+            // the requesting origin itself is allowed to see this hash.
+            if (!create) {
+              const { reachable } = resolveVisibility(hash.value, origin);
+              if (!reachable) {
+                resourceManager.recordMiss();
+                if (tabId) {
+                  if (!tabMissHashes[tabId])
+                    tabMissHashes[tabId] = new Set();
+                  tabMissHashes[tabId].add(hash.value);
+                  if (!tabMissOrigins[tabId])
+                    tabMissOrigins[tabId] = new Set();
+                  tabMissOrigins[tabId].add(origin);
+                  updateBadge(tabId);
+                }
+                await resourceManager.saveManagerToStorage();
+                responseData = { hashes, success };
+                sendResponse({ data: responseData });
+                return;
+              }
             }
             const handle = await getFileHandle(hash, create);
             if (!handle) {
@@ -191,6 +282,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               return;
             }
             success.push(handle);
+            if (create) {
+              // Apply the requested origins value to this hash's stored
+              // visibility tier (global/list/same-site), enforcing the
+              // spec's upgrade-only rule. requestedOrigins is undefined
+              // when the page omitted `origins` entirely (same-site).
+              resourceManager.setVisibility(hash.value, requestedOrigins);
+            }
             resourceManager.recordAccess(origin, hash.value);
             if (!create) {
               resourceManager.recordHit(hash.value);
@@ -299,8 +397,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // Public Hash List gate: if this hash isn't allowlisted,
             // treat it as not available in the COS cache — even if it
             // actually is — and fall through to the normal network-fetch
-            // path below, same as a genuine cache miss.
-            const phlBlocked = await isBlockedByPublicHashList(hash.value);
+            // path below, same as a genuine cache miss. Only applies to
+            // 'global' resources -- see resolveVisibility().
+            const phlBlocked = await isBlockedByPublicHashList(
+              hash.value,
+              origin
+            );
             let blobURL = phlBlocked ? false : await getFileData(hash);
             const alreadyCached = !phlBlocked && !!blobURL;
             if (!blobURL) {
@@ -323,6 +425,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 });
                 resourceManager.recordSize(hash.value, fontBlob.size);
                 resourceManager.recordMimeType(hash.value, mimeType);
+                // Persist this hash's visibility from the CSS
+                // cross-origin-storage() modifier's own origins list,
+                // using the same upgrade-only resourceManager state as
+                // the JS requestFileHandle() path, so a hash stored via
+                // CSS is governed by the same rules either way.
+                resourceManager.setVisibility(
+                  hash.value,
+                  allowed === '*' ? '*' : allowed
+                );
                 blobURL = await getFileData(hash);
               } catch (e) {
                 rewritten = rewritten.replace(fm.full, `url("${fm.fontUrl}")`);

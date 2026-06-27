@@ -238,18 +238,47 @@
     return handles;
   }
 
-  async function requestFileHandlesWithOptionalPrompt(hashes, create = false) {
+  /**
+   * Validates an `options.origins` value per the COS explainer's
+   * CrossOriginStorageRequestFileHandleOptions dictionary: optional
+   * (USVString or sequence<USVString>). '*' means global, an array
+   * means a restricted list, and omitting it entirely means
+   * same-site-only.
+   */
+  function _validateOrigins(origins, methodName) {
+    if (origins === undefined) return;
+    if (origins === '*') return;
+    if (Array.isArray(origins)) {
+      for (const o of origins) {
+        if (typeof o !== 'string') {
+          throw new TypeError(
+            `Failed to execute '${methodName}': 'origins' array must contain only strings.`
+          );
+        }
+      }
+      return;
+    }
+    throw new TypeError(
+      `Failed to execute '${methodName}': 'origins' must be '*', an array of origin strings, or omitted.`
+    );
+  }
+
+  async function requestFileHandlesWithOptionalPrompt(
+    hashes,
+    create = false,
+    origins = undefined
+  ) {
     const responseData = await talkToBridge('requestFileHandles', {
       hashes,
       create,
+      origins,
       origin: location.origin,
     });
     return handleRequestFileHandlesResponse(responseData);
   }
 
-  // Deprecation warning message for the plural requestFileHandles() method.
-  // Prepared here for future use; not yet logged to avoid breaking changes.
-  // See: https://github.com/WICG/cross-origin-storage/issues/61
+  // Deprecation warning for the plural requestFileHandles() method, logged
+  // on every call. See: https://github.com/WICG/cross-origin-storage/issues/61
   const _requestFileHandlesDeprecationWarning =
     `[Cross-Origin Storage] navigator.crossOriginStorage.requestFileHandles() ` +
     `is deprecated and will be removed in a future version. ` +
@@ -287,17 +316,18 @@
         );
       }
       _validateHash(hash, 'requestFileHandle');
-      const { create = false } = options;
+      const { create = false, origins } = options;
+      _validateOrigins(origins, 'requestFileHandle');
       const [handle] = await requestFileHandlesWithOptionalPrompt(
         [hash],
-        create
+        create,
+        origins
       );
       return handle;
     },
 
     requestFileHandles: async (hashes, options = {}) => {
-      // TODO: uncomment once implementations have migrated to requestFileHandle():
-      // console.warn(_requestFileHandlesDeprecationWarning);
+      console.warn(_requestFileHandlesDeprecationWarning);
       if (!hashes) {
         throw new TypeError(
           `Failed to execute 'requestFileHandles': first argument 'hashes' is required.`
@@ -422,9 +452,8 @@
       });
     }
 
-    // Deprecation warning message for the plural requestFileHandles() method.
-    // Prepared here for future use; not yet logged to avoid breaking changes.
-    // See: https://github.com/WICG/cross-origin-storage/issues/61
+    // Deprecation warning for the plural requestFileHandles() method, logged
+    // on every call. See: https://github.com/WICG/cross-origin-storage/issues/61
     const _requestFileHandlesDeprecationWarning =
       `[Cross-Origin Storage] navigator.crossOriginStorage.requestFileHandles() ` +
       `is deprecated and will be removed in a future version. ` +
@@ -456,10 +485,11 @@
       }
     }
 
-    async function _cosRequestFileHandles(hashes, create) {
+    async function _cosRequestFileHandles(hashes, create, origins) {
       const { handleIds } = await cosRelay('requestFileHandles', {
         hashes,
         create,
+        origins,
         origin: self.location.origin,
       });
       return handleIds.map((handleId, i) => ({
@@ -512,14 +542,18 @@
           );
         }
         _validateHash(hash, 'requestFileHandle');
-        const { create = false } = options;
-        const [handle] = await _cosRequestFileHandles([hash], create);
+        const { create = false, origins } = options;
+        _validateOrigins(origins, 'requestFileHandle');
+        const [handle] = await _cosRequestFileHandles(
+          [hash],
+          create,
+          origins
+        );
         return handle;
       },
 
       requestFileHandles: async (hashes, options = {}) => {
-        // TODO: uncomment once implementations have migrated to requestFileHandle():
-        // console.warn(_requestFileHandlesDeprecationWarning);
+        console.warn(_requestFileHandlesDeprecationWarning);
         if (!hashes) {
           throw new TypeError(
             `Failed to execute 'requestFileHandles': first argument 'hashes' is required.`
@@ -533,8 +567,9 @@
         for (const hash of hashes) {
           _validateHash(hash, 'requestFileHandles');
         }
-        const { create = false } = options;
-        return _cosRequestFileHandles(hashes, create);
+        const { create = false, origins } = options;
+        _validateOrigins(origins, 'requestFileHandles');
+        return _cosRequestFileHandles(hashes, create, origins);
       },
     };
 
@@ -822,7 +857,8 @@ ${xhr.responseText}`;
                 if (action === 'requestFileHandles') {
                   const handles = await requestFileHandlesWithOptionalPrompt(
                     data.hashes,
-                    data.create
+                    data.create,
+                    data.origins
                   );
                   const handleIds = handles.map(() => crypto.randomUUID());
                   handleIds.forEach((hid, i) =>
@@ -1007,7 +1043,8 @@ self.addEventListener('message', function __cosBufferFn(e) {
                     // main thread, then give the worker opaque handle IDs to use.
                     const handles = await requestFileHandlesWithOptionalPrompt(
                       data.hashes,
-                      data.create
+                      data.create,
+                      data.origins
                     );
                     const handleIds = handles.map(() => crypto.randomUUID());
                     handleIds.forEach((hid, i) =>
