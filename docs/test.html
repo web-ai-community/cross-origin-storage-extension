@@ -1472,6 +1472,7 @@
       const RELAY_URL = document.documentElement.dataset.cosRelayUrl ?? '';
 
       let _relayIframe = null;
+      let _relayLoaded = false;
       const _pendingRelayMsgs = new Map();
 
       window.addEventListener('message', (ev) => {
@@ -1491,6 +1492,11 @@
             _relayIframe.style.cssText =
               'position:fixed;width:1px;height:1px;top:-200px;left:-200px;border:none';
             document.body.appendChild(_relayIframe);
+            // When src is set before appending, Chrome creates an initial document
+            // that is accessible and readyState='complete' before the real extension
+            // page has loaded. Using a _relayLoaded flag (set by the real load event)
+            // prevents sending to that initial empty document.
+            _relayIframe.addEventListener('load', () => { _relayLoaded = true; }, { once: true });
           }
           const fr = _relayIframe;
           const id = crypto.randomUUID();
@@ -1505,9 +1511,11 @@
               { source: 'cos-relay-cmd', id, action, ...extra }, '*'
             );
           }
-          if (fr.contentDocument?.readyState === 'complete') {
+          if (_relayLoaded) {
             send();
           } else {
+            // Re-use the same load event that sets _relayLoaded; add another listener
+            // to send once the page is truly ready. Both fire on the same load event.
             fr.addEventListener('load', () => setTimeout(send, 300), { once: true });
           }
         });
