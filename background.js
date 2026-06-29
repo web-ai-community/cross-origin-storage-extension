@@ -45,7 +45,7 @@ const publicHashList = new PublicHashList();
  * @param {string} requestingOrigin
  * @returns {{reachable: boolean, isGlobal: boolean}}
  */
-function resolveVisibility(hash, requestingOrigin) {
+async function resolveVisibility(hash, requestingOrigin) {
   const visibility = resourceManager.getVisibility(hash);
   const tier = ResourceManager.classifyVisibility(visibility);
 
@@ -64,9 +64,10 @@ function resolveVisibility(hash, requestingOrigin) {
   // fall back to the access-history origins already tracked for this
   // hash and check same-site against any of them.
   const knownOrigins = resourceManager.getOriginsByHash(hash);
-  const allowed = knownOrigins.some((origin) =>
-    isSameSite(origin, requestingOrigin)
+  const checks = await Promise.all(
+    knownOrigins.map((origin) => isSameSite(origin, requestingOrigin))
   );
+  const allowed = checks.some(Boolean);
   return { reachable: allowed, isGlobal: false };
 }
 
@@ -83,7 +84,7 @@ async function isBlockedByPublicHashList(hashValue, requestingOrigin) {
   );
   if (!publicHashListEnabled) return false;
 
-  const { isGlobal } = resolveVisibility(hashValue, requestingOrigin);
+  const { isGlobal } = await resolveVisibility(hashValue, requestingOrigin);
   if (!isGlobal) {
     // Restricted (list or same-site) resources are not globally
     // probeable by construction -- the origins check below in the
@@ -251,7 +252,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // this check, since resolveVisibility() determines whether
             // the requesting origin itself is allowed to see this hash.
             if (!create) {
-              const { reachable } = resolveVisibility(hash.value, origin);
+              const { reachable } = await resolveVisibility(hash.value, origin);
               if (!reachable) {
                 resourceManager.recordMiss();
                 if (tabId) {

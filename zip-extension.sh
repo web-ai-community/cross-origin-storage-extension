@@ -49,8 +49,8 @@ done
 # Transform manifest.json for Web Store compatibility.
 echo "Transforming manifest.json to remove localhost patterns..."
 jq '
-  .content_scripts |= map(.matches |= map(select(test("http://localhost") | not))) |
-  .web_accessible_resources |= map(.matches |= map(select(test("http://localhost") | not)))
+  .content_scripts |= map(.matches |= map(select(test("http://(localhost|.*\\.test)") | not))) |
+  .web_accessible_resources |= map(.matches |= map(select(test("http://(localhost|.*\\.test)") | not)))
 ' manifest.json > build/manifest.json
 
 echo "Creating new archive named '$OUTPUT_ZIP'..."

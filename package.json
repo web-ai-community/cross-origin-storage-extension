@@ -7,7 +7,8 @@
     "doc": "docs"
   },
   "scripts": {
-    "test": "node e2e-test.mjs"
+    "test": "node e2e-test.mjs",
+    "test:phl": "node e2e-phl-test.mjs"
   },
   "repository": {
     "type": "git",
