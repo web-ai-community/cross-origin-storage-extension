@@ -1,0 +1,65 @@
+<!--
+  Copyright 2026 Google LLC.
+  SPDX-License-Identifier: Apache-2.0
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>COS Relay</title>
+  </head>
+  <body>
+    <!--
+      Minimal relay page used by test.html for cross-origin visibility tests.
+      Loaded in a hidden iframe from cdn.jsdelivr.net so that it acts as a
+      genuinely different-origin reader (jsdelivr.net ≠ localhost or github.io).
+
+      The COS polyfill is injected by the extension at document_start (before
+      this inline script runs), so navigator.crossOriginStorage is available
+      immediately — no polling needed.
+
+      Protocol
+      --------
+      Parent → iframe:
+        { source: 'cos-relay-cmd', id, action: 'ping' }
+        { source: 'cos-relay-cmd', id, action: 'read', hash: {algorithm, value} }
+
+      iframe → parent:
+        { source: 'cos-relay-result', id, ok: true,  cosAvailable, origin }   (ping)
+        { source: 'cos-relay-result', id, ok: true,  text }                   (read success)
+        { source: 'cos-relay-result', id, ok: false, error }                  (read failure)
+    -->
+    <script>
+      window.addEventListener('message', async (event) => {
+        if (!event.data || event.data.source !== 'cos-relay-cmd') return;
+        const { id, action, hash } = event.data;
+
+        function reply(data) {
+          event.source.postMessage(
+            { source: 'cos-relay-result', id, ...data },
+            event.origin
+          );
+        }
+
+        if (action === 'ping') {
+          reply({ ok: true, cosAvailable: !!navigator.crossOriginStorage, origin: location.origin });
+          return;
+        }
+
+        if (!navigator.crossOriginStorage) {
+          reply({ ok: false, error: 'COS not available in relay' });
+          return;
+        }
+
+        try {
+          const handle = await navigator.crossOriginStorage.requestFileHandle(hash);
+          const file = await handle.getFile();
+          const text = await file.text();
+          reply({ ok: true, text });
+        } catch (err) {
+          reply({ ok: false, error: `${err.name}: ${err.message}` });
+        }
+      });
+    </script>
+  </body>
+</html>
