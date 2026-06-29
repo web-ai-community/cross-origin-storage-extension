@@ -180,38 +180,22 @@
           });
         },
         createWritable: async () => {
-          return {
-            write: async (data) => {
-              const mimeType =
-                (data instanceof Blob ? data.type : '') ||
-                'application/octet-stream';
-              if (data instanceof ArrayBuffer) {
-                // ArrayBuffer is already in the V8 heap; hash it in one shot
-                // and transfer it zero-copy to content.js.
-                const hashBuffer = await crypto.subtle.digest(
-                  hash.algorithm,
-                  data
-                );
-                const actualHashHex = Array.from(new Uint8Array(hashBuffer))
-                  .map((byte) => byte.toString(16).padStart(2, '0'))
-                  .join('');
-                if (actualHashHex !== hash.value) {
-                  throw new DOMException(
-                    `The hash of the provided data does not match the declared hash.`,
-                    'NotAllowedError'
-                  );
-                }
-                return await talkToBridge(
-                  'storeFileData',
-                  { hash, data, mimeType: { 'content-type': mimeType } },
-                  [data]
-                );
+          const chunks = [];
+          let detectedMimeType = 'application/octet-stream';
+
+          const ws = new WritableStream({
+            write(chunk) {
+              if (chunk instanceof Blob && chunk.type) {
+                detectedMimeType = chunk.type;
               }
+              chunks.push(chunk);
+            },
+            async close() {
               // For Blob (or anything else), compute the hash in 4 MiB slices
               // so peak memory stays O(chunk) rather than O(file).  Sending the
               // Blob via postMessage uses structured-clone, which in Chrome is
               // ref-counted for Blob storage rather than a byte copy.
-              const blob = data instanceof Blob ? data : new Blob([data]);
+              const blob = new Blob(chunks);
               const actualHashHex = await streamingHexDigest(
                 hash.algorithm,
                 blob
@@ -222,16 +206,23 @@
                   'NotAllowedError'
                 );
               }
-              return await talkToBridge('storeFileData', {
+              await talkToBridge('storeFileData', {
                 hash,
                 data: blob,
-                mimeType: { 'content-type': mimeType },
+                mimeType: { 'content-type': detectedMimeType },
               });
             },
-            close: async () => {
-              // no-op
-            },
+          });
+
+          // Convenience method for the write(data); close() pattern — WritableStream
+          // has no write() directly; callers use this instead of getWriter().
+          ws.write = async (data) => {
+            const writer = ws.getWriter();
+            await writer.write(data);
+            writer.releaseLock();
           };
+
+          return ws;
         },
       });
     }
@@ -521,37 +512,53 @@
             lastModified: result.lastModified,
           });
         },
-        createWritable: async () => ({
-          write: async (data) => {
-            const hash = hashes[i];
-            const arrayBuffer = await new Blob([data]).arrayBuffer();
-            const hashBuffer = await crypto.subtle.digest(
-              hash.algorithm,
-              arrayBuffer
-            );
-            const actualHashHex = Array.from(new Uint8Array(hashBuffer))
-              .map((byte) => byte.toString(16).padStart(2, '0'))
-              .join('');
-            if (actualHashHex !== hash.value) {
-              throw new DOMException(
-                `The hash of the provided data does not match the declared hash.`,
-                'NotAllowedError'
+        createWritable: async () => {
+          const _hash = hashes[i];
+          const chunks = [];
+          let detectedMimeType = 'application/octet-stream';
+
+          const ws = new WritableStream({
+            write(chunk) {
+              if (chunk instanceof Blob && chunk.type) {
+                detectedMimeType = chunk.type;
+              }
+              chunks.push(chunk);
+            },
+            async close() {
+              const arrayBuffer = await new Blob(chunks).arrayBuffer();
+              const hashBuffer = await crypto.subtle.digest(
+                _hash.algorithm,
+                arrayBuffer
               );
-            }
-            return cosRelay(
-              'storeFileData',
-              {
-                handleId,
-                arrayBuffer,
-                mimeType: {
-                  'content-type': data.type || 'application/octet-stream',
+              const actualHashHex = Array.from(new Uint8Array(hashBuffer))
+                .map((byte) => byte.toString(16).padStart(2, '0'))
+                .join('');
+              if (actualHashHex !== _hash.value) {
+                throw new DOMException(
+                  `The hash of the provided data does not match the declared hash.`,
+                  'NotAllowedError'
+                );
+              }
+              await cosRelay(
+                'storeFileData',
+                {
+                  handleId,
+                  arrayBuffer,
+                  mimeType: { 'content-type': detectedMimeType },
                 },
-              },
-              [arrayBuffer]
-            );
-          },
-          close: async () => {},
-        }),
+                [arrayBuffer]
+              );
+            },
+          });
+
+          ws.write = async (data) => {
+            const writer = ws.getWriter();
+            await writer.write(data);
+            writer.releaseLock();
+          };
+
+          return ws;
+        },
       }));
     }
 
