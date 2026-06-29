@@ -20,6 +20,23 @@ async function resolveFontBlobs(responseData) {
 // Expose the extension relay URL so test.html can use an always-cross-origin iframe.
 document.documentElement.dataset.cosRelayUrl = chrome.runtime.getURL('relay-extension.html');
 
+// Allow pages to query extension settings (e.g. whether PHL is enabled).
+// A page posts { source: 'cos-settings-query', action: '<action>', id: '<uuid>' }
+// and receives back { source: 'cos-settings-reply', id, ...responseFields }.
+// Times out silently when the extension is absent (native API or no extension).
+window.addEventListener('message', (event) => {
+  if (
+    event.source !== window ||
+    event.data?.source !== 'cos-settings-query' ||
+    !event.data?.id
+  ) return;
+  const { id, action } = event.data;
+  chrome.runtime.sendMessage({ action }, (response) => {
+    if (chrome.runtime.lastError) return;
+    window.postMessage({ source: 'cos-settings-reply', id, ...response.data }, '*');
+  });
+});
+
 // Listen for messages from the MAIN world script.
 window.addEventListener('message', async (event) => {
   // Only accept messages from the extension itself.

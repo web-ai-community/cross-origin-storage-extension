@@ -143,7 +143,7 @@
         background-color: #2a9a2a;
       }
 
-      .worker-cos-notice {
+      .worker-cos-notice, .phl-notice {
         border-left: 4px solid #f0a500;
         padding: 0.6em 1em;
         border-radius: 0 4px 4px 0;
@@ -153,7 +153,7 @@
       }
 
       @media (prefers-color-scheme: light) {
-        .worker-cos-notice {
+        .worker-cos-notice, .phl-notice {
           background-color: #fff3e0;
           color: #3e2c00;
         }
@@ -366,11 +366,15 @@
       and the Public Hash List gate that applies to global resources.
     </p>
     <p>
-      The last two tests load <code>relay.html</code> from
-      <code>cdn.jsdelivr.net</code> in a hidden iframe to act as a genuinely
-      different-origin reader (<code>jsdelivr.net</code> is always a different
-      eTLD+1 from <code>localhost</code> and <code>github.io</code>).
-      They are skipped gracefully when the relay is unreachable.
+      The last two tests load the extension relay page in a hidden iframe.
+      Because it is at a <code>chrome-extension://</code> URL it is always a
+      different origin from any web page, acting as a genuinely cross-origin
+      reader.
+    </p>
+    <p class="phl-notice" hidden>
+      ⚠️ The Public Hash List gate is currently <strong>disabled</strong>.
+      Toggle <strong>Enable Public Hash List gating</strong> in the extension
+      options on to run these tests.
     </p>
     <button class="run-all" id="run-origins-tests">Run origins tests</button>
     <table>
@@ -528,6 +532,28 @@
             clearTimeout(t);
             resolve(false);
           };
+        });
+      }
+
+      // Queries the extension service worker for the current Public Hash List
+      // setting. Returns true (PHL on), false (PHL explicitly off), or null
+      // (no extension response — native API present or no API at all; in that
+      // case the origins section is left enabled).
+      async function probePhlEnabled() {
+        return new Promise((resolve) => {
+          const id = crypto.randomUUID();
+          const t = setTimeout(() => resolve(null), 1500);
+          function handler(ev) {
+            if (ev.data?.source !== 'cos-settings-reply' || ev.data?.id !== id) return;
+            window.removeEventListener('message', handler);
+            clearTimeout(t);
+            resolve(ev.data.publicHashListEnabled === true ? true : false);
+          }
+          window.addEventListener('message', handler);
+          window.postMessage(
+            { source: 'cos-settings-query', action: 'getPublicHashListSetting', id },
+            '*'
+          );
         });
       }
 
@@ -1453,6 +1479,22 @@
           badge.textContent = 'n/a';
         });
         variantRows.forEach((rowEl) => {
+          rowEl.querySelector('.run-btn').disabled = true;
+          const badge = rowEl.querySelector('.badge');
+          badge.className = 'badge badge-pending';
+          badge.textContent = 'n/a';
+        });
+      });
+
+      // Probe for PHL setting and disable the origins section if it is off.
+      // null means no extension response (native API) — leave section enabled.
+      probePhlEnabled().then((phlEnabled) => {
+        if (phlEnabled !== false) return;
+        document
+          .querySelectorAll('.phl-notice')
+          .forEach((el) => (el.hidden = false));
+        document.getElementById('run-origins-tests').disabled = true;
+        originsRows.forEach((rowEl) => {
           rowEl.querySelector('.run-btn').disabled = true;
           const badge = rowEl.querySelector('.badge');
           badge.className = 'badge badge-pending';
