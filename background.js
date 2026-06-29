@@ -214,7 +214,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // WICG/cross-origin-storage#61. Distinct from (and unrelated to)
         // the public, still-supported requestFileHandles() page API.
         case 'requestFileHandle': {
-          const { origin, hashes, create } = data;
+          const { origin, hashes, create, origins: requestedOrigins } = data;
           const tabId = sender.tab?.id;
           maybeResetForNewPage(tabId, sender.documentId);
           const success = [];

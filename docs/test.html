@@ -1386,6 +1386,9 @@
         for (let i = 0; i < TESTS.length; i++) {
           await runTest(TESTS[i], rows[i]);
         }
+        for (let i = 0; i < SINGULAR_TESTS.length; i++) {
+          await runTest(SINGULAR_TESTS[i], singularRows[i]);
+        }
         if (cosInWorker) {
           for (let i = 0; i < TESTS.length; i++) {
             await runWorkerTest(i, workerRows[i]);

@@ -485,7 +485,25 @@
       }
     }
 
-    async function _cosRequestFileHandles(hashes, create) {
+    function _validateOrigins(origins, methodName) {
+      if (origins === undefined) return;
+      if (origins === '*') return;
+      if (Array.isArray(origins)) {
+        for (const o of origins) {
+          if (typeof o !== 'string') {
+            throw new TypeError(
+              `Failed to execute '${methodName}': 'origins' array must contain only strings.`
+            );
+          }
+        }
+        return;
+      }
+      throw new TypeError(
+        `Failed to execute '${methodName}': 'origins' must be '*', an array of origin strings, or omitted.`
+      );
+    }
+
+    async function _cosRequestFileHandles(hashes, create, origins) {
       // Internal message-passing action name (singular wire format, same
       // rationale as talkToBridge's 'requestFileHandle' above — distinct
       // from the public requestFileHandles() page API).
