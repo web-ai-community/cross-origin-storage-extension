@@ -239,7 +239,12 @@
   }
 
   async function requestFileHandlesWithOptionalPrompt(hashes, create = false) {
-    const responseData = await talkToBridge('requestFileHandles', {
+    // Internal message-passing action name. Always singular regardless of
+    // how many hashes are requested — see WICG/cross-origin-storage#61.
+    // This is distinct from the public, still-deprecated-but-supported
+    // requestFileHandles() page API below, which is unaffected by this
+    // rename.
+    const responseData = await talkToBridge('requestFileHandle', {
       hashes,
       create,
       origin: location.origin,
@@ -457,7 +462,10 @@
     }
 
     async function _cosRequestFileHandles(hashes, create) {
-      const { handleIds } = await cosRelay('requestFileHandles', {
+      // Internal message-passing action name (singular wire format, same
+      // rationale as talkToBridge's 'requestFileHandle' above — distinct
+      // from the public requestFileHandles() page API).
+      const { handleIds } = await cosRelay('requestFileHandle', {
         hashes,
         create,
         origin: self.location.origin,
@@ -819,7 +827,7 @@ ${xhr.responseText}`;
               const { id, action, data } = e.data;
               try {
                 let result;
-                if (action === 'requestFileHandles') {
+                if (action === 'requestFileHandle') {
                   const handles = await requestFileHandlesWithOptionalPrompt(
                     data.hashes,
                     data.create
@@ -1002,7 +1010,7 @@ self.addEventListener('message', function __cosBufferFn(e) {
                 const { id, action, data } = e.data;
                 try {
                   let result;
-                  if (action === 'requestFileHandles') {
+                  if (action === 'requestFileHandle') {
                     // Run the full permission flow (including any dialog) on the
                     // main thread, then give the worker opaque handle IDs to use.
                     const handles = await requestFileHandlesWithOptionalPrompt(
