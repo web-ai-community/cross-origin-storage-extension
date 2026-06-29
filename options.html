@@ -43,6 +43,31 @@
         (<code>navigator.crossOriginStorage</code>).
       </p>
     </div>
+    <div class="panel">
+      <div class="option-item">
+        <!-- switch attribute is required by the input-switch-polyfill -->
+        <!-- prettier-ignore -->
+        <input type="checkbox" switch id="public-hash-list">
+        <label for="public-hash-list"
+          >Only reveal resources on the
+          <a
+            href="https://github.com/tomayac/public-hash-list"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Public Hash List</a
+          ></label
+        >
+      </div>
+      <p>
+        The Public Hash List (PHL) is a curated allowlist of resource hashes
+        widely deployed enough that their presence in a shared cache reveals
+        nothing specific about your browsing history. When enabled, a
+        requested hash that isn't on the PHL is treated as unavailable —
+        and the access is blocked and logged — even if it's actually
+        present in the local COS cache. Off by default; the PHL is fetched
+        from GitHub and refreshed at most once every 24 hours.
+      </p>
+    </div>
     <div id="toast">Settings saved</div>
     <script type="module" src="options.js"></script>
   </body>

@@ -238,15 +238,40 @@
     return handles;
   }
 
-  async function requestFileHandlesWithOptionalPrompt(hashes, create = false) {
-    // Internal message-passing action name. Always singular regardless of
-    // how many hashes are requested — see WICG/cross-origin-storage#61.
-    // This is distinct from the public, still-deprecated-but-supported
-    // requestFileHandles() page API below, which is unaffected by this
-    // rename.
+  /**
+   * Validates an `options.origins` value per the COS explainer's
+   * CrossOriginStorageRequestFileHandleOptions dictionary: optional
+   * (USVString or sequence<USVString>). '*' means global, an array
+   * means a restricted list, and omitting it entirely means
+   * same-site-only.
+   */
+  function _validateOrigins(origins, methodName) {
+    if (origins === undefined) return;
+    if (origins === '*') return;
+    if (Array.isArray(origins)) {
+      for (const o of origins) {
+        if (typeof o !== 'string') {
+          throw new TypeError(
+            `Failed to execute '${methodName}': 'origins' array must contain only strings.`
+          );
+        }
+      }
+      return;
+    }
+    throw new TypeError(
+      `Failed to execute '${methodName}': 'origins' must be '*', an array of origin strings, or omitted.`
+    );
+  }
+
+  async function requestFileHandlesWithOptionalPrompt(
+    hashes,
+    create = false,
+    origins = undefined
+  ) {
     const responseData = await talkToBridge('requestFileHandle', {
       hashes,
       create,
+      origins,
       origin: location.origin,
     });
     return handleRequestFileHandlesResponse(responseData);
@@ -291,10 +316,12 @@
         );
       }
       _validateHash(hash, 'requestFileHandle');
-      const { create = false } = options;
+      const { create = false, origins } = options;
+      _validateOrigins(origins, 'requestFileHandle');
       const [handle] = await requestFileHandlesWithOptionalPrompt(
         [hash],
-        create
+        create,
+        origins
       );
       return handle;
     },
@@ -465,6 +492,7 @@
       const { handleIds } = await cosRelay('requestFileHandle', {
         hashes,
         create,
+        origins,
         origin: self.location.origin,
       });
       return handleIds.map((handleId, i) => ({
@@ -517,8 +545,13 @@
           );
         }
         _validateHash(hash, 'requestFileHandle');
-        const { create = false } = options;
-        const [handle] = await _cosRequestFileHandles([hash], create);
+        const { create = false, origins } = options;
+        _validateOrigins(origins, 'requestFileHandle');
+        const [handle] = await _cosRequestFileHandles(
+          [hash],
+          create,
+          origins
+        );
         return handle;
       },
 
@@ -537,8 +570,9 @@
         for (const hash of hashes) {
           _validateHash(hash, 'requestFileHandles');
         }
-        const { create = false } = options;
-        return _cosRequestFileHandles(hashes, create);
+        const { create = false, origins } = options;
+        _validateOrigins(origins, 'requestFileHandles');
+        return _cosRequestFileHandles(hashes, create, origins);
       },
     };
 
@@ -826,7 +860,8 @@ ${xhr.responseText}`;
                 if (action === 'requestFileHandle') {
                   const handles = await requestFileHandlesWithOptionalPrompt(
                     data.hashes,
-                    data.create
+                    data.create,
+                    data.origins
                   );
                   const handleIds = handles.map(() => crypto.randomUUID());
                   handleIds.forEach((hid, i) =>
@@ -1011,7 +1046,8 @@ self.addEventListener('message', function __cosBufferFn(e) {
                     // main thread, then give the worker opaque handle IDs to use.
                     const handles = await requestFileHandlesWithOptionalPrompt(
                       data.hashes,
-                      data.create
+                      data.create,
+                      data.origins
                     );
                     const handleIds = handles.map(() => crypto.randomUUID());
                     handleIds.forEach((hid, i) =>
