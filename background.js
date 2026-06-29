@@ -208,8 +208,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     try {
       switch (action) {
-        case 'requestFileHandles': {
-          const { origin, hashes, create, origins: requestedOrigins } = data;
+        // Internal message-passing action name. Always singular — every
+        // caller passes a single-element hashes array — even though the
+        // payload still carries a 'hashes' array for now. See
+        // WICG/cross-origin-storage#61. Distinct from (and unrelated to)
+        // the public, still-supported requestFileHandles() page API.
+        case 'requestFileHandle': {
+          const { origin, hashes, create } = data;
           const tabId = sender.tab?.id;
           maybeResetForNewPage(tabId, sender.documentId);
           const success = [];

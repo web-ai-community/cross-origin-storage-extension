@@ -268,7 +268,7 @@
     create = false,
     origins = undefined
   ) {
-    const responseData = await talkToBridge('requestFileHandles', {
+    const responseData = await talkToBridge('requestFileHandle', {
       hashes,
       create,
       origins,
@@ -485,8 +485,11 @@
       }
     }
 
-    async function _cosRequestFileHandles(hashes, create, origins) {
-      const { handleIds } = await cosRelay('requestFileHandles', {
+    async function _cosRequestFileHandles(hashes, create) {
+      // Internal message-passing action name (singular wire format, same
+      // rationale as talkToBridge's 'requestFileHandle' above — distinct
+      // from the public requestFileHandles() page API).
+      const { handleIds } = await cosRelay('requestFileHandle', {
         hashes,
         create,
         origins,
@@ -854,7 +857,7 @@ ${xhr.responseText}`;
               const { id, action, data } = e.data;
               try {
                 let result;
-                if (action === 'requestFileHandles') {
+                if (action === 'requestFileHandle') {
                   const handles = await requestFileHandlesWithOptionalPrompt(
                     data.hashes,
                     data.create,
@@ -1038,7 +1041,7 @@ self.addEventListener('message', function __cosBufferFn(e) {
                 const { id, action, data } = e.data;
                 try {
                   let result;
-                  if (action === 'requestFileHandles') {
+                  if (action === 'requestFileHandle') {
                     // Run the full permission flow (including any dialog) on the
                     // main thread, then give the worker opaque handle IDs to use.
                     const handles = await requestFileHandlesWithOptionalPrompt(
