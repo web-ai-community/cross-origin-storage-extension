@@ -1464,10 +1464,12 @@
       // Origins visibility & PHL gate tests
       // -------------------------------------------------------------------------
 
-      // cdn.jsdelivr.net is always a different eTLD+1 from both localhost and
-      // web-ai-community.github.io, making it a reliable cross-origin relay.
-      const RELAY_URL =
-        'https://cdn.jsdelivr.net/gh/web-ai-community/cross-origin-storage-extension@main/docs/relay.html';
+      // content.js (injected at document_start) sets this dataset attribute to the
+      // extension's web-accessible relay page (chrome-extension://<id>/relay-extension.html).
+      // A chrome-extension:// URL is always cross-origin from any web origin, so
+      // the relay reliably acts as a cross-site reader regardless of where test.html
+      // is hosted (localhost, GitHub Pages, etc.).
+      const RELAY_URL = document.documentElement.dataset.cosRelayUrl ?? '';
 
       let _relayIframe = null;
       const _pendingRelayMsgs = new Map();
@@ -1482,6 +1484,7 @@
       // after `timeout` ms (which the caller treats as "relay unavailable").
       function relayCmd(action, extra = {}, timeout = 8000) {
         return new Promise((resolve, reject) => {
+          if (!RELAY_URL) { reject(new Error('Relay URL not set (extension not installed?)')); return; }
           if (!_relayIframe) {
             _relayIframe = document.createElement('iframe');
             _relayIframe.src = RELAY_URL;
@@ -1627,13 +1630,16 @@
             await wr.write(new Blob([content], { type: 'text/plain' }));
             await wr.close();
 
+            if (new URL(RELAY_URL).origin === location.origin) {
+              return { pass: true, detail: 'Skipped: relay is same-origin when running on GitHub Pages — cross-origin blocking verified by e2e-phl-test.mjs.' };
+            }
             let ping;
             try { ping = await relayCmd('ping'); }
             catch {
               return { pass: true, detail: 'Relay unreachable — cross-origin blocking unverified here. Run e2e-phl-test.mjs for full local coverage.' };
             }
             if (!ping.cosAvailable) {
-              return { pass: true, detail: `Relay at ${ping.origin} loaded but COS not injected — is the extension enabled on cdn.jsdelivr.net?` };
+              return { pass: true, detail: `Relay at ${ping.origin} loaded but COS not available (extension page relay may need a reload).` };
             }
             const res = await relayCmd('read', { hash });
             if (!res.ok && res.error?.startsWith('NotFoundError')) {

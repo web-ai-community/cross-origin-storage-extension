@@ -1,0 +1,73 @@
+<!--
+  Copyright 2026 Google LLC.
+  SPDX-License-Identifier: Apache-2.0
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>COS Extension Relay</title>
+  </head>
+  <body>
+    <!--
+      Extension web-accessible relay for cross-origin visibility tests.
+
+      This page is loaded in a hidden iframe from test.html via a
+      chrome-extension://<id>/relay-extension.html URL that content.js
+      injects into every page via document.documentElement.dataset.cosRelayUrl.
+
+      Because chrome-extension:// URLs are always cross-origin from every web
+      origin, this relay reliably acts as a cross-site reader regardless of
+      whether test.html is served from localhost or github.io.
+
+      The COS polyfill (main-world.js + content.js) is loaded explicitly below.
+      Extension pages have native chrome API access, so the full polyfill chain
+      works without the usual MAIN / ISOLATED world indirection.
+
+      Protocol (identical to docs/relay.html)
+      ----------------------------------------
+      Parent → iframe:
+        { source: 'cos-relay-cmd', id, action: 'ping' }
+        { source: 'cos-relay-cmd', id, action: 'read', hash: {algorithm, value} }
+
+      iframe → parent:
+        { source: 'cos-relay-result', id, ok: true,  cosAvailable, origin }   (ping)
+        { source: 'cos-relay-result', id, ok: true,  text }                   (read success)
+        { source: 'cos-relay-result', id, ok: false, error }                  (read failure)
+    -->
+    <script src="main-world.js"></script>
+    <script src="content.js"></script>
+    <script>
+      window.addEventListener('message', async (event) => {
+        if (!event.data || event.data.source !== 'cos-relay-cmd') return;
+        const { id, action, hash } = event.data;
+
+        function reply(data) {
+          event.source.postMessage(
+            { source: 'cos-relay-result', id, ...data },
+            event.origin
+          );
+        }
+
+        if (action === 'ping') {
+          reply({ ok: true, cosAvailable: !!navigator.crossOriginStorage, origin: location.origin });
+          return;
+        }
+
+        if (!navigator.crossOriginStorage) {
+          reply({ ok: false, error: 'COS not available in relay' });
+          return;
+        }
+
+        try {
+          const handle = await navigator.crossOriginStorage.requestFileHandle(hash);
+          const file = await handle.getFile();
+          const text = await file.text();
+          reply({ ok: true, text });
+        } catch (err) {
+          reply({ ok: false, error: `${err.name}: ${err.message}` });
+        }
+      });
+    </script>
+  </body>
+</html>

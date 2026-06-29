@@ -17,6 +17,9 @@ async function resolveFontBlobs(responseData) {
   );
 }
 
+// Expose the extension relay URL so test.html can use an always-cross-origin iframe.
+document.documentElement.dataset.cosRelayUrl = chrome.runtime.getURL('relay-extension.html');
+
 // Listen for messages from the MAIN world script.
 window.addEventListener('message', async (event) => {
   // Only accept messages from the extension itself.
