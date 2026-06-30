@@ -491,6 +491,7 @@
       const logEl = document.getElementById('log');
 
       function log(msg, isError = false) {
+        console[isError ? 'error' : 'log'](msg);
         const line = `[${new Date().toLocaleTimeString()}] ${msg}\n`;
         if (isError) {
           const span = document.createElement('span');

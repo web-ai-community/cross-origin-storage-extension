@@ -113,6 +113,7 @@ async function main() {
     headless: false,
     ignoreDefaultArgs: ['--disable-extensions'],
     args: [
+      '--headless=new',
       `--disable-extensions-except=${EXT_PATH}`,
       `--load-extension=${EXT_PATH}`,
       '--no-first-run',
@@ -188,6 +189,16 @@ async function main() {
     process.exit(1);
   }
   console.log('navigator.crossOriginStorage detected ✓');
+
+  // Forward browser console to Node stdout so test results stream in real time.
+  page.on('console', (msg) => {
+    const text = msg.text();
+    if (msg.type() === 'error') {
+      console.error(text);
+    } else {
+      console.log(text);
+    }
+  });
 
   // Single click runs every test group in sequence: main + singular, worker,
   // worker variants, stress (3 GiB), origins, MOPHL, CSS.
