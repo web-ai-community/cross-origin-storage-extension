@@ -115,7 +115,6 @@ async function setupOffscreenDocument(path) {
     return;
   }
 
-  // create offscreen document
   if (creating) {
     await creating;
   } else {
@@ -209,11 +208,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     try {
       switch (action) {
-        // Internal message-passing action name. Always singular — every
-        // caller passes a single-element hashes array — even though the
-        // payload still carries a 'hashes' array for now. See
-        // WICG/cross-origin-storage#61. Distinct from (and unrelated to)
-        // the public, still-supported requestFileHandles() page API.
+        // Internal wire action. The payload carries a 'hashes' array; callers
+        // using the singular API pass exactly one element. See WICG/cross-origin-storage#61.
         case 'requestFileHandle': {
           const { origin, hashes, create, origins: requestedOrigins } = data;
           const tabId = sender.tab?.id;
@@ -570,10 +566,8 @@ function generateCacheKey(hash) {
 // originsStr } regardless of which modifier appears first.
 function findCOSMatches(cssText) {
   const matches = [];
-  // integrity() before cross-origin-storage()
   const RE_INT_FIRST =
     /url\s*\(\s*["']([^"']+)["']\s*integrity\s*\(\s*["'](sha(?:256|384|512)-[A-Za-z0-9+/=]+)["']\s*\)\s*cross-origin-storage\s*\(\s*([^)]*?)\s*\)\s*\)/g;
-  // cross-origin-storage() before integrity()
   const RE_COS_FIRST =
     /url\s*\(\s*["']([^"']+)["']\s*cross-origin-storage\s*\(\s*([^)]*?)\s*\)\s*integrity\s*\(\s*["'](sha(?:256|384|512)-[A-Za-z0-9+/=]+)["']\s*\)\s*\)/g;
   let m;

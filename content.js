@@ -37,9 +37,7 @@ window.addEventListener('message', (event) => {
   });
 });
 
-// Listen for messages from the MAIN world script.
 window.addEventListener('message', async (event) => {
-  // Only accept messages from the extension itself.
   if (
     event.source !== window ||
     event.data.source !== 'cos-polyfill-main' ||
@@ -66,7 +64,6 @@ window.addEventListener('message', async (event) => {
     data.blobURL = URL.createObjectURL(blob);
     delete data.data;
   }
-  // Forward the message to the background script
   chrome.runtime.sendMessage({ action, data }, async (response) => {
     if (chrome.runtime.lastError || !response) {
       // Background service worker was unloaded mid-request; retry once after it

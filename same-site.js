@@ -1,10 +1,7 @@
 // Copyright 2026 Google LLC.
 // SPDX-License-Identifier: Apache-2.0
 
-// Same-site helper backed by the real Public Suffix List (PSL).
-// Replaces the previous hand-rolled COMMON_MULTI_LABEL_SUFFIXES approximation
-// with a full PSL implementation (see public-suffix-list.js) that uses the
-// same stale-while-revalidate infrastructure as the Public Hash List.
+// Same-site helper backed by the Public Suffix List (see public-suffix-list.js).
 
 import { PublicSuffixList } from './public-suffix-list.js';
 

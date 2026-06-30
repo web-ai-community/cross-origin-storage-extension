@@ -495,9 +495,7 @@
     }
 
     async function _cosRequestFileHandles(hashes, create, origins) {
-      // Internal message-passing action name (singular wire format, same
-      // rationale as talkToBridge's 'requestFileHandle' above — distinct
-      // from the public requestFileHandles() page API).
+      // Internal wire action — matches the 'requestFileHandle' case in background.js.
       const { handleIds } = await cosRelay('requestFileHandle', {
         hashes,
         create,
@@ -773,8 +771,6 @@
       self.postMessage({ source: 'cos-worker-ready' });
     }
   }
-
-  // (sharedWorkerCrossOriginStoragePolyfill merged into universalWorkerPolyfill above)
 
   // Worker/SharedWorker patching is gated behind a user opt-in setting because
   // replacing these globals can confuse bot-detection systems (e.g. Cloudflare

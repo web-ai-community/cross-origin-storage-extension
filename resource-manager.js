@@ -235,12 +235,7 @@ class ResourceManager {
     };
   }
 
-  /**
-   * Deletes one or more resources based on their hash value(s).
-   * @param {string|string[]} hashesToDelete - A single hash string or an array of hash strings.
-   */
   async deleteResourcesByHash(hashesToDelete) {
-    // Standardize input to always be an array for consistent processing.
     const hashes = Array.isArray(hashesToDelete)
       ? hashesToDelete
       : [hashesToDelete];
@@ -249,24 +244,19 @@ class ResourceManager {
     for (const hash of hashes) {
       itemsWereDeleted = true;
 
-      // Find all origins associated with this hash.
       const origins = this.hashToOrigins[hash];
       if (origins) {
-        // Remove the hash from each associated origin's list.
         for (const origin of origins) {
           if (this.originToHashes[origin]) {
             this.originToHashes[origin] = this.originToHashes[origin].filter(
               (h) => h !== hash
             );
-            // If the origin now has no hashes, remove the origin key itself.
             if (this.originToHashes[origin].length === 0) {
               delete this.originToHashes[origin];
             }
           }
-          // Remove the access history for the origin-hash pair.
           delete this.accessHistory[`${origin}|${hash}`];
         }
-        // Remove the hash from the central hash-to-origins map.
         delete this.hashToOrigins[hash];
       }
 
@@ -275,7 +265,6 @@ class ResourceManager {
       delete this.hashToHitCount[hash];
     }
 
-    // If any changes were made, persist them to storage.
     if (itemsWereDeleted) {
       await this.saveManagerToStorage();
     }
