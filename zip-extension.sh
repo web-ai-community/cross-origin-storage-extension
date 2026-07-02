@@ -31,6 +31,8 @@ FILES_TO_ZIP=(
   "input-switch-polyfill.css"
   "relay-extension.html"
   "relay-extension.js"
+  "public-hash-list.js"
+  "same-site.js"
 )
 
 # Check if an old zip file exists and remove it.
