@@ -865,6 +865,72 @@
             };
           },
         },
+
+        {
+          id: 'singular-get-file-before-write',
+          label: 'requestFileHandle({create:true}) — getFile() before any write throws NotAllowedError',
+          async run() {
+            log('Singular test 4: getFile() on unwritten handle…');
+            const content = 'cos-test-singular-C';
+            const hash = hashObj(await sha256Hex(content));
+            const handle = await navigator.crossOriginStorage.requestFileHandle(
+              hash,
+              { create: true }
+            );
+            try {
+              await handle.getFile();
+              return {
+                pass: false,
+                detail: 'Expected NotAllowedError but getFile() resolved without error.',
+              };
+            } catch (err) {
+              if (err.name === 'NotAllowedError') {
+                return {
+                  pass: true,
+                  detail: `Correctly threw ${err.name}: ${err.message}`,
+                };
+              }
+              return {
+                pass: false,
+                detail: `Threw unexpected error ${err.name}: ${err.message}`,
+              };
+            }
+          },
+        },
+
+        {
+          id: 'singular-hash-mismatch',
+          label: 'requestFileHandle({create:true}) — writing data that does not match the hash throws DataError',
+          async run() {
+            log('Singular test 5: writing mismatched data…');
+            const content = 'cos-test-singular-D';
+            const hash = hashObj(await sha256Hex(content));
+            const handle = await navigator.crossOriginStorage.requestFileHandle(
+              hash,
+              { create: true }
+            );
+            const writable = await handle.createWritable();
+            await writable.write(new Blob(['this is not the right content'], { type: 'text/plain' }));
+            try {
+              await writable.close();
+              return {
+                pass: false,
+                detail: 'Expected DataError on close() but it resolved without error.',
+              };
+            } catch (err) {
+              if (err.name === 'DataError') {
+                return {
+                  pass: true,
+                  detail: `Correctly threw ${err.name}: ${err.message}`,
+                };
+              }
+              return {
+                pass: false,
+                detail: `Threw unexpected error ${err.name}: ${err.message}`,
+              };
+            }
+          },
+        },
       ];
 
       // ---------------------------------------------------------------------------

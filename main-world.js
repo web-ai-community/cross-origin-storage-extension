@@ -174,6 +174,12 @@
           const { data, mimeType } = await talkToBridge('getFileData', {
             hash,
           });
+          if (!data) {
+            throw new DOMException(
+              `File contents must be written before getFile() can be called.`,
+              'NotAllowedError'
+            );
+          }
           return new File([data], 'file', {
             type: mimeType,
             lastModified: Date.now(),
@@ -203,7 +209,7 @@
               if (actualHashHex !== hash.value) {
                 throw new DOMException(
                   `The hash of the provided data does not match the declared hash.`,
-                  'NotAllowedError'
+                  'DataError'
                 );
               }
               await talkToBridge('storeFileData', {
@@ -534,7 +540,7 @@
               if (actualHashHex !== _hash.value) {
                 throw new DOMException(
                   `The hash of the provided data does not match the declared hash.`,
-                  'NotAllowedError'
+                  'DataError'
                 );
               }
               await cosRelay(
