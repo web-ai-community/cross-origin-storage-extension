@@ -1700,7 +1700,7 @@
         },
         {
           id: 'origins-list-other',
-          label: "origins: ['https://example.com'] — unlisted origin is blocked",
+          label: "origins: ['https://example.com'] — storer can read back their own resource",
           async run() {
             const content = `cos-origins-list-other-${Date.now()}`;
             const hex = await sha256Hex(content);
@@ -1711,17 +1711,21 @@
             const wr = await wh.createWritable();
             await wr.write(new Blob([content], { type: 'text/plain' }));
             await wr.close();
+            // Per spec: the original storer always retains read access regardless
+            // of the origins list set at write time. Cross-origin blocking for
+            // non-storers is covered by the relay tests below.
             try {
-              await navigator.crossOriginStorage.requestFileHandle(hash);
-              return { pass: false, detail: 'Expected NotFoundError — read should be blocked for unlisted origin' };
-            } catch (err) {
-              if (err.name === 'NotFoundError') {
-                return {
-                  pass: true,
-                  detail: `Correctly blocked: origins:['https://example.com'], requesting origin is ${location.origin}`,
-                };
+              const rh = await navigator.crossOriginStorage.requestFileHandle(hash);
+              const text = await (await rh.getFile()).text();
+              if (text !== content) {
+                return { pass: false, detail: `Content mismatch: got "${text}"` };
               }
-              return { pass: false, detail: `Unexpected: ${err.name}: ${err.message}` };
+              return {
+                pass: true,
+                detail: `Storer (${location.origin}) read back their own resource despite origins:['https://example.com']`,
+              };
+            } catch (err) {
+              return { pass: false, detail: `Storer should always have access — got ${err.name}: ${err.message}` };
             }
           },
         },
