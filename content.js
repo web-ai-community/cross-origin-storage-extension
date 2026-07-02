@@ -45,12 +45,16 @@ window.addEventListener('message', async (event) => {
   ) {
     return;
   }
-  const { id, action, data } = event.data;
+  const { id, action } = event.data;
+  // Shallow-clone the page-origin data payload before mutating — Firefox wraps
+  // postMessage data from the main world in Xray Vision, which disallows
+  // assigning content-script objects as properties on page-owned objects.
+  const data = event.data.data != null ? { ...event.data.data } : event.data.data;
 
   if (data && data.data) {
     // data.data arrives as a transferred ArrayBuffer (zero-copy from the main
     // world) or, for legacy callers, as a structured-cloned Blob.  Either way,
-    // convert to a blob URL so the background can fetch it without another copy.
+    // normalize to a Blob.
     const raw = data.data;
     const mimeType =
       (raw instanceof Blob ? raw.type : data.mimeType?.['content-type']) ||
@@ -61,8 +65,15 @@ window.addEventListener('message', async (event) => {
         : raw instanceof Blob
           ? raw
           : new Blob([raw], { type: mimeType });
-    data.blobURL = URL.createObjectURL(blob);
-    delete data.data;
+    if (typeof browser !== 'undefined') {
+      // Firefox: blob URLs created in content scripts carry the page's origin
+      // (blob:http://...) which the moz-extension:// background page cannot
+      // fetch. Send the Blob directly via structured clone instead.
+      data.data = blob;
+    } else {
+      data.blobURL = URL.createObjectURL(blob);
+      delete data.data;
+    }
   }
   chrome.runtime.sendMessage({ action, data }, async (response) => {
     if (chrome.runtime.lastError || !response) {
