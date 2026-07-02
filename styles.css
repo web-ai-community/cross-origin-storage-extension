@@ -663,6 +663,12 @@ dialog footer {
   margin: 0.25em 0 0;
 }
 
+.storer-info {
+  font-size: 0.85em;
+  color: light-dark(#555, #ccc);
+  margin: 0.15em 0 0;
+}
+
 .other-origins-details {
   margin-top: 0.25em;
 }

@@ -40,6 +40,8 @@ class ResourceManager {
     // entry means same-site-only, the spec's default when `origins` is
     // omitted at creation time).
     this.hashToVisibility = {};
+    // hash -> origin string of the first storer (immutable after first set).
+    this.hashToStorer = {};
   }
 
   /**
@@ -111,6 +113,50 @@ class ResourceManager {
 
     this.hashToVisibility[hash] = requestedOrigins;
     return { applied: true, visibility: requestedOrigins };
+  }
+
+  /**
+   * Records the first origin to store a resource under this hash. Subsequent
+   * calls are no-ops; the storer is immutable once set.
+   */
+  setStorer(hash, origin) {
+    if (!this.hashToStorer[hash]) {
+      this.hashToStorer[hash] = origin;
+    }
+  }
+
+  /** Returns the origin that first stored this hash, or null if unknown. */
+  getStorer(hash) {
+    return this.hashToStorer[hash] ?? null;
+  }
+
+  /**
+   * Backfills hashToStorer for resources that pre-date storer tracking by
+   * finding the origin with the earliest recorded access timestamp for each
+   * hash. Returns true if any entries were added (caller should save).
+   */
+  _backfillStorers() {
+    let changed = false;
+    for (const hash of Object.keys(this.hashToOrigins)) {
+      if (this.hashToStorer[hash]) continue;
+      let earliestOrigin = null;
+      let earliestTime = null;
+      for (const origin of this.hashToOrigins[hash]) {
+        const history = this.accessHistory[`${origin}|${hash}`];
+        if (!history || !history.length) continue;
+        // accessHistory is newest-first (unshift), so oldest entry is last.
+        const oldest = history[history.length - 1];
+        if (!earliestTime || oldest < earliestTime) {
+          earliestTime = oldest;
+          earliestOrigin = origin;
+        }
+      }
+      if (earliestOrigin) {
+        this.hashToStorer[hash] = earliestOrigin;
+        changed = true;
+      }
+    }
+    return changed;
   }
 
   recordAccess(origin, hash, timestamp = new Date()) {
@@ -263,6 +309,7 @@ class ResourceManager {
       delete this.hashToSize[hash];
       delete this.hashToMimeType[hash];
       delete this.hashToHitCount[hash];
+      delete this.hashToStorer[hash];
     }
 
     if (itemsWereDeleted) {
@@ -283,6 +330,10 @@ class ResourceManager {
         this.hashToHitCount = stored.hashToHitCount || {};
         this.totalMissCount = stored.totalMissCount || 0;
         this.hashToVisibility = stored.hashToVisibility || {};
+        this.hashToStorer = stored.hashToStorer || {};
+      }
+      if (this._backfillStorers()) {
+        await this.saveManagerToStorage();
       }
     } catch (error) {
       console.error('Error loading resource manager from storage:', error);
@@ -301,6 +352,7 @@ class ResourceManager {
           hashToHitCount: this.hashToHitCount,
           totalMissCount: this.totalMissCount,
           hashToVisibility: this.hashToVisibility,
+          hashToStorer: this.hashToStorer,
         },
       });
     } catch (error) {

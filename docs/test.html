@@ -2161,6 +2161,7 @@
         globalBlocked: 'phl-e2e-global-blocked',
         list:          'phl-e2e-list',
         samesite:      'phl-e2e-samesite',
+        storerBypass:  'phl-e2e-storer-bypass',
       };
 
       // Cached setup promise: iframes created + resources stored.
@@ -2178,7 +2179,7 @@
             const hex = await sha256Hex(content);
             const hash = { algorithm: 'SHA-256', value: hex };
             const opts = { create: true };
-            if (key === 'globalAllowed' || key === 'globalBlocked') {
+            if (key === 'globalAllowed' || key === 'globalBlocked' || key === 'storerBypass') {
               opts.origins = '*';
             } else if (key === 'list') {
               opts.origins = [`http://a.test:${port}`];
@@ -2266,10 +2267,10 @@
         // ── Scenario 2: origins:'*', hash NOT in PHL → all three origins blocked ─
         {
           id: 'mophl-global-not-phl-self',
-          label: "global (not in PHL): a.test blocked",
+          label: "global (not in PHL): a.test (storer) reads",
           async run() {
             await ensureMophlResources();
-            return mophlSelfRead('globalBlocked', false);
+            return mophlSelfRead('globalBlocked', true);
           },
         },
         {
@@ -2336,6 +2337,33 @@
           async run() {
             await ensureMophlResources();
             return mophlRemoteRead(`http://b.test:${location.port}`, 'samesite', false);
+          },
+        },
+        // ── Scenario 5: storer bypass — global resource not in PHL ───────────────
+        // The storing origin always has read access regardless of PHL gating.
+        // Same-site siblings and cross-site origins remain blocked as usual.
+        {
+          id: 'mophl-storer-bypass-self',
+          label: "storer bypass: a.test (storer) reads global resource not in PHL",
+          async run() {
+            await ensureMophlResources();
+            return mophlSelfRead('storerBypass', true);
+          },
+        },
+        {
+          id: 'mophl-storer-bypass-samesite',
+          label: "storer bypass: sub.a.test (same-site, non-storer) still blocked",
+          async run() {
+            await ensureMophlResources();
+            return mophlRemoteRead(`http://sub.a.test:${location.port}`, 'storerBypass', false);
+          },
+        },
+        {
+          id: 'mophl-storer-bypass-crosssite',
+          label: "storer bypass: b.test (cross-site, non-storer) still blocked",
+          async run() {
+            await ensureMophlResources();
+            return mophlRemoteRead(`http://b.test:${location.port}`, 'storerBypass', false);
           },
         },
       ];

@@ -399,6 +399,29 @@ async function initializePopup() {
     }
     textContent.append(hashDiv);
 
+    const storer = resourceManager.getStorer(hash);
+    if (storer) {
+      const storerLine = document.createElement('div');
+      storerLine.className = 'storer-info';
+      const storerBtn = document.createElement('button');
+      storerBtn.type = 'button';
+      storerBtn.className = 'origin-link-btn';
+      storerBtn.textContent = storer;
+      storerBtn.addEventListener('click', () => {
+        originSelect.value = storer;
+        originSelect.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        originSelect.classList.add('select-highlight');
+        clearTimeout(selectHighlightTimer);
+        selectHighlightTimer = setTimeout(
+          () => originSelect.classList.remove('select-highlight'),
+          2000
+        );
+        updateHashesDisplay();
+      });
+      storerLine.append('Initially stored by: ', storerBtn);
+      textContent.append(storerLine);
+    }
+
     if (selectedOrigin) {
       const history = resourceManager.getAccessHistory(selectedOrigin, hash);
       if (history.length > 0) {

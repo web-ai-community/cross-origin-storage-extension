@@ -42,6 +42,7 @@ const MOPHL_CONTENT = {
   globalBlocked: 'phl-e2e-global-blocked',
   list:          'phl-e2e-list',
   samesite:      'phl-e2e-samesite',
+  storerBypass:  'phl-e2e-storer-bypass',
 };
 
 // Only the globalAllowed hash goes into the mock PHL.
