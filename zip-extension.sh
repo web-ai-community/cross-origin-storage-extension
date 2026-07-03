@@ -32,6 +32,7 @@ FILES_TO_ZIP=(
   "relay-extension.html"
   "relay-extension.js"
   "public-hash-list.js"
+  "public-suffix-list.js"
   "same-site.js"
 )
 
