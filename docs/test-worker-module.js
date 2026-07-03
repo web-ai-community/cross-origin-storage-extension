@@ -8,7 +8,6 @@
 //     extension's wrapper blob URL (which would make the import below fail).
 import { sha256Hex, hashObj } from './test-worker-module-helper.js';
 
-// Variant type is passed as data.variant: 'plural' (deprecated) | 'singular'.
 self.onmessage = async ({ data }) => {
   if (data.type !== 'run') return;
   if (!self.navigator?.crossOriginStorage) {
@@ -23,46 +22,22 @@ self.onmessage = async ({ data }) => {
     const content = `cos-variant-${data.label}`;
     const blob = new Blob([content], { type: 'text/plain' });
     const hash = hashObj(await sha256Hex(content));
-    if (data.variant === 'singular') {
-      // New singular API (requestFileHandle).
-      const wh = await navigator.crossOriginStorage.requestFileHandle(hash, {
-        create: true,
-      });
-      const writable = await wh.createWritable();
-      await writable.write(blob);
-      await writable.close();
-      const rh = await navigator.crossOriginStorage.requestFileHandle(hash);
-      const text = await (await rh.getFile()).text();
-      const pass = text === content;
-      self.postMessage({
-        type: 'result',
-        pass,
-        detail: pass
-          ? `[singular] Stored and read back correctly: "${text}"`
-          : `[singular] Expected "${content}", got "${text}"`,
-      });
-    } else {
-      // Deprecated plural API (requestFileHandles).
-      const [wh] = await navigator.crossOriginStorage.requestFileHandles(
-        [hash],
-        { create: true }
-      );
-      const writable = await wh.createWritable();
-      await writable.write(blob);
-      await writable.close();
-      const [rh] = await navigator.crossOriginStorage.requestFileHandles([
-        hash,
-      ]);
-      const text = await (await rh.getFile()).text();
-      const pass = text === content;
-      self.postMessage({
-        type: 'result',
-        pass,
-        detail: pass
-          ? `[plural — deprecated] Stored and read back correctly: "${text}"`
-          : `[plural — deprecated] Expected "${content}", got "${text}"`,
-      });
-    }
+    const wh = await navigator.crossOriginStorage.requestFileHandle(hash, {
+      create: true,
+    });
+    const writable = await wh.createWritable();
+    await writable.write(blob);
+    await writable.close();
+    const rh = await navigator.crossOriginStorage.requestFileHandle(hash);
+    const text = await (await rh.getFile()).text();
+    const pass = text === content;
+    self.postMessage({
+      type: 'result',
+      pass,
+      detail: pass
+        ? `Stored and read back correctly: "${text}"`
+        : `Expected "${content}", got "${text}"`,
+    });
   } catch (err) {
     self.postMessage({
       type: 'result',

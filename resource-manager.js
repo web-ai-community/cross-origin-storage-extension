@@ -40,8 +40,10 @@ class ResourceManager {
     // entry means same-site-only, the spec's default when `origins` is
     // omitted at creation time).
     this.hashToVisibility = {};
-    // hash -> origin string of the first storer (immutable after first set).
-    this.hashToStorer = {};
+    // hash -> string[] of all origins that have successfully written this entry.
+    // Grows monotonically; every writing origin gets permanent read access
+    // regardless of the `origins` field or PHL membership.
+    this.hashToStoringOrigins = {};
   }
 
   /**
@@ -116,29 +118,34 @@ class ResourceManager {
   }
 
   /**
-   * Records the first origin to store a resource under this hash. Subsequent
-   * calls are no-ops; the storer is immutable once set.
+   * Adds `origin` to the storing-origins set for this hash. Every origin
+   * that successfully writes an entry is added here and gains permanent
+   * read access regardless of the `origins` field or PHL membership.
    */
-  setStorer(hash, origin) {
-    if (!this.hashToStorer[hash]) {
-      this.hashToStorer[hash] = origin;
+  addStoringOrigin(hash, origin) {
+    if (!this.hashToStoringOrigins[hash]) {
+      this.hashToStoringOrigins[hash] = [];
+    }
+    if (!this.hashToStoringOrigins[hash].includes(origin)) {
+      this.hashToStoringOrigins[hash].push(origin);
     }
   }
 
-  /** Returns the origin that first stored this hash, or null if unknown. */
-  getStorer(hash) {
-    return this.hashToStorer[hash] ?? null;
+  /** Returns true if `origin` has ever successfully written this hash. */
+  isStoringOrigin(hash, origin) {
+    return (this.hashToStoringOrigins[hash] ?? []).includes(origin);
   }
 
   /**
-   * Backfills hashToStorer for resources that pre-date storer tracking by
-   * finding the origin with the earliest recorded access timestamp for each
-   * hash. Returns true if any entries were added (caller should save).
+   * Backfills hashToStoringOrigins for resources that pre-date storing-origin
+   * tracking by seeding each hash with the origin that has the earliest
+   * recorded access timestamp (the most likely original writer). Returns true
+   * if any entries were added (caller should save).
    */
   _backfillStorers() {
     let changed = false;
     for (const hash of Object.keys(this.hashToOrigins)) {
-      if (this.hashToStorer[hash]) continue;
+      if (this.hashToStoringOrigins[hash]?.length) continue;
       let earliestOrigin = null;
       let earliestTime = null;
       for (const origin of this.hashToOrigins[hash]) {
@@ -152,7 +159,7 @@ class ResourceManager {
         }
       }
       if (earliestOrigin) {
-        this.hashToStorer[hash] = earliestOrigin;
+        this.hashToStoringOrigins[hash] = [earliestOrigin];
         changed = true;
       }
     }
@@ -309,7 +316,7 @@ class ResourceManager {
       delete this.hashToSize[hash];
       delete this.hashToMimeType[hash];
       delete this.hashToHitCount[hash];
-      delete this.hashToStorer[hash];
+      delete this.hashToStoringOrigins[hash];
     }
 
     if (itemsWereDeleted) {
@@ -330,7 +337,13 @@ class ResourceManager {
         this.hashToHitCount = stored.hashToHitCount || {};
         this.totalMissCount = stored.totalMissCount || 0;
         this.hashToVisibility = stored.hashToVisibility || {};
-        this.hashToStorer = stored.hashToStorer || {};
+        // Migrate legacy single-storer entries to the storing-origins set.
+        const oldStorers = stored.hashToStorer || {};
+        const storingOrigins = stored.hashToStoringOrigins || {};
+        for (const [hash, origin] of Object.entries(oldStorers)) {
+          if (!storingOrigins[hash]) storingOrigins[hash] = [origin];
+        }
+        this.hashToStoringOrigins = storingOrigins;
       }
       if (this._backfillStorers()) {
         await this.saveManagerToStorage();
@@ -352,7 +365,7 @@ class ResourceManager {
           hashToHitCount: this.hashToHitCount,
           totalMissCount: this.totalMissCount,
           hashToVisibility: this.hashToVisibility,
-          hashToStorer: this.hashToStorer,
+          hashToStoringOrigins: this.hashToStoringOrigins,
         },
       });
     } catch (error) {

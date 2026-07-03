@@ -220,7 +220,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // The original storer always has access to a resource it stored,
             // regardless of PHL or visibility tier.
             const isStorer =
-              !create && resourceManager.getStorer(hash.value) === origin;
+              !create && resourceManager.isStoringOrigin(hash.value, origin);
 
             // Public Hash List gate: when enabled, a hash that isn't on
             // the allowlist is treated as unavailable before the COS
@@ -296,7 +296,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               // spec's upgrade-only rule. requestedOrigins is undefined
               // when the page omitted `origins` entirely (same-site).
               resourceManager.setVisibility(hash.value, requestedOrigins);
-              resourceManager.setStorer(hash.value, origin);
+              resourceManager.addStoringOrigin(hash.value, origin);
             }
             resourceManager.recordAccess(origin, hash.value);
             if (!create) {
@@ -409,7 +409,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // path below, same as a genuine cache miss. Only applies to
             // 'global' resources -- see resolveVisibility().
             // The original storer is always exempt from the PHL gate.
-            const isStorer = resourceManager.getStorer(hash.value) === origin;
+            const isStorer = resourceManager.isStoringOrigin(hash.value, origin);
             const phlBlocked =
               !isStorer &&
               (await isBlockedByPublicHashList(hash.value, origin));
@@ -444,7 +444,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                   hash.value,
                   allowed === '*' ? '*' : allowed
                 );
-                resourceManager.setStorer(hash.value, origin);
+                resourceManager.addStoringOrigin(hash.value, origin);
                 blobURL = await getFileData(hash);
               } catch (e) {
                 rewritten = rewritten.replace(fm.full, `url("${fm.fontUrl}")`);
