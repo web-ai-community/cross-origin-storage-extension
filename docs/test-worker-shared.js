@@ -27,8 +27,8 @@ self.onconnect = (e) => {
     if (!self.navigator?.crossOriginStorage) {
       port.postMessage({
         type: 'result',
-        pass: false,
-        detail: 'navigator.crossOriginStorage is undefined',
+        pass: null,
+        detail: 'navigator.crossOriginStorage not available',
       });
       return;
     }

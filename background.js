@@ -206,6 +206,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     let responseData;
     const { action, data, target } = message;
     if (target && target === 'offscreen-doc') {
+      if (chrome.offscreen) return; // Chrome: offscreen document handles it
+      // Firefox: no offscreen document — handle cache operations directly.
+      const cosCache = await caches.open('cos-storage');
+      switch (action) {
+        case 'getResourceMetadata': {
+          const metaResp = await cosCache.match(
+            `https://cos.example.com/SHA-256_${data.hash}`
+          );
+          if (metaResp) {
+            const blob = await metaResp.blob();
+            sendResponse({ data: { size: blob.size, mimeType: metaResp.headers.get('content-type') } });
+          } else {
+            sendResponse({ data: { size: null, mimeType: null } });
+          }
+          break;
+        }
+        case 'deleteResource':
+          await cosCache.delete(`https://cos.example.com/SHA-256_${data.hash}`);
+          sendResponse({ data: { success: true } });
+          break;
+        case 'deleteAllResources': {
+          for (const key of await cosCache.keys()) await cosCache.delete(key);
+          sendResponse({ data: { success: true } });
+          break;
+        }
+        case 'getBlobURL': {
+          const r = await cosCache.match(data.key);
+          const blobURL = URL.createObjectURL(await r.blob());
+          sendResponse({ data: { blobURL } });
+          break;
+        }
+      }
       return;
     }
     try {

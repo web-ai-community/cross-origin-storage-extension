@@ -678,7 +678,10 @@
 
     // Sub-worker patching: dedicated workers only — SharedWorkers don't spawn
     // child workers through this relay in the current implementation.
-    if (!isSharedWorker && typeof Worker !== 'undefined') {
+    // Wrapped in try/catch so a browser-specific failure (e.g. inability to
+    // subclass a native Worker constructor) doesn't prevent cos-worker-ready
+    // from being sent and the polyfill from being usable for the primary worker.
+    try { if (!isSharedWorker && typeof Worker !== 'undefined') {
       const OriginalSubWorker = Worker;
       // Self-referential: serialise this very function so each sub-worker blob
       // contains a fresh copy of the polyfill.
@@ -769,7 +772,7 @@
           );
         }
       };
-    }
+    } } catch {} // end sub-worker patching try-catch
 
     // Dedicated workers signal readiness after wiring up the setupCOS listener;
     // SharedWorkers signal inside the connect handler instead (see above).
@@ -783,8 +786,8 @@
   // Turnstile).  We fetch the setting asynchronously; by the time real page
   // scripts create workers the setting will already be known.
   talkToBridge('getWorkerPatchSetting')
-    .then(({ workerPatchEnabled }) => {
-      if (!workerPatchEnabled) return;
+    .then((result) => {
+      if (!result?.workerPatchEnabled) return;
 
       if (typeof SharedWorker !== 'undefined') {
         const OriginalSharedWorker = SharedWorker;

@@ -143,7 +143,7 @@
         background-color: #2a9a2a;
       }
 
-      .worker-cos-notice, .phl-notice, .mophl-notice {
+      .mophl-notice {
         border-left: 4px solid #f0a500;
         padding: 0.6em 1em;
         border-radius: 0 4px 4px 0;
@@ -153,7 +153,7 @@
       }
 
       @media (prefers-color-scheme: light) {
-        .worker-cos-notice, .phl-notice, .mophl-notice {
+        .mophl-notice {
           background-color: #fff3e0;
           color: #3e2c00;
         }
@@ -205,15 +205,6 @@
       The same five tests, run inside a <code>Worker</code> to verify that
       <code>navigator.crossOriginStorage</code> is also available on worker
       threads.
-    </p>
-    <p class="worker-cos-notice" hidden>
-      ⚠️ <code>navigator.crossOriginStorage</code> is not available in Workers
-      on this page. Toggle
-      <strong
-        >Enable the COS API in <code>Worker</code> and
-        <code>SharedWorker</code></strong
-      >
-      in the extension options on to run these tests.
     </p>
     <button class="run-all" id="run-all-worker">Run all worker tests</button>
 
@@ -285,15 +276,6 @@
         implementation.
       </li>
     </ul>
-    <p class="worker-cos-notice" hidden>
-      ⚠️ <code>navigator.crossOriginStorage</code> is not available in Workers
-      on this page. Toggle
-      <strong
-        >Enable the COS API in <code>Worker</code> and
-        <code>SharedWorker</code></strong
-      >
-      in the extension options on to run these tests.
-    </p>
     <button class="run-all" id="run-all-variants">Run all variant tests</button>
 
     <table>
@@ -346,11 +328,6 @@
       Because it is at a <code>chrome-extension://</code> URL it is always a
       different origin from any web page, acting as a genuinely cross-origin
       reader.
-    </p>
-    <p class="phl-notice" hidden>
-      ⚠️ The Public Hash List gate is currently <strong>disabled</strong>.
-      Toggle <strong>Enable Public Hash List gating</strong> in the extension
-      options on to run these tests.
     </p>
     <button class="run-all" id="run-origins-tests">Run origins tests</button>
     <table>
@@ -502,72 +479,6 @@
           logEl.append(line);
         }
         logEl.scrollTop = logEl.scrollHeight;
-      }
-
-      // ---------------------------------------------------------------------------
-      // Worker COS feature detection
-      // ---------------------------------------------------------------------------
-
-      let cosInWorker = false;
-
-      // Spawns a minimal Worker that polls for navigator.crossOriginStorage
-      // (injected asynchronously by the extension after the cos-setup handshake).
-      // Returns true if the extension has patched Worker and COS is available.
-      async function probeWorkerCOS() {
-        return new Promise((resolve) => {
-          const code =
-            '(async()=>{' +
-            'const d=Date.now();' +
-            'while(!navigator.crossOriginStorage&&Date.now()-d<2000)' +
-            'await new Promise(r=>setTimeout(r,50));' +
-            'self.postMessage(!!navigator.crossOriginStorage);' +
-            'self.close();' +
-            '})();';
-          let w;
-          try {
-            const blob = new Blob([code], { type: 'text/javascript' });
-            const url = URL.createObjectURL(blob);
-            w = new Worker(url);
-            URL.revokeObjectURL(url);
-          } catch {
-            resolve(false);
-            return;
-          }
-          const t = setTimeout(() => {
-            w.terminate();
-            resolve(false);
-          }, 5000);
-          w.onmessage = ({ data }) => {
-            clearTimeout(t);
-            resolve(!!data);
-          };
-          w.onerror = () => {
-            clearTimeout(t);
-            resolve(false);
-          };
-        });
-      }
-
-      // Queries the extension service worker for the current Public Hash List
-      // setting. Returns true (PHL on), false (PHL explicitly off), or null
-      // (no extension response — native API present or no API at all; in that
-      // case the origins section is left enabled).
-      async function probePhlEnabled() {
-        return new Promise((resolve) => {
-          const id = crypto.randomUUID();
-          const t = setTimeout(() => resolve(null), 1500);
-          function handler(ev) {
-            if (ev.data?.source !== 'cos-settings-reply' || ev.data?.id !== id) return;
-            window.removeEventListener('message', handler);
-            clearTimeout(t);
-            resolve(ev.data.publicHashListEnabled === true ? true : false);
-          }
-          window.addEventListener('message', handler);
-          window.postMessage(
-            { source: 'cos-settings-query', action: 'getPublicHashListSetting', id },
-            '*'
-          );
-        });
       }
 
       // ---------------------------------------------------------------------------
@@ -971,7 +882,7 @@
 
       function setRowStatus(rowEl, status, detail = '') {
         const badge = rowEl.querySelector('.badge');
-        badge.className = `badge badge-${status}`;
+        badge.className = `badge badge-${status === 'n/a' ? 'pending' : status}`;
         badge.textContent = status;
         rowEl.querySelector('.detail').textContent = detail;
       }
@@ -979,6 +890,11 @@
       async function runTest(test, rowEl) {
         const btn = rowEl.querySelector('.run-btn');
         btn.disabled = true;
+        if (!navigator.crossOriginStorage) {
+          setRowStatus(rowEl, 'n/a', 'navigator.crossOriginStorage not available');
+          btn.disabled = false;
+          return;
+        }
         setRowStatus(rowEl, 'running', '');
         log(`--- Running: ${test.label} ---`);
         try {
@@ -1093,10 +1009,12 @@
             pendingWorkerTests.set(testIdx, resolve);
             getWorker().postMessage({ type: 'run', index: testIdx });
           });
-          setRowStatus(rowEl, result.pass ? 'pass' : 'fail', result.detail);
+          const isNA = result.pass == null ||
+            (result.pass === false && /^navigator\.crossOriginStorage (is undefined|not available)$/.test(result.detail));
+          setRowStatus(rowEl, isNA ? 'n/a' : result.pass ? 'pass' : 'fail', result.detail);
           log(
-            `Worker Result: ${result.pass ? 'PASS' : 'FAIL'}${result.detail ? ' — ' + result.detail.split('\n')[0] : ''}`,
-            !result.pass
+            `Worker Result: ${isNA ? 'N/A' : result.pass ? 'PASS' : 'FAIL'}${result.detail ? ' — ' + result.detail.split('\n')[0] : ''}`,
+            !result.pass && !isNA
           );
         } catch (err) {
           const detail = `Uncaught ${err.name}: ${err.message}`;
@@ -1322,6 +1240,11 @@
       async function runVariantTest(variant, rowEl) {
         const btn = rowEl.querySelector('.run-btn');
         btn.disabled = true;
+        if (!navigator.crossOriginStorage) {
+          setRowStatus(rowEl, 'n/a', 'navigator.crossOriginStorage not available');
+          btn.disabled = false;
+          return;
+        }
         setRowStatus(rowEl, 'running', '');
         log(`--- Variant: ${variant.label} ---`);
         let worker;
@@ -1342,14 +1265,16 @@
             };
             worker.onerror = (err) => {
               clearTimeout(timeoutId);
-              reject(new Error(err.message || 'Worker error'));
+              resolve({ pass: null, detail: err.message || 'Worker load error' });
             };
             worker.postMessage({ type: 'run', label: variant.id });
           });
-          setRowStatus(rowEl, result.pass ? 'pass' : 'fail', result.detail);
+          const isNA = result.pass == null ||
+            (result.pass === false && /^navigator\.crossOriginStorage (is undefined|not available)$/.test(result.detail));
+          setRowStatus(rowEl, isNA ? 'n/a' : result.pass ? 'pass' : 'fail', result.detail);
           log(
-            `Variant Result: ${result.pass ? 'PASS' : 'FAIL'}${result.detail ? ' — ' + result.detail : ''}`,
-            !result.pass
+            `Variant Result: ${isNA ? 'N/A' : result.pass ? 'PASS' : 'FAIL'}${result.detail ? ' — ' + result.detail : ''}`,
+            !result.pass && !isNA
           );
         } catch (err) {
           const detail = `${err.name}: ${err.message}`;
@@ -1477,6 +1402,11 @@
       async function runStressTest(test, rowEl) {
         const btn = rowEl.querySelector('.run-btn');
         btn.disabled = true;
+        if (!navigator.crossOriginStorage) {
+          setRowStatus(rowEl, 'n/a', 'navigator.crossOriginStorage not available');
+          btn.disabled = false;
+          return;
+        }
         setRowStatus(rowEl, 'running', '');
         log(`--- Stress test: ${test.label} ---`);
         try {
@@ -1516,13 +1446,11 @@
         for (let i = 0; i < TESTS.length; i++) {
           await runTest(TESTS[i], rows[i]);
         }
-        if (cosInWorker) {
-          for (let i = 0; i < TESTS.length; i++) {
-            await runWorkerTest(i, workerRows[i]);
-          }
-          for (let i = 0; i < WORKER_VARIANTS.length; i++) {
-            await runVariantTest(WORKER_VARIANTS[i], variantRows[i]);
-          }
+        for (let i = 0; i < TESTS.length; i++) {
+          await runWorkerTest(i, workerRows[i]);
+        }
+        for (let i = 0; i < WORKER_VARIANTS.length; i++) {
+          await runVariantTest(WORKER_VARIANTS[i], variantRows[i]);
         }
         for (let i = 0; i < STRESS_TESTS.length; i++) {
           await runStressTest(STRESS_TESTS[i], stressRows[i]);
@@ -1540,45 +1468,6 @@
         for (let i = 0; i < CSS_TESTS.length; i++) {
           await runCSSTest(CSS_TESTS[i], cssRows[i]);
         }
-      });
-
-      // Probe for COS-in-Worker support and disable affected UI if unavailable.
-      probeWorkerCOS().then((available) => {
-        cosInWorker = available;
-        if (available) return;
-        document
-          .querySelectorAll('.worker-cos-notice')
-          .forEach((el) => (el.hidden = false));
-        document.getElementById('run-all-worker').disabled = true;
-        document.getElementById('run-all-variants').disabled = true;
-        workerRows.forEach((rowEl) => {
-          rowEl.querySelector('.run-btn').disabled = true;
-          const badge = rowEl.querySelector('.badge');
-          badge.className = 'badge badge-pending';
-          badge.textContent = 'n/a';
-        });
-        variantRows.forEach((rowEl) => {
-          rowEl.querySelector('.run-btn').disabled = true;
-          const badge = rowEl.querySelector('.badge');
-          badge.className = 'badge badge-pending';
-          badge.textContent = 'n/a';
-        });
-      });
-
-      // Probe for PHL setting and disable the origins section if it is off.
-      // null means no extension response (native API) — leave section enabled.
-      probePhlEnabled().then((phlEnabled) => {
-        if (phlEnabled !== false) return;
-        document
-          .querySelectorAll('.phl-notice')
-          .forEach((el) => (el.hidden = false));
-        document.getElementById('run-origins-tests').disabled = true;
-        originsRows.forEach((rowEl) => {
-          rowEl.querySelector('.run-btn').disabled = true;
-          const badge = rowEl.querySelector('.badge');
-          badge.className = 'badge badge-pending';
-          badge.textContent = 'n/a';
-        });
       });
 
       // -------------------------------------------------------------------------
@@ -2045,6 +1934,11 @@
       async function runCSSTest(test, rowEl) {
         const btn = rowEl.querySelector('.run-btn');
         btn.disabled = true;
+        if (!navigator.crossOriginStorage) {
+          setRowStatus(rowEl, 'n/a', 'navigator.crossOriginStorage not available');
+          btn.disabled = false;
+          return;
+        }
         setRowStatus(rowEl, 'running', '');
         log(`--- CSS Polyfill: ${test.label} ---`);
         try {
@@ -2439,8 +2333,8 @@
         if (!self.navigator?.crossOriginStorage) {
           self.postMessage({
             type: 'result',
-            pass: false,
-            detail: 'navigator.crossOriginStorage is undefined',
+            pass: null,
+            detail: 'navigator.crossOriginStorage not available',
           });
           return;
         }
@@ -2696,6 +2590,15 @@
 
       self.onmessage = async ({ data }) => {
         if (data.type !== 'run') return;
+        if (!self.navigator?.crossOriginStorage) {
+          self.postMessage({
+            type: 'result',
+            index: data.index,
+            pass: null,
+            detail: 'navigator.crossOriginStorage not available',
+          });
+          return;
+        }
         const test = TESTS[data.index];
         if (!test) {
           self.postMessage({
