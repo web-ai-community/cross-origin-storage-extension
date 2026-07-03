@@ -65,7 +65,7 @@ window.addEventListener('message', async (event) => {
         : raw instanceof Blob
           ? raw
           : new Blob([raw], { type: mimeType });
-    if (typeof browser !== 'undefined') {
+    if (chrome.runtime.getURL('').startsWith('moz-extension://')) {
       // Firefox: blob URLs created in content scripts carry the page's origin
       // (blob:http://...) which the moz-extension:// background page cannot
       // fetch. Send the Blob directly via structured clone instead.
