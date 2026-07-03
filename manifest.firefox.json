@@ -36,5 +36,10 @@
   ],
   "icons": {
     "512": "logo-cos.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "{133c330c-eac1-4aba-9ec0-e52d4d09392a}"
+    }
   }
 }
