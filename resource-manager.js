@@ -136,6 +136,16 @@ class ResourceManager {
     return (this.hashToStoringOrigins[hash] ?? []).includes(origin);
   }
 
+  /** Returns all origins that have successfully written this hash, or []. */
+  getStoringOrigins(hash) {
+    return this.hashToStoringOrigins[hash] ?? [];
+  }
+
+  /** Returns the first origin to store this hash, or null if unknown. */
+  getStorer(hash) {
+    return this.hashToStoringOrigins[hash]?.[0] ?? null;
+  }
+
   /**
    * Backfills hashToStoringOrigins for resources that pre-date storing-origin
    * tracking by seeding each hash with the origin that has the earliest

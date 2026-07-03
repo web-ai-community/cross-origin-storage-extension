@@ -134,7 +134,9 @@ const resourceManager = new ResourceManager();
 // Exposed as a module-level promise so getFileData can await it before sending
 // getBlobURL — the offscreen doc must exist before it can receive messages.
 const offscreenSetupPromise = (async () => {
-  await setupOffscreenDocument('offscreen.html');
+  if (chrome.offscreen) {
+    await setupOffscreenDocument('offscreen.html');
+  }
   // Load the initial state when the extension starts.
   await resourceManager.loadManagerFromStorage();
 })();
@@ -204,6 +206,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     let responseData;
     const { action, data, target } = message;
     if (target && target === 'offscreen-doc') {
+      if (chrome.offscreen) return; // Chrome: offscreen document handles it
+      // Firefox: no offscreen document — handle cache operations directly.
+      const cosCache = await caches.open('cos-storage');
+      switch (action) {
+        case 'getResourceMetadata': {
+          const metaResp = await cosCache.match(
+            `https://cos.example.com/SHA-256_${data.hash}`
+          );
+          if (metaResp) {
+            const blob = await metaResp.blob();
+            sendResponse({ data: { size: blob.size, mimeType: metaResp.headers.get('content-type') } });
+          } else {
+            sendResponse({ data: { size: null, mimeType: null } });
+          }
+          break;
+        }
+        case 'deleteResource':
+          await cosCache.delete(`https://cos.example.com/SHA-256_${data.hash}`);
+          sendResponse({ data: { success: true } });
+          break;
+        case 'deleteAllResources': {
+          for (const key of await cosCache.keys()) await cosCache.delete(key);
+          sendResponse({ data: { success: true } });
+          break;
+        }
+        case 'getBlobURL': {
+          const r = await cosCache.match(data.key);
+          const blobURL = URL.createObjectURL(await r.blob());
+          sendResponse({ data: { blobURL } });
+          break;
+        }
+      }
       return;
     }
     try {
@@ -316,15 +350,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         case 'getFileData': {
           const { hash } = data;
-          let blobURL = await getFileData(hash);
+          const fileResult = await getFileData(hash);
           const size = resourceManager.getSizeByHash(hash.value);
           const mimeType = resourceManager.getMimeTypeByHash(hash.value);
-          responseData = { hash, blobURL, size, mimeType };
+          responseData = fileResult instanceof Blob
+            ? { hash, data: fileResult, size, mimeType }
+            : { hash, blobURL: fileResult, size, mimeType };
           break;
         }
         case 'storeFileData': {
           let { hash, blobURL, mimeType } = data;
-          const blob = await fetch(blobURL).then((response) => response.blob());
+          const blob = blobURL
+            ? await fetch(blobURL).then((response) => response.blob())
+            : data.data instanceof Blob
+              ? data.data
+              : new Blob([data.data], {
+                  type: mimeType?.['content-type'] || 'application/octet-stream',
+                });
           await storeFileData(hash, blob, mimeType);
           resourceManager.recordSize(hash.value, blob.size);
           resourceManager.recordMimeType(
@@ -336,21 +378,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         case 'deleteResource': {
           const { hash } = data;
-          const offscreenResp = await new Promise((resolve) => {
-            chrome.runtime.sendMessage(
-              {
-                action: 'deleteResource',
-                target: 'offscreen-doc',
-                data: { hash: hash.value },
-              },
-              resolve
-            );
-          });
-          if (offscreenResp?.data?.success) {
+          let deleteSuccess;
+          if (chrome.offscreen) {
+            const offscreenResp = await new Promise((resolve) => {
+              chrome.runtime.sendMessage(
+                {
+                  action: 'deleteResource',
+                  target: 'offscreen-doc',
+                  data: { hash: hash.value },
+                },
+                resolve
+              );
+            });
+            deleteSuccess = !!offscreenResp?.data?.success;
+          } else {
+            await cache.delete(`https://cos.example.com/SHA-256_${hash.value}`);
+            deleteSuccess = true;
+          }
+          if (deleteSuccess) {
             await resourceManager.loadManagerFromStorage();
             await resourceManager.deleteResourcesByHash(hash.value);
           }
-          responseData = { success: !!offscreenResp?.data?.success };
+          responseData = { success: deleteSuccess };
           break;
         }
         case 'getWorkerPatchSetting': {
@@ -413,9 +462,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const phlBlocked =
               !isStorer &&
               (await isBlockedByPublicHashList(hash.value, origin));
-            let blobURL = phlBlocked ? false : await getFileData(hash);
-            const alreadyCached = !phlBlocked && !!blobURL;
-            if (!blobURL) {
+            let fileResult = phlBlocked ? false : await getFileData(hash);
+            const alreadyCached = !phlBlocked && !!fileResult;
+            if (!fileResult) {
               resourceManager.recordMiss();
               if (tabId) {
                 if (!tabMissHashes[tabId]) tabMissHashes[tabId] = new Set();
@@ -445,13 +494,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                   allowed === '*' ? '*' : allowed
                 );
                 resourceManager.addStoringOrigin(hash.value, origin);
-                blobURL = await getFileData(hash);
+                fileResult = await getFileData(hash);
               } catch (e) {
                 rewritten = rewritten.replace(fm.full, `url("${fm.fontUrl}")`);
                 continue;
               }
             }
-            if (blobURL) {
+            if (fileResult) {
               if (alreadyCached) {
                 resourceManager.recordHit(hash.value);
                 if (tabId) {
@@ -464,7 +513,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               }
               const placeholder = `__COS_FONT_${fontIdx++}__`;
               rewritten = rewritten.replace(fm.full, `url("${placeholder}")`);
-              fonts.push({ placeholder, blobURL });
+              fonts.push(
+                fileResult instanceof Blob
+                  ? { placeholder, blob: fileResult }
+                  : { placeholder, blobURL: fileResult }
+              );
               resourceManager.recordAccess(origin, hash.value);
             } else {
               rewritten = rewritten.replace(fm.full, `url("${fm.fontUrl}")`);
@@ -628,6 +681,11 @@ async function getFileData(hash) {
   const match = await cache.match(key);
   if (!match) {
     return false;
+  }
+  if (!chrome.offscreen) {
+    // Background page context: return the Blob directly.
+    // blob:moz-extension:// URLs cannot be fetched by content scripts in Firefox.
+    return match.blob();
   }
   // Wait for the offscreen document to be ready. When the service worker
   // restarts after inactivity, setupOffscreenDocument runs asynchronously;
