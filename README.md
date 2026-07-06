@@ -7,22 +7,9 @@
 1. Choose between the developer or the end user flow:
    - Developer:
      - Clone the repo or download the files manually.
-     - Run `npm install` once (wires up the pre-commit hook via the
-       `prepare` script).
-     - Load the extension unpacked from the subfolder matching your browser
-       (`chrome/`, `firefox/`, or `safari/`) as per the
+     - Install the extension as per the
        [Load an unpacked extension](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked)
-       instructions (Firefox: `about:debugging` → **Load Temporary Add-on**;
-       Safari 18+: Develop menu → **Allow Unsigned Extensions**, then add the
-       extension). Each subfolder is a self-contained checkout of the shared
-       source files (via symlinks) plus that browser's own generated
-       `manifest.json`, so editing a shared file at the repo root updates
-       all three at once. Don't hand-edit anything inside `chrome/`,
-       `firefox/`, or `safari/` directly — `manifest.json` in each is
-       generated from `manifest.base.json` + `manifest.<browser>.diff.json`
-       (run `npm run sync` once, or `npm run watch` to regenerate live while
-       you edit; a commit also regenerates it automatically via the
-       pre-commit hook).
+       instructions.
    - End user:
      - Install the extension from the
        [Chrome Web Store](https://chromewebstore.google.com/detail/cross-origin-storage/denpnpcgjgikjpoglpjefakmdcbmlgih).

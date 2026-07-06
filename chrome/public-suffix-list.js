@@ -1,1 +1,0 @@
-../public-suffix-list.js

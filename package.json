@@ -7,11 +7,10 @@
     "doc": "docs"
   },
   "scripts": {
-    "prepare": "git config core.hooksPath .githooks",
     "test": "node e2e-test.chrome.mjs",
-    "sync": "node sync-browsers.mjs",
-    "watch": "node sync-browsers.mjs --watch",
-    "start": "node start.mjs",
+    "use-chrome": "cp manifest.chrome.json manifest.json",
+    "use-firefox": "cp manifest.firefox.json manifest.json",
+    "use-safari": "cp manifest.safari.json manifest.json",
     "build:chrome": "bash zip-extension.sh chrome",
     "build:firefox": "bash zip-extension.sh firefox",
     "build:safari": "bash zip-extension.sh safari"

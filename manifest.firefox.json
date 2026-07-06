@@ -1,7 +1,17 @@
 {
+  "manifest_version": 3,
+  "name": "Cross-Origin Storage",
+  "version": "0.1.19",
+  "description": "Implements the proposed Cross-Origin Storage API, letting sites share files with your consent for a faster and more efficient web.",
+  "options_page": "options.html",
   "permissions": ["storage", "unlimitedStorage", "tabs"],
+  "host_permissions": ["https://raw.githubusercontent.com/*"],
   "background": {
     "page": "background.html"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "logo-cos.png"
   },
   "content_scripts": [
     {
@@ -24,6 +34,9 @@
       "matches": ["https://*/*", "http://localhost/*", "http://*.test/*", "http://*.a.test/*"]
     }
   ],
+  "icons": {
+    "512": "logo-cos.png"
+  },
   "browser_specific_settings": {
     "gecko": {
       "id": "{133c330c-eac1-4aba-9ec0-e52d4d09392a}",
