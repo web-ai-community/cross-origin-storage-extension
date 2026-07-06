@@ -5,7 +5,7 @@
 // Serves docs/ (where test.html and the demo pages live) over plain HTTP,
 // so a manually loaded unpacked extension has something to point at.
 //
-// Usage: node serve-docs.mjs [port]  (defaults to 7474, same as e2e-test.chrome.mjs)
+// Usage: node serve-docs.mjs [port]  (defaults to 8080)
 
 import { createServer } from 'http';
 import { readFile } from 'fs/promises';
@@ -14,7 +14,7 @@ import { fileURLToPath } from 'url';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DOCS_PATH = join(ROOT, 'docs');
-const PORT = Number(process.argv[2]) || 7474;
+const PORT = Number(process.argv[2]) || 8080;
 
 const MIME = {
   '.html': 'text/html',
