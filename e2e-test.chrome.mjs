@@ -26,7 +26,7 @@ import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
-const EXT_PATH = __dirname;
+const EXT_PATH = join(__dirname, 'chrome');
 const DOCS_PATH = join(__dirname, 'docs');
 const PORT = 7474;
 

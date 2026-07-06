@@ -4,6 +4,12 @@
 
 # A script to zip the necessary files for the extension.
 # Usage: ./zip-extension.sh [chrome|firefox|safari]  (defaults to chrome)
+#
+# Each browser's loadable extension lives in its own subfolder
+# (chrome/, firefox/, safari/), made up of symlinks into the shared source
+# files at the repo root plus a browser-specific manifest.json (and any
+# other browser-exclusive real files). This script dereferences those
+# symlinks (cp -L) into a build/ dir and zips the result.
 
 BROWSER="${1:-chrome}"
 
@@ -14,62 +20,24 @@ esac
 
 OUTPUT_ZIP="cross-origin-storage-extension-${BROWSER}.zip"
 
-COMMON_FILES=(
-  "resource-manager.js"
-  "popup.js"
-  "popup.html"
-  "options.html"
-  "options.js"
-  "styles.css"
-  "main-world.js"
-  "logo-cos.svg"
-  "logo-cos.png"
-  "content.js"
-  "background.js"
-  "sha256.js"
-  "viewer.html"
-  "viewer.js"
-  "input-switch-polyfill.js"
-  "input-switch-polyfill.css"
-  "relay-extension.html"
-  "relay-extension.js"
-  "public-hash-list.js"
-  "public-suffix-list.js"
-  "same-site.js"
-)
-
-if [ "$BROWSER" = "chrome" ]; then
-  EXTRA_FILES=("offscreen.js" "offscreen.html")
-else
-  # Firefox and Safari both run the background code as a non-persistent
-  # background page rather than a service worker, so they share this file.
-  EXTRA_FILES=("background.html")
-fi
-
-FILES_TO_ZIP=("${COMMON_FILES[@]}" "${EXTRA_FILES[@]}")
-
 if [ -f "$OUTPUT_ZIP" ]; then
   echo "Removing old archive: $OUTPUT_ZIP"
   rm "$OUTPUT_ZIP"
 fi
 
+rm -rf build
 mkdir -p build
-echo "Prepared build directory."
-
-for file in "${FILES_TO_ZIP[@]}"; do
-  cp "$file" build/
-done
+cp -RL "$BROWSER"/. build/
+echo "Prepared build directory from '$BROWSER/'."
 
 if [ "$BROWSER" = "chrome" ]; then
   # Strip dev-only localhost/test patterns for Web Store compatibility.
-  echo "Transforming manifest.chrome.json to remove localhost patterns..."
+  echo "Transforming manifest.json to remove localhost patterns..."
   jq '
     .content_scripts |= map(.matches |= map(select(test("http://(localhost|.*\\.test)") | not))) |
     .web_accessible_resources |= map(.matches |= map(select(test("http://(localhost|.*\\.test)") | not)))
-  ' manifest.chrome.json > build/manifest.json
-else
-  # Firefox and Safari manifests already use localhost/* (no port wildcard); copy as-is.
-  cp "manifest.$BROWSER.json" build/manifest.json
+  ' build/manifest.json > build/manifest.json.tmp
+  mv build/manifest.json.tmp build/manifest.json
 fi
 
 echo "Creating new archive named '$OUTPUT_ZIP'..."

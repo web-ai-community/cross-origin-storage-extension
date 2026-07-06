@@ -1,0 +1,13 @@
+#!/bin/bash
+# Regenerates chrome/manifest.json, firefox/manifest.json, safari/manifest.json,
+# and each browser's main-world.js from the shared source files, then stages
+# the results, so a commit can never carry stale generated output.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+node sync-browsers.mjs
+
+git add \
+  chrome/manifest.json chrome/main-world.js \
+  firefox/manifest.json firefox/main-world.js \
+  safari/manifest.json safari/main-world.js
