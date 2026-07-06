@@ -7,11 +7,13 @@
     "doc": "docs"
   },
   "scripts": {
-    "test": "node e2e-test.mjs",
+    "test": "node e2e-test.chrome.mjs",
     "use-chrome": "cp manifest.chrome.json manifest.json",
     "use-firefox": "cp manifest.firefox.json manifest.json",
+    "use-safari": "cp manifest.safari.json manifest.json",
     "build:chrome": "bash zip-extension.sh chrome",
-    "build:firefox": "bash zip-extension.sh firefox"
+    "build:firefox": "bash zip-extension.sh firefox",
+    "build:safari": "bash zip-extension.sh safari"
   },
   "repository": {
     "type": "git",

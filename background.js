@@ -7,6 +7,88 @@ import { isSameSite } from './same-site.js';
 
 let creating; // A global promise to avoid concurrency issues
 
+// Proactively checks (via the standard Storage API, supported in Chrome,
+// Firefox, and Safari) whether there's plausibly enough room for a resource
+// of the given size before attempting to write it, so a doomed multi-GiB
+// write can fail fast with a clear error instead of after streaming most of
+// the file. This is a best-effort estimate, not a guarantee (the browser's
+// reported quota/usage can be approximate, and other tabs/extensions can
+// consume space concurrently) -- the actual write is still wrapped
+// separately (see storeFileData and storeFileDataChunk below) so a failure
+// that slips past this check is still caught and reported the same way.
+async function checkStorageQuota(estimatedBytes) {
+  if (!navigator.storage?.estimate) return;
+  const { quota, usage } = await navigator.storage.estimate();
+  if (quota == null || usage == null) return;
+  if (quota - usage < estimatedBytes) {
+    const err = new Error(
+      `Not enough storage available: this resource needs ~${estimatedBytes} bytes, but only ~${quota - usage} bytes remain (quota=${quota}, usage=${usage}).`
+    );
+    err.cosErrorName = 'QuotaExceededError';
+    throw err;
+  }
+}
+
+// Wraps a raw write failure (e.g. Safari's Cache Storage implementation has
+// an undocumented ~2 GiB per-entry ceiling -- writes fail there with a
+// generic "Failed writing data to the file system" TypeError, exactly at
+// the 2^31-byte boundary, strongly suggesting an internal 32-bit integer
+// overflow in WebKit rather than a real quota check) as the standard
+// "storage limit exceeded" exception, since from the caller's perspective a
+// write that fails at this layer is a storage-capacity problem regardless
+// of the underlying engine-specific cause.
+function asQuotaError(err) {
+  if (err.cosErrorName) return err; // already classified (e.g. by checkStorageQuota)
+  const quotaError = new Error(`Failed to write resource to storage: ${err.message}`);
+  quotaError.cosErrorName = 'QuotaExceededError';
+  return quotaError;
+}
+
+// Safari doesn't reliably preserve Blob or ArrayBuffer across
+// chrome.runtime.sendMessage between this background page and a content
+// script -- only JSON-safe values survive that channel intact (confirmed by
+// getResourceForViewer's pre-existing dataURL/base64 path below, which has
+// always worked). So, for Safari specifically, file bytes are pushed/pulled
+// as a sequence of small base64-encoded chunks (getFileDataMeta/
+// getFileDataChunk/storeFileDataChunk) rather than as one message carrying
+// the whole payload -- this bounds the size of any single message
+// regardless of file size. Chrome and Firefox are unaffected and keep using
+// the original blobURL/raw-Blob path below.
+const SAFARI_CHUNK_SIZE = 4 * 1024 * 1024; // 4 MiB pre-encode (~5.3 MiB as base64)
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const SUBCHUNK = 0x8000; // String.fromCharCode.apply's practical arg limit
+  for (let i = 0; i < bytes.length; i += SUBCHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + SUBCHUNK));
+  }
+  return btoa(binary);
+}
+
+function base64ToUint8Array(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+// transferId -> { writer, hash, mimeType, putPromise, bytesWritten }. Chunks
+// are streamed straight into cache.put() via a TransformStream as they
+// arrive, rather than buffered into one in-memory array first -- for a
+// multi-GiB file, buffering the whole thing in this background page's heap
+// before ever calling cache.put() risked exhausting memory and losing the
+// write entirely. writer.write() awaits backpressure from the cache-storage
+// consumer, so peak memory stays bounded regardless of file size.
+const pendingSafariWrites = new Map();
+
+// hash.value -> Blob, cached for the duration of a chunked read so
+// getFileDataChunk doesn't need to re-open/re-materialize the Cache Storage
+// entry on every single chunk request. A Blob is a lightweight handle (not
+// raw bytes sitting in this process's heap), so holding one here is cheap
+// regardless of file size.
+const pendingSafariReads = new Map();
+
 chrome.runtime.onInstalled.addListener(async ({ reason }) => {
   if (reason === 'install') {
     await chrome.storage.local.set({
@@ -182,11 +264,11 @@ function updateBadge(tabId) {
   if (hits > 0) {
     chrome.action.setBadgeText({ text: formatBadgeCount(hits), tabId });
     chrome.action.setBadgeBackgroundColor({ color: '#2e7d32', tabId });
-    chrome.action.setBadgeTextColor({ color: '#ffffff', tabId });
+    chrome.action.setBadgeTextColor?.({ color: '#ffffff', tabId });
   } else if (misses > 0) {
     chrome.action.setBadgeText({ text: formatBadgeCount(misses), tabId });
     chrome.action.setBadgeBackgroundColor({ color: '#e65100', tabId });
-    chrome.action.setBadgeTextColor({ color: '#ffffff', tabId });
+    chrome.action.setBadgeTextColor?.({ color: '#ffffff', tabId });
   } else {
     chrome.action.setBadgeText({ text: '', tabId });
   }
@@ -353,9 +435,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const fileResult = await getFileData(hash);
           const size = resourceManager.getSizeByHash(hash.value);
           const mimeType = resourceManager.getMimeTypeByHash(hash.value);
+          // Safari's content.js ignores this data/blobURL field and instead
+          // pulls the bytes via the getFileDataMeta/getFileDataChunk actions
+          // below -- see the comment on those for why.
           responseData = fileResult instanceof Blob
             ? { hash, data: fileResult, size, mimeType }
             : { hash, blobURL: fileResult, size, mimeType };
+          break;
+        }
+        case 'getFileDataMeta': {
+          const { hash } = data;
+          const match = await cache.match(generateCacheKey(hash));
+          if (!match) {
+            responseData = { found: false };
+            break;
+          }
+          const blob = await match.blob();
+          pendingSafariReads.set(hash.value, blob);
+          responseData = {
+            found: true,
+            size: blob.size,
+            mimeType: resourceManager.getMimeTypeByHash(hash.value),
+            totalChunks: Math.max(1, Math.ceil(blob.size / SAFARI_CHUNK_SIZE)),
+          };
+          break;
+        }
+        case 'getFileDataChunk': {
+          const { hash, chunkIndex } = data;
+          const blob = pendingSafariReads.get(hash.value);
+          const slice = blob.slice(
+            chunkIndex * SAFARI_CHUNK_SIZE,
+            (chunkIndex + 1) * SAFARI_CHUNK_SIZE
+          );
+          if ((chunkIndex + 1) * SAFARI_CHUNK_SIZE >= blob.size) {
+            pendingSafariReads.delete(hash.value);
+          }
+          responseData = {
+            base64: arrayBufferToBase64(await slice.arrayBuffer()),
+          };
           break;
         }
         case 'storeFileData': {
@@ -374,6 +491,56 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             mimeType['content-type'] || 'application/octet-stream'
           );
           responseData = { hash };
+          break;
+        }
+        // Safari-only push path for storing a resource's bytes in bounded
+        // chunks (see the comments on SAFARI_CHUNK_SIZE and
+        // pendingSafariWrites above). Chunks arrive in order (the sender
+        // awaits each round trip before sending the next), so writing them
+        // to the stream in arrival order is safe.
+        case 'storeFileDataChunk': {
+          const { transferId, hash, mimeType, chunkIndex, totalChunks, base64, totalSize } = data;
+          let entry = pendingSafariWrites.get(transferId);
+          if (!entry) {
+            await checkStorageQuota(totalSize);
+            const { readable, writable } = new TransformStream();
+            const putPromise = cache
+              .put(
+                generateCacheKey(hash),
+                new Response(readable, {
+                  headers: {
+                    'content-type': mimeType['content-type'] || 'application/octet-stream',
+                  },
+                })
+              )
+              .catch((err) => {
+                throw asQuotaError(err);
+              });
+            entry = {
+              writer: writable.getWriter(),
+              hash,
+              mimeType,
+              putPromise,
+              bytesWritten: 0,
+            };
+            pendingSafariWrites.set(transferId, entry);
+          }
+          const bytes = base64ToUint8Array(base64);
+          await entry.writer.write(bytes); // awaits cache-storage backpressure
+          entry.bytesWritten += bytes.length;
+          if (chunkIndex === totalChunks - 1) {
+            pendingSafariWrites.delete(transferId);
+            await entry.writer.close();
+            await entry.putPromise;
+            resourceManager.recordSize(entry.hash.value, entry.bytesWritten);
+            resourceManager.recordMimeType(
+              entry.hash.value,
+              entry.mimeType['content-type'] || 'application/octet-stream'
+            );
+            responseData = { hash: entry.hash };
+          } else {
+            responseData = { received: true };
+          }
           break;
         }
         case 'deleteResource': {
@@ -514,9 +681,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               const placeholder = `__COS_FONT_${fontIdx++}__`;
               rewritten = rewritten.replace(fm.full, `url("${placeholder}")`);
               fonts.push(
+                // hash is included alongside blob/blobURL so Safari's
+                // content.js can pull the bytes via getFileDataMeta/
+                // getFileDataChunk instead (see the comment on those).
                 fileResult instanceof Blob
-                  ? { placeholder, blob: fileResult }
-                  : { placeholder, blobURL: fileResult }
+                  ? { placeholder, blob: fileResult, hash }
+                  : { placeholder, blobURL: fileResult, hash }
               );
               resourceManager.recordAccess(origin, hash.value);
             } else {
@@ -612,7 +782,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     } catch (error) {
       console.error(`Error processing action "${action}":`, error);
-      sendResponse({ error: error.message });
+      sendResponse({
+        error: error.message,
+        errorName: error.cosErrorName || 'UnknownError',
+      });
     }
   })();
 
@@ -666,14 +839,19 @@ function sriToHashObj(sriHash) {
 
 async function storeFileData(hash, blob, mimeType) {
   const key = generateCacheKey(hash);
-  await cache.put(
-    key,
-    new Response(blob, {
-      headers: {
-        'content-type': mimeType['content-type'] || 'application/octet-stream',
-      },
-    })
-  );
+  await checkStorageQuota(blob.size);
+  try {
+    await cache.put(
+      key,
+      new Response(blob, {
+        headers: {
+          'content-type': mimeType['content-type'] || 'application/octet-stream',
+        },
+      })
+    );
+  } catch (err) {
+    throw asQuotaError(err);
+  }
 }
 
 async function getFileData(hash) {

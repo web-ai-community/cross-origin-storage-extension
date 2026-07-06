@@ -3,15 +3,20 @@
 
 // Streaming SHA-256: processes a Blob/File in 4 MiB slices so peak memory is
 // O(chunk) rather than O(file), avoiding V8's hard ArrayBuffer ceiling for
-// files above ~2 GB.  SHA-384 and SHA-512 fall back to the full-buffer
-// crypto.subtle.digest path (they are rarely used for multi-GB assets).
+// files above ~2 GB. Below that ceiling, native crypto.subtle.digest on the
+// whole buffer at once is used instead -- it's hardware-accelerated and
+// consistently much faster than this hand-rolled loop, which is a poor fit
+// for at least one JS engine's GC behavior at scale (observed 500 MiB taking
+// over a minute in Safari). SHA-384 and SHA-512 always use that path (they
+// are rarely used for multi-GB assets).
 //
 // NOTE: main-world.js is a classic MAIN-world content script that must execute
 // synchronously at document_start and therefore cannot use ES module imports.
 // It contains an inline copy of this function.  All other consumers (popup.js,
 // docs/test.html) import from this file.
+const NATIVE_DIGEST_MAX_SIZE = 1.5 * 1024 * 1024 * 1024; // 1.5 GiB
 export async function streamingHexDigest(algorithm, blob) {
-  if (algorithm !== 'SHA-256') {
+  if (algorithm !== 'SHA-256' || blob.size <= NATIVE_DIGEST_MAX_SIZE) {
     const buf = await blob.arrayBuffer();
     return Array.from(
       new Uint8Array(await crypto.subtle.digest(algorithm, buf))
@@ -96,10 +101,20 @@ export async function streamingHexDigest(algorithm, blob) {
     const chunk = new Uint8Array(
       await blob.slice(offset, offset + CHUNK).arrayBuffer()
     );
-    const buf = new Uint8Array(pending.length + chunk.length);
-    buf.set(pending);
-    buf.set(chunk, pending.length);
     byteCount += chunk.length;
+    // pending is empty whenever CHUNK is a multiple of 64 (always true here)
+    // and every prior chunk was full-sized (true for all but the last) --
+    // i.e. in practice on every iteration except possibly the final one.
+    // Concatenating into a fresh buffer in that (common) case was a wholly
+    // unnecessary multi-MiB allocation + copy on every single chunk.
+    let buf;
+    if (pending.length === 0) {
+      buf = chunk;
+    } else {
+      buf = new Uint8Array(pending.length + chunk.length);
+      buf.set(pending);
+      buf.set(chunk, pending.length);
+    }
     let i = 0;
     for (; i + 64 <= buf.length; i += 64) processBlock(buf.subarray(i, i + 64));
     pending = buf.subarray(i);

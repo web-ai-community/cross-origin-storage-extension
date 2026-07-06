@@ -3,13 +3,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # A script to zip the necessary files for the extension.
-# Usage: ./zip-extension.sh [chrome|firefox]  (defaults to chrome)
+# Usage: ./zip-extension.sh [chrome|firefox|safari]  (defaults to chrome)
 
 BROWSER="${1:-chrome}"
 
 case "$BROWSER" in
-  chrome|firefox) ;;
-  *) echo "Usage: $0 [chrome|firefox]" >&2; exit 1 ;;
+  chrome|firefox|safari) ;;
+  *) echo "Usage: $0 [chrome|firefox|safari]" >&2; exit 1 ;;
 esac
 
 OUTPUT_ZIP="cross-origin-storage-extension-${BROWSER}.zip"
@@ -41,6 +41,8 @@ COMMON_FILES=(
 if [ "$BROWSER" = "chrome" ]; then
   EXTRA_FILES=("offscreen.js" "offscreen.html")
 else
+  # Firefox and Safari both run the background code as a non-persistent
+  # background page rather than a service worker, so they share this file.
   EXTRA_FILES=("background.html")
 fi
 
@@ -66,8 +68,8 @@ if [ "$BROWSER" = "chrome" ]; then
     .web_accessible_resources |= map(.matches |= map(select(test("http://(localhost|.*\\.test)") | not)))
   ' manifest.chrome.json > build/manifest.json
 else
-  # Firefox manifest already uses localhost/* (no port wildcard); copy as-is.
-  cp manifest.firefox.json build/manifest.json
+  # Firefox and Safari manifests already use localhost/* (no port wildcard); copy as-is.
+  cp "manifest.$BROWSER.json" build/manifest.json
 fi
 
 echo "Creating new archive named '$OUTPUT_ZIP'..."

@@ -4,8 +4,15 @@
 // Copy of ../sha256.js — kept as a real file rather than a symlink because
 // GitHub Pages (Jekyll safe mode) does not dereference symlinks that resolve
 // outside the site source directory.
+//
+// Below NATIVE_DIGEST_MAX_SIZE, native crypto.subtle.digest on the whole
+// buffer at once is used instead of the hand-rolled streaming loop below --
+// it's hardware-accelerated and consistently much faster (the hand-rolled
+// loop is a poor fit for at least one JS engine's GC behavior at scale:
+// observed 500 MiB taking over a minute in Safari).
+const NATIVE_DIGEST_MAX_SIZE = 1.5 * 1024 * 1024 * 1024; // 1.5 GiB
 export async function streamingHexDigest(algorithm, blob) {
-  if (algorithm !== 'SHA-256') {
+  if (algorithm !== 'SHA-256' || blob.size <= NATIVE_DIGEST_MAX_SIZE) {
     const buf = await blob.arrayBuffer();
     return Array.from(
       new Uint8Array(await crypto.subtle.digest(algorithm, buf))
@@ -90,10 +97,20 @@ export async function streamingHexDigest(algorithm, blob) {
     const chunk = new Uint8Array(
       await blob.slice(offset, offset + CHUNK).arrayBuffer()
     );
-    const buf = new Uint8Array(pending.length + chunk.length);
-    buf.set(pending);
-    buf.set(chunk, pending.length);
     byteCount += chunk.length;
+    // pending is empty whenever CHUNK is a multiple of 64 (always true here)
+    // and every prior chunk was full-sized (true for all but the last) --
+    // i.e. in practice on every iteration except possibly the final one.
+    // Concatenating into a fresh buffer in that (common) case was a wholly
+    // unnecessary multi-MiB allocation + copy on every single chunk.
+    let buf;
+    if (pending.length === 0) {
+      buf = chunk;
+    } else {
+      buf = new Uint8Array(pending.length + chunk.length);
+      buf.set(pending);
+      buf.set(chunk, pending.length);
+    }
     let i = 0;
     for (; i + 64 <= buf.length; i += 64) processBlock(buf.subarray(i, i + 64));
     pending = buf.subarray(i);

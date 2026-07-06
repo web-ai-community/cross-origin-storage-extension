@@ -8,6 +8,48 @@
 
   const pendingRequests = new Map();
 
+  // QuotaExceededError is a newer, dedicated interface (not a DOMException)
+  // but is Chrome-only so far (unsupported in Firefox and Safari as of this
+  // writing); fall back to the long-established DOMException-with-that-name
+  // convention elsewhere, which every caller checking err.name will see
+  // identically either way.
+  function makeQuotaExceededError(message) {
+    if (typeof QuotaExceededError !== 'undefined') {
+      return new QuotaExceededError(message);
+    }
+    return new DOMException(message, 'QuotaExceededError');
+  }
+
+  // background.js's catch-all handler reports unexpected exceptions as
+  // { error: message, errorName } rather than throwing a real exception
+  // object across the message boundary (which isn't guaranteed to survive
+  // that crossing intact in every engine).
+  function errorFromResponse(data) {
+    if (data.errorName === 'QuotaExceededError') {
+      return makeQuotaExceededError(data.error);
+    }
+    return new DOMException(data.error, data.errorName || 'UnknownError');
+  }
+
+  // This MAIN-world script has no chrome.runtime access (that's the whole
+  // reason the ISOLATED-world bridge in content.js exists), so it can't use
+  // content.js's reliable safari-web-extension:// scheme check. This is a
+  // best-effort heuristic used only to skip pointless work early (see
+  // SAFARI_MAX_RESOURCE_SIZE below) -- the write path's own quota check
+  // (background.js) is the authoritative correctness backstop regardless of
+  // whether this misdetects a browser.
+  const IS_LIKELY_SAFARI =
+    /^((?!chrome|crios|fxios|android).)*safari/i.test(navigator.userAgent);
+
+  // Safari's Cache Storage implementation has an undocumented per-entry
+  // size ceiling: writes fail exactly at the 2^31-byte boundary (confirmed:
+  // 1 GiB succeeds, 2 GiB fails with a generic "Failed writing data to the
+  // file system" error), strongly suggesting an internal 32-bit signed
+  // integer overflow in WebKit. Checking this before hashing lets a
+  // known-too-large write fail fast instead of spending potentially minutes
+  // computing a hash for a file that can't be stored regardless.
+  const SAFARI_MAX_RESOURCE_SIZE = 2 ** 31 - 1;
+
   // Listen for responses from the bridge content script.
   window.addEventListener('message', (event) => {
     if (
@@ -19,9 +61,13 @@
     }
     const { id, data } = event.data;
     if (pendingRequests.has(id)) {
-      const { resolve } = pendingRequests.get(id);
+      const { resolve, reject } = pendingRequests.get(id);
       pendingRequests.delete(id);
-      resolve(data);
+      if (data?.error) {
+        reject(errorFromResponse(data));
+      } else {
+        resolve(data);
+      }
     }
   });
 
@@ -42,11 +88,37 @@
     });
   }
 
+  // Blob structured-clone across the MAIN-world/isolated-world content
+  // script boundary isn't part of the DOM spec (isolated worlds are a
+  // WebExtensions-only construct) and isn't reliably supported by every
+  // engine, so file bytes cross that boundary as transferred ArrayBuffers
+  // instead. Slicing into fixed-size chunks (rather than one arrayBuffer()
+  // call on the whole Blob) keeps peak memory bounded and avoids the
+  // whole-file materialization that can fail for very large (multi-GiB)
+  // files.
+  const TRANSFER_CHUNK_SIZE = 4 * 1024 * 1024; // 4 MiB
+  async function blobToTransferChunks(blob) {
+    const chunks = [];
+    for (let offset = 0; offset < blob.size; offset += TRANSFER_CHUNK_SIZE) {
+      chunks.push(
+        await blob.slice(offset, offset + TRANSFER_CHUNK_SIZE).arrayBuffer()
+      );
+    }
+    return chunks;
+  }
+
   // Inline copy of sha256.js — main-world.js is a classic MAIN-world content
   // script that must execute synchronously at document_start and therefore
   // cannot use ES module imports.  Keep in sync with sha256.js manually.
+  //
+  // Below NATIVE_DIGEST_MAX_SIZE, native crypto.subtle.digest on the whole
+  // buffer at once is used instead of the hand-rolled streaming loop below --
+  // it's hardware-accelerated and consistently much faster (the hand-rolled
+  // loop is a poor fit for at least one JS engine's GC behavior at scale:
+  // observed 500 MiB taking over a minute in Safari).
+  const NATIVE_DIGEST_MAX_SIZE = 1.5 * 1024 * 1024 * 1024; // 1.5 GiB
   async function streamingHexDigest(algorithm, blob) {
-    if (algorithm !== 'SHA-256') {
+    if (algorithm !== 'SHA-256' || blob.size <= NATIVE_DIGEST_MAX_SIZE) {
       const buf = await blob.arrayBuffer();
       return Array.from(
         new Uint8Array(await crypto.subtle.digest(algorithm, buf))
@@ -132,10 +204,21 @@
       const chunk = new Uint8Array(
         await blob.slice(offset, offset + CHUNK).arrayBuffer()
       );
-      const buf = new Uint8Array(pending.length + chunk.length);
-      buf.set(pending);
-      buf.set(chunk, pending.length);
       byteCount += chunk.length;
+      // pending is empty whenever CHUNK is a multiple of 64 (always true
+      // here) and every prior chunk was full-sized (true for all but the
+      // last) -- i.e. in practice on every iteration except possibly the
+      // final one. Concatenating into a fresh buffer in that (common) case
+      // was a wholly unnecessary multi-MiB allocation + copy on every
+      // single chunk.
+      let buf;
+      if (pending.length === 0) {
+        buf = chunk;
+      } else {
+        buf = new Uint8Array(pending.length + chunk.length);
+        buf.set(pending);
+        buf.set(chunk, pending.length);
+      }
       let i = 0;
       for (; i + 64 <= buf.length; i += 64)
         processBlock(buf.subarray(i, i + 64));
@@ -171,16 +254,16 @@
     for (const hash of hashes) {
       handles.push({
         getFile: async () => {
-          const { data, mimeType } = await talkToBridge('getFileData', {
+          const { dataChunks, mimeType } = await talkToBridge('getFileData', {
             hash,
           });
-          if (!data) {
+          if (!dataChunks) {
             throw new DOMException(
               `File contents must be written before getFile() can be called.`,
               'NotAllowedError'
             );
           }
-          return new File([data], 'file', {
+          return new File(dataChunks, 'file', {
             type: mimeType,
             lastModified: Date.now(),
           });
@@ -198,10 +281,13 @@
             },
             async close() {
               // For Blob (or anything else), compute the hash in 4 MiB slices
-              // so peak memory stays O(chunk) rather than O(file).  Sending the
-              // Blob via postMessage uses structured-clone, which in Chrome is
-              // ref-counted for Blob storage rather than a byte copy.
+              // so peak memory stays O(chunk) rather than O(file).
               const blob = new Blob(chunks);
+              if (IS_LIKELY_SAFARI && blob.size > SAFARI_MAX_RESOURCE_SIZE) {
+                throw makeQuotaExceededError(
+                  `This resource (${blob.size} bytes) exceeds the maximum size Safari's storage backend supports for a single resource (~2 GiB).`
+                );
+              }
               const actualHashHex = await streamingHexDigest(
                 hash.algorithm,
                 blob
@@ -212,11 +298,16 @@
                   'DataError'
                 );
               }
-              await talkToBridge('storeFileData', {
-                hash,
-                data: blob,
-                mimeType: { 'content-type': detectedMimeType },
-              });
+              const dataChunks = await blobToTransferChunks(blob);
+              await talkToBridge(
+                'storeFileData',
+                {
+                  hash,
+                  dataChunks,
+                  mimeType: { 'content-type': detectedMimeType },
+                },
+                dataChunks
+              );
             },
           });
 
@@ -917,11 +1008,14 @@ ${xhr.responseText}`;
                   return;
                 } else if (action === 'storeFileData') {
                   const { hash } = workerHandles.get(data.handleId);
-                  await talkToBridge('storeFileData', {
-                    hash,
-                    data: new Blob([data.arrayBuffer]),
-                    mimeType: data.mimeType,
-                  });
+                  const dataChunks = await blobToTransferChunks(
+                    new Blob([data.arrayBuffer])
+                  );
+                  await talkToBridge(
+                    'storeFileData',
+                    { hash, dataChunks, mimeType: data.mimeType },
+                    dataChunks
+                  );
                   result = {};
                 }
                 mainPort.postMessage({ id, data: result });
@@ -1105,11 +1199,14 @@ self.addEventListener('message', function __cosBufferFn(e) {
                     // The worker already verified the hash; forward raw bytes to
                     // the bridge, skipping the redundant check in the handle wrapper.
                     const { hash } = workerHandles.get(data.handleId);
-                    await talkToBridge('storeFileData', {
-                      hash,
-                      data: new Blob([data.arrayBuffer]),
-                      mimeType: data.mimeType,
-                    });
+                    const dataChunks = await blobToTransferChunks(
+                      new Blob([data.arrayBuffer])
+                    );
+                    await talkToBridge(
+                      'storeFileData',
+                      { hash, dataChunks, mimeType: data.mimeType },
+                      dataChunks
+                    );
                     result = {};
                   }
                   mainPort.postMessage({ id, data: result });
@@ -1151,7 +1248,11 @@ self.addEventListener('message', function __cosBufferFn(e) {
   // browser's font-loading pipeline.
   function applyFontBlobs(cssText, fonts) {
     let resolved = cssText;
-    for (const { placeholder, blob } of fonts || []) {
+    for (const { placeholder, dataChunks, mimeType } of fonts || []) {
+      // Rebuild the Blob here in the MAIN world from the transferred bytes
+      // rather than using a cross-world-cloned Blob directly — see the note
+      // in storeFileData's close() handler for why.
+      const blob = new Blob(dataChunks, { type: mimeType });
       const blobUrl = URL.createObjectURL(blob);
       resolved = resolved.replace(`"${placeholder}"`, `"${blobUrl}"`);
     }
