@@ -249,7 +249,8 @@ class ResourceManager {
   }
 
   recordHit(hash) {
-    this.hashToHitCount[hash] = (this.hashToHitCount[hash] || 0) + 1;
+    const prevCount = Number(this.hashToHitCount[hash]) || 0;
+    this.hashToHitCount[hash] = prevCount + 1;
   }
 
   recordMiss() {
@@ -264,7 +265,7 @@ class ResourceManager {
 
   getStats() {
     const totalHits = Object.values(this.hashToHitCount).reduce(
-      (s, n) => s + n,
+      (s, n) => s + (Number(n) || 0),
       0
     );
     const totalMisses = this.totalMissCount;
@@ -272,7 +273,7 @@ class ResourceManager {
 
     let bytesServed = 0;
     for (const [hash, count] of Object.entries(this.hashToHitCount)) {
-      bytesServed += count * (this.hashToSize[hash] || 0);
+      bytesServed += (Number(count) || 0) * (this.hashToSize[hash] || 0);
     }
 
     let deduplicationSavings = 0;
@@ -355,12 +356,29 @@ class ResourceManager {
         }
         this.hashToStoringOrigins = storingOrigins;
       }
-      if (this._backfillStorers()) {
+      const backfilled = this._backfillStorers();
+      const sanitized = this._sanitizeHitCounts();
+      if (backfilled || sanitized) {
         await this.saveManagerToStorage();
       }
     } catch (error) {
       console.error('Error loading resource manager from storage:', error);
     }
+  }
+
+  // Repairs hit counts that were previously corrupted into non-numeric
+  // strings (e.g. by a `+=` on an unset value going through a code path
+  // that produced a string instead of a number). Returns true if anything
+  // was changed, so the caller knows to persist the repair.
+  _sanitizeHitCounts() {
+    let changed = false;
+    for (const [hash, count] of Object.entries(this.hashToHitCount)) {
+      if (typeof count !== 'number' || !Number.isFinite(count)) {
+        this.hashToHitCount[hash] = Number(count) || 0;
+        changed = true;
+      }
+    }
+    return changed;
   }
 
   async saveManagerToStorage() {
