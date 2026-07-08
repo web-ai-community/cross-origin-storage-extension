@@ -1297,26 +1297,41 @@
         log(`--- Variant: ${variant.label} ---`);
         let worker;
         try {
-          worker = variant.create();
-          const result = await new Promise((resolve, reject) => {
-            const timeoutId = setTimeout(
-              () => reject(new Error('Worker did not respond within 15 s')),
-              15000
-            );
-            worker.onmessage = ({ data }) => {
-              if (data.type === 'log') {
-                log(`[Variant] ${data.msg}`, data.isError);
-              } else if (data.type === 'result') {
+          // Worker() throws synchronously (e.g. a SecurityError for a
+          // cross-origin script when the page itself isn't served over
+          // HTTPS — Chrome disallows cross-origin worker scripts from
+          // non-HTTPS pages even on otherwise-secure contexts like
+          // localhost) as well as asynchronously via onerror below. Route
+          // both through the same pass:null path so the isNA check treats
+          // either kind of load-time failure as an environment limitation
+          // rather than an extension bug.
+          let result;
+          try {
+            worker = variant.create();
+          } catch (err) {
+            result = { pass: null, detail: `${err.name}: ${err.message}` };
+          }
+          if (!result) {
+            result = await new Promise((resolve, reject) => {
+              const timeoutId = setTimeout(
+                () => reject(new Error('Worker did not respond within 15 s')),
+                15000
+              );
+              worker.onmessage = ({ data }) => {
+                if (data.type === 'log') {
+                  log(`[Variant] ${data.msg}`, data.isError);
+                } else if (data.type === 'result') {
+                  clearTimeout(timeoutId);
+                  resolve(data);
+                }
+              };
+              worker.onerror = (err) => {
                 clearTimeout(timeoutId);
-                resolve(data);
-              }
-            };
-            worker.onerror = (err) => {
-              clearTimeout(timeoutId);
-              resolve({ pass: null, detail: err.message || 'Worker load error' });
-            };
-            worker.postMessage({ type: 'run', label: variant.id });
-          });
+                resolve({ pass: null, detail: err.message || 'Worker load error' });
+              };
+              worker.postMessage({ type: 'run', label: variant.id });
+            });
+          }
           const isNA = result.pass == null ||
             (result.pass === false && /^navigator\.crossOriginStorage (is undefined|not available)$/.test(result.detail));
           setRowStatus(rowEl, isNA ? 'n/a' : result.pass ? 'pass' : 'fail', result.detail);
