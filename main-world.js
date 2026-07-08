@@ -433,10 +433,13 @@
       return requestFileHandlesWithOptionalPrompt(hashes, create);
     },
 
-    deleteResource: async (hash) => {
+    // Not part of the COS explainer's public surface — a private, debug-only
+    // escape hatch used by this extension's own tests to clean up resources.
+    // Not spec'd, not stable, and not for production use by page scripts.
+    __debugDeleteResource: async (hash) => {
       if (!hash || !hash.algorithm || !hash.value) {
         throw new TypeError(
-          `Failed to execute 'deleteResource': argument must be a hash object with 'algorithm' and 'value'.`
+          `Failed to execute '__debugDeleteResource': argument must be a hash object with 'algorithm' and 'value'.`
         );
       }
       const result = await talkToBridge('deleteResource', { hash });

@@ -1437,7 +1437,7 @@
             log(`[Stress] Read back OK — size ${file.size} bytes.`);
 
             log('[Stress] Deleting from COS (and local disk)…');
-            await navigator.crossOriginStorage.deleteResource(hash);
+            await navigator.crossOriginStorage.__debugDeleteResource(hash);
             log('[Stress] Delete complete. Verifying resource is gone…');
 
             try {
@@ -1445,7 +1445,7 @@
               return {
                 pass: false,
                 detail:
-                  'Resource still accessible after deleteResource — cleanup failed.',
+                  'Resource still accessible after __debugDeleteResource — cleanup failed.',
               };
             } catch (err) {
               if (err.name !== 'NotFoundError') {
@@ -1726,6 +1726,64 @@
               };
             } catch (err) {
               return { pass: false, detail: `Storer should always have access — got ${err.name}: ${err.message}` };
+            }
+          },
+        },
+        {
+          id: 'origins-list-jsdelivr-cross-origin-read',
+          label: "origins: ['https://cdn.jsdelivr.net'] — real cross-origin worker (jsDelivr) confirms the file exists",
+          async run() {
+            const content = `cos-origins-jsdelivr-${Date.now()}`;
+            const hex = await sha256Hex(content);
+            const hash = { algorithm: 'SHA-256', value: hex };
+            const wh = await navigator.crossOriginStorage.requestFileHandle(
+              hash, { create: true, origins: ['https://cdn.jsdelivr.net'] }
+            );
+            const wr = await wh.createWritable();
+            await wr.write(new Blob([content], { type: 'text/plain' }));
+            await wr.close();
+            log(`Origins: stored resource for jsDelivr cross-origin readback (${hex.slice(0, 12)}…)`);
+
+            // This worker's script is fetched from cdn.jsdelivr.net, so its
+            // global scope's own origin is genuinely https://cdn.jsdelivr.net
+            // — unlike the .test subdomains or the extension relay page used
+            // by the other origins tests, this is an independent, real-world
+            // origin over which this test has no control.
+            const worker = new Worker(
+              'https://cdn.jsdelivr.net/gh/web-ai-community/cross-origin-storage-extension@main/docs/test-worker-cross-origin-read.js'
+            );
+            try {
+              const result = await new Promise((resolve, reject) => {
+                const timeoutId = setTimeout(
+                  () => reject(new Error('jsDelivr worker did not respond within 15 s')),
+                  15000
+                );
+                worker.onmessage = ({ data }) => {
+                  clearTimeout(timeoutId);
+                  resolve(data);
+                };
+                worker.onerror = (err) => {
+                  clearTimeout(timeoutId);
+                  reject(new Error(err.message || 'Worker load error'));
+                };
+                worker.postMessage({ type: 'read', hash, expected: content });
+              });
+              if (result.pass === null) {
+                return {
+                  pass: true,
+                  detail:
+                    'Skipped: navigator.crossOriginStorage not available in the jsDelivr worker — ' +
+                    'enable "Enable the COS API in Worker and SharedWorker" in extension options to run this test with real verification.',
+                };
+              }
+              return {
+                pass: result.pass,
+                detail: result.pass
+                  ? `Confirmed: a worker running on ${result.origin} (loaded from jsDelivr, not this page's origin ${location.origin}) read the file back — ${result.detail}`
+                  : result.detail,
+              };
+            } finally {
+              worker.terminate();
             }
           },
         },
