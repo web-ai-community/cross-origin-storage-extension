@@ -16,6 +16,25 @@
       The `data-cos` attribute tells the COS extension polyfill to intercept this stylesheet.    
     -->
     <link rel="stylesheet" data-cos href="test-cos-fonts.css" />
+    <!--
+      Declarative HTML integration (see the README's "Declarative HTML
+      Integration" section): a bare `crossoriginstorage` attribute opts a
+      same-site-only resource into COS. The extension polyfill intercepts
+      these at parse time, same as the `data-cos` link above.
+    -->
+    <link
+      rel="stylesheet"
+      href="test-declarative-style.css"
+      integrity="sha256-mQBYj4h2ur98msgMVb/ojfmkEHQCXRG+fElFEiCD6QE="
+      crossoriginstorage
+      id="decl-static-link"
+    />
+    <script
+      src="test-declarative-script.js"
+      integrity="sha256-6beX92fZ01C6VA5MBmfKLqKozsxKDKA2kZLb6DKS/PY="
+      crossoriginstorage
+      id="decl-static-script"
+    ></script>
     <title>Cross-Origin Storage — Test Page</title>
     <style>
       :root {
@@ -426,6 +445,56 @@
         </tr>
       </thead>
       <tbody id="css-results">
+        <!-- rows injected by JS -->
+      </tbody>
+    </table>
+
+    <h2>Declarative HTML Integration Tests</h2>
+    <p>
+      Tests the
+      <code>&lt;link integrity crossoriginstorage&gt;</code> /
+      <code>&lt;script integrity crossoriginstorage&gt;</code> polyfill (see
+      the README's
+      <a
+        href="https://github.com/WICG/cross-origin-storage/blob/main/README.md#declarative-html-integration"
+        >"Declarative HTML Integration"</a
+      >
+      section). The static <code>&lt;link&gt;</code> and
+      <code>&lt;script&gt;</code> in this page's <code>&lt;head&gt;</code>
+      point to <code>test-declarative-style.css</code> and
+      <code>test-declarative-script.js</code> with a bare (same-site-only)
+      <code>crossoriginstorage</code> attribute. The last two tests are
+      cross-origin: they run inside the <code>sub.a.test</code> /
+      <code>b.test</code> iframes already used by the multi-origin PHL tests
+      above, and deliberately point a <code>&lt;link&gt;</code> at a
+      non-existent URL so a pass is only possible if the stylesheet was
+      actually served from COS rather than falling back to a native fetch
+      (they use <code>&lt;link&gt;</code>, not <code>&lt;script&gt;</code>,
+      for this specific check: a classic script's <code>src</code> can't be
+      overridden after the browser starts fetching it, so pointing one at a
+      broken URL would just fail regardless of whether COS sharing works —
+      see the comment on <code>processDeclarativeResource</code> in
+      main-world.js for the full explanation).
+    </p>
+    <p>
+      Marker element for the stylesheet test (should be
+      <span style="color: rgb(1, 2, 3)">this color</span> once COS-served):
+      <span id="cos-declarative-marker">■■■</span>
+    </p>
+    <button class="run-all" id="run-all-declarative">
+      Run declarative HTML integration tests
+    </button>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Scenario</th>
+          <th>Status</th>
+          <th>Run</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody id="declarative-results">
         <!-- rows injected by JS -->
       </tbody>
     </table>
@@ -1594,6 +1663,9 @@
         for (let i = 0; i < CSS_TESTS.length; i++) {
           await runCSSTest(CSS_TESTS[i], cssRows[i]);
         }
+        for (let i = 0; i < DECLARATIVE_TESTS.length; i++) {
+          await runDeclarativeTest(DECLARATIVE_TESTS[i], declarativeRows[i]);
+        }
       });
 
       // -------------------------------------------------------------------------
@@ -2206,6 +2278,42 @@
             reply({ ok: false, error: `${err.name}: ${err.message}` });
           }
         }
+        if (action === 'declarative-link') {
+          // Inserts a <link rel="stylesheet" integrity crossoriginstorage>
+          // into THIS document (this frame may be sub.a.test or b.test) and
+          // reports the resulting computed color of a marker element.
+          //
+          // Deliberately uses <link>, not <script>, to prove cross-origin
+          // COS sharing: a classic <script>'s `src` cannot be reassigned
+          // after the fact (the HTML spec permanently locks in the first
+          // "prepare the script" run -- see the comment on
+          // processDeclarativeResource in main-world.js), so pointing one at
+          // a broken URL would just fail natively regardless of whether COS
+          // sharing itself works. <link>'s `href` has no such limitation --
+          // reassigning it reliably re-applies the new stylesheet -- so a
+          // <link> pointed at a broken URL only ever renders correctly if
+          // the polyfill actually swapped in a COS-served blob: URL.
+          const { href, integrity, crossOriginStorageAttr, expectedColor } = ev.data;
+          const markerId = 'cos-decl-xorigin-marker';
+          document.getElementById(markerId)?.remove();
+          const marker = document.createElement('span');
+          marker.id = markerId;
+          document.body.appendChild(marker);
+          const link = document.createElement('link');
+          link.rel = 'stylesheet';
+          link.href = href;
+          link.integrity = integrity;
+          link.setAttribute('crossoriginstorage', crossOriginStorageAttr ?? '');
+          document.head.appendChild(link);
+          const deadline = Date.now() + 5000;
+          let color;
+          while (Date.now() < deadline) {
+            color = getComputedStyle(marker).color;
+            if (color === expectedColor) break;
+            await new Promise((r) => setTimeout(r, 100));
+          }
+          reply({ matched: color === expectedColor, color });
+        }
       });
 
       // Only available when running at http://a.test:<port> (e2e-test.mjs setup).
@@ -2513,6 +2621,348 @@
         setMophlNA();
         mophlRows.forEach(rowEl => (rowEl.querySelector('.run-btn').disabled = true));
       }
+
+      // ── Declarative HTML Integration Tests ───────────────────────────────────
+      //
+      // Tests <link integrity crossoriginstorage> / <script integrity
+      // crossoriginstorage> (see the README's "Declarative HTML Integration"
+      // section). The static <link>/<script> pair in <head> exercises the
+      // parse-time interception path; the rest exercise dynamic insertion,
+      // hash-mismatch rejection, and (reusing the sub.a.test/b.test iframes
+      // set up by the multi-origin PHL tests above) cross-origin visibility.
+
+      const DECL_SCRIPT_SRC = 'test-declarative-script.js';
+      const DECL_SCRIPT_INTEGRITY =
+        'sha256-6beX92fZ01C6VA5MBmfKLqKozsxKDKA2kZLb6DKS/PY=';
+      const DECL_WRONG_INTEGRITY =
+        'sha256-lJyrUbO5pkHSUm6cpZGHOlSJ7J5BUKZ3lpJK2FK9swM=';
+      // Deliberately 404s -- the cross-origin checks below use it so a pass
+      // is only possible if the resource was actually served from COS,
+      // never from a native network fetch. See the comment on the
+      // 'declarative-link' handler above for why these checks use <link>
+      // rather than <script>.
+      const DECL_MISSING_HREF = 'test-declarative-resource-does-not-exist';
+
+      async function sriFor(text) {
+        const buf = await crypto.subtle.digest(
+          'SHA-256',
+          new TextEncoder().encode(text)
+        );
+        const bytes = new Uint8Array(buf);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        return `sha256-${btoa(binary)}`;
+      }
+
+      // Sends a declarative-link command to an already-created MOPHL iframe
+      // (sub.a.test / b.test) and awaits its { matched, color } result,
+      // reusing the cos-mophl-cmd/-result postMessage plumbing above.
+      function declarativeRemoteCheck(origin, payload, timeout = 8000) {
+        return new Promise((resolve, reject) => {
+          const fr = _mophlIframes.get(origin);
+          if (!fr) { reject(new Error(`No iframe for ${origin}`)); return; }
+          const id = crypto.randomUUID();
+          const t = setTimeout(() => {
+            _pendingMophlReads.delete(id);
+            reject(new Error(`declarative check timeout (${origin})`));
+          }, timeout);
+          _pendingMophlReads.set(id, (data) => { clearTimeout(t); resolve(data); });
+          fr.contentWindow?.postMessage(
+            { source: 'cos-mophl-cmd', id, action: 'declarative-link', ...payload },
+            '*'
+          );
+        });
+      }
+
+      // Distinct (never touched by the local same-origin tests below) CSS
+      // content for the two cross-origin visibility checks, so their
+      // upgrade-only visibility tiers ('*' vs same-site) can't collide with
+      // each other or with DECL_SCRIPT_SRC's own tier. Different colors so
+      // the two checks can never be confused with one another either.
+      const DECL_XORIGIN_GLOBAL_CSS =
+        '#cos-decl-xorigin-marker { color: rgb(1, 2, 3); } /* xorigin-global */';
+      const DECL_XORIGIN_GLOBAL_COLOR = 'rgb(1, 2, 3)';
+      const DECL_XORIGIN_SAMESITE_CSS =
+        '#cos-decl-xorigin-marker { color: rgb(4, 5, 6); } /* xorigin-samesite */';
+      const DECL_XORIGIN_SAMESITE_COLOR = 'rgb(4, 5, 6)';
+
+      async function storeDeclarativeContent(content, origins, mimeType) {
+        const hex = await sha256Hex(content);
+        const hash = { algorithm: 'SHA-256', value: hex };
+        const opts = { create: true };
+        if (origins !== undefined) opts.origins = origins;
+        const wh = await navigator.crossOriginStorage.requestFileHandle(hash, opts);
+        const wr = await wh.createWritable();
+        await wr.write(new Blob([content], { type: mimeType }));
+        await wr.close();
+      }
+
+      let _globalDeclarativeStorePromise = null;
+      function ensureGlobalDeclarativeStored() {
+        if (!_globalDeclarativeStorePromise) {
+          _globalDeclarativeStorePromise = storeDeclarativeContent(
+            DECL_XORIGIN_GLOBAL_CSS,
+            '*',
+            'text/css'
+          );
+        }
+        return _globalDeclarativeStorePromise;
+      }
+
+      let _samesiteDeclarativeStorePromise = null;
+      function ensureSamesiteDeclarativeStored() {
+        if (!_samesiteDeclarativeStorePromise) {
+          _samesiteDeclarativeStorePromise = storeDeclarativeContent(
+            DECL_XORIGIN_SAMESITE_CSS,
+            undefined,
+            'text/css'
+          );
+        }
+        return _samesiteDeclarativeStorePromise;
+      }
+
+      const DECLARATIVE_TESTS = [
+        {
+          id: 'decl-static-script',
+          label:
+            'Static &lt;script integrity crossoriginstorage&gt; (same-site) — polyfill intercepts at parse time',
+          async run() {
+            const el = document.getElementById('decl-static-script');
+            if (!el) {
+              return { pass: false, detail: 'No <script id="decl-static-script"> found in DOM.' };
+            }
+            const deadline = Date.now() + 8000;
+            while (
+              !(window.__cosDeclarativeRunCount > 0 && (el.getAttribute('src') || '').startsWith('blob:')) &&
+              Date.now() < deadline
+            ) {
+              await new Promise((r) => setTimeout(r, 100));
+            }
+            const ran = (window.__cosDeclarativeRunCount || 0) > 0;
+            const srcIsBlob = (el.getAttribute('src') || '').startsWith('blob:');
+            // Both signals are required: `ran` alone doesn't prove COS was
+            // involved here, since the browser's native fetch of this real,
+            // valid file would *also* make it run even if the COS pipeline
+            // did nothing (a classic <script>'s src, unlike a <link>'s
+            // href, can't be overridden by a later reassignment once the
+            // browser has started -- see the comment on
+            // processDeclarativeResource in main-world.js). srcIsBlob
+            // confirms the polyfill's own resolve+swap pipeline ran too.
+            return {
+              pass: ran && srcIsBlob,
+              detail: [
+                `Script ran: ${ran} (runCount=${window.__cosDeclarativeRunCount || 0})`,
+                `src replaced with blob: URL: ${srcIsBlob}`,
+                'Note: the browser’s own native fetch -- not this blob: URL -- is what always actually executes for a <script> element; see main-world.js.',
+              ].join('\n'),
+            };
+          },
+        },
+        {
+          id: 'decl-static-link',
+          label:
+            'Static &lt;link integrity crossoriginstorage&gt; (same-site) — polyfill intercepts at parse time',
+          async run() {
+            const el = document.getElementById('decl-static-link');
+            const marker = document.getElementById('cos-declarative-marker');
+            if (!el || !marker) {
+              return {
+                pass: false,
+                detail: 'Missing <link id="decl-static-link"> or the marker element.',
+              };
+            }
+            const deadline = Date.now() + 8000;
+            let color;
+            while (Date.now() < deadline) {
+              color = getComputedStyle(marker).color;
+              if (color === 'rgb(1, 2, 3)') break;
+              await new Promise((r) => setTimeout(r, 100));
+            }
+            const pass = color === 'rgb(1, 2, 3)';
+            const hrefIsBlob = (el.getAttribute('href') || '').startsWith('blob:');
+            return {
+              pass,
+              detail: [
+                `Marker color: ${color}`,
+                `href replaced with blob: URL: ${hrefIsBlob}`,
+              ].join('\n'),
+            };
+          },
+        },
+        {
+          id: 'decl-dynamic-global',
+          label:
+            'Dynamic &lt;script crossoriginstorage="*"&gt; insertion — polyfill intercepts MutationObserver event',
+          async run() {
+            const before = window.__cosDeclarativeRunCount || 0;
+            const script = document.createElement('script');
+            script.src = DECL_SCRIPT_SRC;
+            script.integrity = DECL_SCRIPT_INTEGRITY;
+            script.setAttribute('crossoriginstorage', '*');
+            document.head.appendChild(script);
+            const deadline = Date.now() + 8000;
+            while (
+              !(
+                (window.__cosDeclarativeRunCount || 0) === before + 1 &&
+                (script.getAttribute('src') || '').startsWith('blob:')
+              ) &&
+              Date.now() < deadline
+            ) {
+              await new Promise((r) => setTimeout(r, 100));
+            }
+            const after = window.__cosDeclarativeRunCount || 0;
+            const srcIsBlob = (script.getAttribute('src') || '').startsWith('blob:');
+            // See decl-static-script's comment: `after === before + 1` alone
+            // (no double-execution) doesn't prove COS served this element,
+            // only that nothing broke -- srcIsBlob confirms the polyfill's
+            // pipeline also ran.
+            const pass = after === before + 1 && srcIsBlob;
+            return {
+              pass,
+              detail: [
+                `Run count before: ${before}, after: ${after} (expected exactly +1 -- no double-execution)`,
+                `src replaced with blob: URL: ${srcIsBlob}`,
+              ].join('\n'),
+            };
+          },
+        },
+        {
+          id: 'decl-hash-mismatch',
+          label:
+            '&lt;script integrity crossoriginstorage&gt; with a wrong hash — must NOT execute',
+          async run() {
+            const before = window.__cosDeclarativeRunCount || 0;
+            const script = document.createElement('script');
+            script.src = DECL_SCRIPT_SRC;
+            script.integrity = DECL_WRONG_INTEGRITY;
+            script.setAttribute('crossoriginstorage', '');
+            document.head.appendChild(script);
+            // Give the polyfill's fetch+verify round-trip, and the native
+            // SRI check on its fallback, time to settle.
+            await new Promise((r) => setTimeout(r, 3000));
+            const after = window.__cosDeclarativeRunCount || 0;
+            const pass = after === before;
+            return {
+              pass,
+              detail: `Run count before: ${before}, after: ${after} (expected unchanged -- hash mismatch must block execution)`,
+            };
+          },
+        },
+        {
+          id: 'decl-global-cross-origin',
+          label:
+            'crossoriginstorage="*" (&lt;link&gt;): b.test (cross-site) reads via COS despite a broken URL',
+          async run() {
+            if (!MOPHL_AVAILABLE) {
+              return { pass: null, detail: 'n/a — requires the a.test/b.test e2e setup' };
+            }
+            await ensureMophlResources();
+            await ensureGlobalDeclarativeStored();
+            const integrity = await sriFor(DECL_XORIGIN_GLOBAL_CSS);
+            const result = await declarativeRemoteCheck(`http://b.test:${location.port}`, {
+              href: DECL_MISSING_HREF,
+              integrity,
+              crossOriginStorageAttr: '*',
+              expectedColor: DECL_XORIGIN_GLOBAL_COLOR,
+            });
+            return {
+              pass: !!result.matched,
+              detail: `b.test applied the stylesheet via COS despite a 404 href: ${!!result.matched} (color: ${result.color})`,
+            };
+          },
+        },
+        {
+          id: 'decl-samesite-cross-origin',
+          label:
+            'bare crossoriginstorage (&lt;link&gt;, same-site): sub.a.test reads via COS, b.test cannot',
+          async run() {
+            if (!MOPHL_AVAILABLE) {
+              return { pass: null, detail: 'n/a — requires the a.test/b.test e2e setup' };
+            }
+            await ensureMophlResources();
+            await ensureSamesiteDeclarativeStored();
+            const integrity = await sriFor(DECL_XORIGIN_SAMESITE_CSS);
+            const [sameSite, crossSite] = await Promise.all([
+              declarativeRemoteCheck(`http://sub.a.test:${location.port}`, {
+                href: DECL_MISSING_HREF,
+                integrity,
+                crossOriginStorageAttr: '',
+                expectedColor: DECL_XORIGIN_SAMESITE_COLOR,
+              }),
+              declarativeRemoteCheck(`http://b.test:${location.port}`, {
+                href: DECL_MISSING_HREF,
+                integrity,
+                crossOriginStorageAttr: '',
+                expectedColor: DECL_XORIGIN_SAMESITE_COLOR,
+              }),
+            ]);
+            const pass = !!sameSite.matched && !crossSite.matched;
+            return {
+              pass,
+              detail: [
+                `sub.a.test (same-site sibling) applied via COS: ${!!sameSite.matched} (expected true, color: ${sameSite.color})`,
+                `b.test (cross-site) applied via COS: ${!!crossSite.matched} (expected false, color: ${crossSite.color})`,
+              ].join('\n'),
+            };
+          },
+        },
+      ];
+
+      const declarativeTbody = document.getElementById('declarative-results');
+      const declarativeRows = DECLARATIVE_TESTS.map((test, idx) => {
+        const tr = document.createElement('tr');
+        tr.id = `declarative-row-${test.id}`;
+        tr.innerHTML = `
+          <td>${idx + 1}</td>
+          <td>${test.label}</td>
+          <td class="status-cell"><span class="badge badge-pending">pending</span></td>
+          <td><button class="run-btn">Run</button></td>
+          <td><pre class="detail"></pre></td>
+        `;
+        declarativeTbody.append(tr);
+        return tr;
+      });
+
+      async function runDeclarativeTest(test, rowEl) {
+        const btn = rowEl.querySelector('.run-btn');
+        btn.disabled = true;
+        if (!navigator.crossOriginStorage) {
+          setRowStatus(rowEl, 'n/a', 'navigator.crossOriginStorage not available');
+          btn.disabled = false;
+          return;
+        }
+        setRowStatus(rowEl, 'running', '');
+        log(`--- Declarative HTML: ${test.label} ---`);
+        try {
+          const { pass, detail } = await test.run();
+          const isNA = pass == null;
+          setRowStatus(rowEl, isNA ? 'n/a' : pass ? 'pass' : 'fail', detail);
+          log(
+            `Declarative Result: ${isNA ? 'N/A' : pass ? 'PASS' : 'FAIL'}${detail ? ' — ' + detail.split('\n')[0] : ''}`,
+            !pass && !isNA
+          );
+        } catch (err) {
+          const detail = `Uncaught ${err.name}: ${err.message}`;
+          setRowStatus(rowEl, 'fail', detail);
+          log(`Declarative Result: FAIL — ${detail}`, true);
+        } finally {
+          btn.disabled = false;
+        }
+      }
+
+      declarativeRows.forEach((rowEl, idx) => {
+        rowEl.querySelector('.run-btn').addEventListener('click', () => {
+          runDeclarativeTest(DECLARATIVE_TESTS[idx], rowEl);
+        });
+      });
+
+      document
+        .getElementById('run-all-declarative')
+        .addEventListener('click', async () => {
+          for (let i = 0; i < DECLARATIVE_TESTS.length; i++) {
+            await runDeclarativeTest(DECLARATIVE_TESTS[i], declarativeRows[i]);
+          }
+        });
     </script>
     <!-- Variant worker source — used for blob: and data: URL variant tests. -->
     <script id="variant-worker-src" type="text/worker">

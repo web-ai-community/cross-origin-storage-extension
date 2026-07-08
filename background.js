@@ -701,6 +701,98 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           };
           break;
         }
+        // Declarative HTML integration: <link integrity crossoriginstorage>
+        // and <script integrity crossoriginstorage>. See
+        // https://github.com/WICG/cross-origin-storage/blob/main/README.md#declarative-html-integration
+        //
+        // Unlike requestFileHandle()'s persisted-visibility read check, reads
+        // here are gated by resolveVisibility() exactly the same way -- the
+        // difference from the CSS integration above is deliberate: the CSS
+        // form re-derives "allowed" from the declaration's own origins list
+        // on every read, which silently never matches for the same-site
+        // (no-origins) form. Using the persisted visibility tier instead
+        // makes the spec's first example (a bare `crossoriginstorage`
+        // attribute, same-site-only) actually work.
+        case 'resolveDeclarativeResource': {
+          const tabId = sender.tab?.id;
+          maybeResetForNewPage(tabId, sender.documentId);
+          const { url, integrity, origins, origin } = data;
+          const hash = sriToHashObj(integrity);
+          await resourceManager.loadManagerFromStorage();
+
+          const isStorer = resourceManager.isStoringOrigin(hash.value, origin);
+          const phlBlocked =
+            !isStorer && (await isBlockedByPublicHashList(hash.value, origin));
+          let reachable = isStorer;
+          if (!reachable && !phlBlocked) {
+            ({ reachable } = await resolveVisibility(hash.value, origin));
+          }
+
+          let fileResult =
+            reachable && !phlBlocked ? await getFileData(hash) : false;
+          const alreadyCached = !!fileResult;
+
+          if (!fileResult) {
+            resourceManager.recordMiss();
+            if (tabId) {
+              if (!tabMissHashes[tabId]) tabMissHashes[tabId] = new Set();
+              tabMissHashes[tabId].add(hash.value);
+              if (!tabMissOrigins[tabId]) tabMissOrigins[tabId] = new Set();
+              tabMissOrigins[tabId].add(origin);
+              updateBadge(tabId);
+            }
+            try {
+              const resp = await fetch(url, { cache: 'no-cache' });
+              if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+              const blob = await resp.blob();
+              const actualHashHex = await computeHashHex(hash.algorithm, blob);
+              if (actualHashHex !== hash.value) {
+                // Hash mismatch: reject like SRI would and don't store
+                // poisoned bytes -- the caller falls back to letting the
+                // browser's native integrity check block the resource.
+                responseData = { hash, data: null };
+                break;
+              }
+              const mimeType =
+                resp.headers.get('content-type') || 'application/octet-stream';
+              await storeFileData(hash, blob, { 'content-type': mimeType });
+              resourceManager.recordSize(hash.value, blob.size);
+              resourceManager.recordMimeType(hash.value, mimeType);
+              // Persist this hash's visibility from the crossoriginstorage
+              // attribute's own origins value, using the same upgrade-only
+              // resourceManager state as the JS requestFileHandle() path.
+              resourceManager.setVisibility(hash.value, origins);
+              resourceManager.addStoringOrigin(hash.value, origin);
+              fileResult = await getFileData(hash);
+            } catch (e) {
+              responseData = { hash, data: null };
+              break;
+            }
+          }
+
+          if (fileResult) {
+            if (alreadyCached) {
+              resourceManager.recordHit(hash.value);
+              if (tabId) {
+                if (!tabHitHashes[tabId]) tabHitHashes[tabId] = new Set();
+                tabHitHashes[tabId].add(hash.value);
+                if (!tabHitOrigins[tabId]) tabHitOrigins[tabId] = new Set();
+                tabHitOrigins[tabId].add(origin);
+                updateBadge(tabId);
+              }
+            }
+            resourceManager.recordAccess(origin, hash.value);
+            const mimeType = resourceManager.getMimeTypeByHash(hash.value);
+            responseData =
+              fileResult instanceof Blob
+                ? { hash, data: fileResult, mimeType }
+                : { hash, blobURL: fileResult, mimeType };
+          } else {
+            responseData = { hash, data: null };
+          }
+          await resourceManager.saveManagerToStorage();
+          break;
+        }
         case 'getResourceForViewer': {
           const { hash } = data;
           await resourceManager.loadManagerFromStorage();
@@ -835,6 +927,13 @@ function sriToHashObj(sriHash) {
   for (let i = 0; i < binary.length; i++)
     hex += binary.charCodeAt(i).toString(16).padStart(2, '0');
   return { algorithm, value: hex };
+}
+
+async function computeHashHex(algorithm, blob) {
+  const digest = await crypto.subtle.digest(algorithm, await blob.arrayBuffer());
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 async function storeFileData(hash, blob, mimeType) {

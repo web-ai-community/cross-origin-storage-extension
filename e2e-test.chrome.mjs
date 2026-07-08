@@ -45,8 +45,18 @@ const MOPHL_CONTENT = {
   storerBypass:  'phl-e2e-storer-bypass',
 };
 
-// Only the globalAllowed hash goes into the mock PHL.
-const MOCK_PHL_HASHES = [sha256Hex(MOPHL_CONTENT.globalAllowed)];
+// Content stored (via the JS API) by the declarative HTML integration tests'
+// cross-origin global-visibility check -- must match DECL_XORIGIN_GLOBAL_CSS
+// in docs/test.html. Needs a PHL entry because it's a 'global' (origins: '*')
+// resource read by a non-storer origin (b.test), same as MOPHL_CONTENT.globalAllowed.
+const DECL_XORIGIN_GLOBAL_CSS =
+  '#cos-decl-xorigin-marker { color: rgb(1, 2, 3); } /* xorigin-global */';
+
+// Only the globalAllowed/declarative-global hashes go into the mock PHL.
+const MOCK_PHL_HASHES = [
+  sha256Hex(MOPHL_CONTENT.globalAllowed),
+  sha256Hex(DECL_XORIGIN_GLOBAL_CSS),
+];
 
 // Mock PSL: 'test' as the sole extra TLD so a.test and b.test are separate
 // eTLD+1 domains, and sub.a.test is same-site as a.test.
@@ -202,7 +212,7 @@ async function main() {
   });
 
   // Single click runs every test group in sequence: main + singular, worker,
-  // worker variants, stress (3 GiB), origins, MOPHL, CSS.
+  // worker variants, stress (3 GiB), origins, MOPHL, CSS, declarative HTML.
   console.log('\nRunning all tests (this may take ~10–15 min for the 3 GiB stress test)…');
   await page.click('#run-all');
 
@@ -219,6 +229,7 @@ async function main() {
       '#origins-results .badge',
       '#mophl-results .badge',
       '#css-results .badge',
+      '#declarative-results .badge',
     ].join(', ');
     const badges = [...document.querySelectorAll(sel)];
     return badges.length > 0 && badges.every(b => !b.textContent.match(/pending|running/));
@@ -235,6 +246,7 @@ async function main() {
       '#origins-results tr[id]',
       '#mophl-results tr[id]',
       '#css-results tr[id]',
+      '#declarative-results tr[id]',
     ].join(', ');
     return [...document.querySelectorAll(selector)].map(tr => ({
       label:  tr.querySelector('td:nth-child(2)')?.textContent?.trim(),

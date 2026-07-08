@@ -1320,4 +1320,134 @@ self.addEventListener('message', function __cosBufferFn(e) {
     childList: true,
     subtree: true,
   });
+
+  // Declarative HTML integration: <link integrity crossoriginstorage> and
+  // <script integrity crossoriginstorage>. Intercepts elements carrying both
+  // an `integrity` and a `crossoriginstorage` attribute, resolves them via
+  // the COS cache, and re-injects the resolved bytes as a blob: URL.
+  // See https://github.com/WICG/cross-origin-storage/blob/main/README.md#declarative-html-integration
+  //
+  // As with the CSS integration above, this MutationObserver callback runs
+  // as a microtask after the element is inserted, so the browser's native
+  // loader has always already begun fetching the original href/src before
+  // this callback can remove it -- a benign double-fetch for <link>, but a
+  // hard limitation for <script>: per the HTML spec, a classic script's
+  // "already started" flag is set synchronously the moment it's inserted
+  // with a src, and once set, no later reassignment of .src can make the
+  // element fetch/execute again (verified empirically -- reassigning
+  // script.src, even synchronously in the same tick, never changes what
+  // executes; reassigning link.href, by contrast, reliably does). So for
+  // <script>, the blob: URL swap below still runs and still seeds COS for
+  // other readers, but the *original* network response -- not the COS
+  // replacement -- is always what actually executes on this element. Only
+  // a network-layer interception (e.g. declarativeNetRequest redirects)
+  // could change that, which this content-script-based polyfill does not
+  // attempt. This has no effect on <link rel="stylesheet">, which has no
+  // execute-once semantics.
+
+  // Picks the first `integrity` token using an algorithm COS/SRI both
+  // support. `integrity` may list several space-separated hashes; the
+  // conversion to a COS hex-hash object happens bridge-side (see
+  // background.js's sriToHashObj) so only one realm needs that logic.
+  function firstSupportedIntegrityToken(integrity) {
+    for (const token of integrity.trim().split(/\s+/)) {
+      if (/^sha(256|384|512)-/.test(token)) return token;
+    }
+    return null;
+  }
+
+  // Mirrors the JS API's origins shape: '*' stays '*', a space-separated
+  // list becomes an array, and a valueless/empty attribute (same-site-only)
+  // becomes undefined -- matching omitting `origins` in requestFileHandle().
+  function parseCrossOriginStorageAttr(value) {
+    const trimmed = (value || '').trim();
+    if (trimmed === '') return undefined;
+    if (trimmed === '*') return '*';
+    return trimmed.split(/\s+/);
+  }
+
+  function processDeclarativeResource(el, urlAttr) {
+    if (el._cosDeclarativeProcessed) return;
+    if (!el.hasAttribute('crossoriginstorage') || !el.hasAttribute('integrity'))
+      return;
+    const sriToken = firstSupportedIntegrityToken(el.getAttribute('integrity'));
+    if (!sriToken) return; // No COS-supported hash algorithm -- let the browser handle it natively.
+    el._cosDeclarativeProcessed = true;
+    const origins = parseCrossOriginStorageAttr(
+      el.getAttribute('crossoriginstorage')
+    );
+    const url = el[urlAttr]; // Resolved absolute URL, read before removing the attribute.
+    el.removeAttribute(urlAttr);
+
+    const restoreNative = () => {
+      el[urlAttr] = url;
+    };
+
+    talkToBridge('resolveDeclarativeResource', {
+      url,
+      integrity: sriToken,
+      origins,
+      origin: location.origin,
+    })
+      .then(({ dataChunks, mimeType }) => {
+        if (!dataChunks) {
+          restoreNative();
+          return;
+        }
+        const blob = new Blob(dataChunks, { type: mimeType });
+        const blobUrl = URL.createObjectURL(blob);
+
+        // Detect worker-src-style CSP violations blocking the blob: URL
+        // (e.g. a strict script-src/style-src without the blob: scheme) --
+        // same synchronous-detection approach as the Worker/SharedWorker
+        // blob CSP guards above.
+        let cspBlocked = false;
+        const cspListener = (e) => {
+          if (e.blockedURI === 'blob' || e.blockedURI.startsWith('blob:'))
+            cspBlocked = true;
+        };
+        document.addEventListener('securitypolicyviolation', cspListener, true);
+        el[urlAttr] = blobUrl;
+        document.removeEventListener('securitypolicyviolation', cspListener, true);
+
+        if (cspBlocked) {
+          URL.revokeObjectURL(blobUrl);
+          restoreNative();
+          return;
+        }
+        const cleanup = () => URL.revokeObjectURL(blobUrl);
+        el.addEventListener('load', cleanup, { once: true });
+        el.addEventListener('error', cleanup, { once: true });
+      })
+      .catch(restoreNative);
+  }
+
+  function scanForDeclarativeResources(root) {
+    if (root.tagName === 'LINK' && root.rel === 'stylesheet') {
+      processDeclarativeResource(root, 'href');
+    } else if (root.tagName === 'SCRIPT') {
+      processDeclarativeResource(root, 'src');
+    }
+    if (root.querySelectorAll) {
+      root
+        .querySelectorAll('link[rel="stylesheet"][integrity][crossoriginstorage]')
+        .forEach((el) => processDeclarativeResource(el, 'href'));
+      root
+        .querySelectorAll('script[integrity][crossoriginstorage]')
+        .forEach((el) => processDeclarativeResource(el, 'src'));
+    }
+  }
+
+  const cosDeclarativeObserver = new MutationObserver((mutations) => {
+    for (const mut of mutations) {
+      for (const node of mut.addedNodes) {
+        if (node.nodeType !== Node.ELEMENT_NODE) continue;
+        scanForDeclarativeResources(node);
+      }
+    }
+  });
+  cosDeclarativeObserver.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+  });
 })();

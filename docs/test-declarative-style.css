@@ -1,0 +1,7 @@
+/* Copyright 2026 Google LLC. */
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Static stylesheet served for the declarative HTML integration tests in
+   test.html (<link integrity crossoriginstorage>). */
+#cos-declarative-marker {
+  color: rgb(1, 2, 3);
+}

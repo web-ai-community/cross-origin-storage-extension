@@ -155,15 +155,19 @@ async function resolveFontBlobs(responseData) {
 }
 
 // Dispatches to the Safari chunked-pull path or the Chrome/Firefox
-// single-message path, depending on the browser, for a getFileData response
-// or a rewriteStylesheet response's fonts.
+// single-message path, depending on the browser, for a getFileData or
+// resolveDeclarativeResource response, or a rewriteStylesheet response's
+// fonts.
 async function finalizeResponseData(action, payload) {
   if (!IS_SAFARI) {
     await normalizeFileDataForMainWorld(payload);
     await resolveFontBlobs(payload);
     return;
   }
-  if (action === 'getFileData' && payload?.hash) {
+  if (
+    (action === 'getFileData' || action === 'resolveDeclarativeResource') &&
+    payload?.hash
+  ) {
     const result = await safariFetchDataChunksByHash(payload.hash);
     if (result) {
       payload.dataChunks = result.dataChunks;

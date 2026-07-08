@@ -1,14 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Cross-Origin Storage",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "description": "Implements the proposed Cross-Origin Storage API for sharing files across sites with consent.",
   "options_page": "options.html",
-  "permissions": ["storage", "unlimitedStorage", "tabs"],
+  "permissions": ["storage", "unlimitedStorage", "offscreen", "tabs"],
   "host_permissions": ["https://raw.githubusercontent.com/*"],
   "background": {
-    "page": "background.html",
-    "persistent": false
+    "service_worker": "background.js",
+    "type": "module"
   },
   "action": {
     "default_popup": "popup.html",
@@ -16,14 +16,14 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://*/*", "http://localhost/*", "http://*.test/*", "http://*.a.test/*"],
+      "matches": ["https://*/*", "http://localhost:*/*", "http://*.test/*", "http://*.a.test/*"],
       "js": ["main-world.js"],
       "run_at": "document_start",
       "world": "MAIN",
       "all_frames": true
     },
     {
-      "matches": ["https://*/*", "http://localhost/*", "http://*.test/*", "http://*.a.test/*"],
+      "matches": ["https://*/*", "http://localhost:*/*", "http://*.test/*", "http://*.a.test/*"],
       "js": ["content.js"],
       "run_at": "document_start",
       "all_frames": true
@@ -32,15 +32,10 @@
   "web_accessible_resources": [
     {
       "resources": ["relay-extension.html"],
-      "matches": ["https://*/*", "http://localhost/*", "http://*.test/*", "http://*.a.test/*"]
+      "matches": ["https://*/*", "http://localhost:*/*", "http://*.test/*", "http://*.a.test/*"]
     }
   ],
   "icons": {
     "512": "logo-cos.png"
-  },
-  "browser_specific_settings": {
-    "safari": {
-      "strict_min_version": "18.0"
-    }
   }
 }
