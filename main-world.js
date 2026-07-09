@@ -436,10 +436,10 @@
     // Not part of the COS explainer's public surface — a private, debug-only
     // escape hatch used by this extension's own tests to clean up resources.
     // Not spec'd, not stable, and not for production use by page scripts.
-    __debugDeleteResource: async (hash) => {
+    __non_standard__deleteResource: async (hash) => {
       if (!hash || !hash.algorithm || !hash.value) {
         throw new TypeError(
-          `Failed to execute '__debugDeleteResource': argument must be a hash object with 'algorithm' and 'value'.`
+          `Failed to execute '__non_standard__deleteResource': argument must be a hash object with 'algorithm' and 'value'.`
         );
       }
       const result = await talkToBridge('deleteResource', { hash });
@@ -1450,4 +1450,388 @@ self.addEventListener('message', function __cosBufferFn(e) {
     childList: true,
     subtree: true,
   });
+
+  // Declarative JavaScript integration: import attributes
+  // (`import … from "url" with { crossOriginStorage }` and
+  // `import(url, { with: { crossOriginStorage } })`).
+  // See https://github.com/WICG/cross-origin-storage#declarative-javascript-integration
+  //
+  // Unlike the CSS/HTML integrations above, this one cannot be implemented
+  // as request-time interception at all: there's no DOM node to react to,
+  // and `import` isn't a monkey-patchable property the way fetch/Worker/
+  // XMLHttpRequest are (`const f = import;` is a SyntaxError -- dynamic
+  // import is a syntactic form, not a callable reference). Worse, this is
+  // broken two levels deeper than that, both verified empirically against
+  // Chrome:
+  //   1. Every browser today rejects *any* unrecognized import-attribute
+  //      key -- including `integrity`, which isn't COS-specific -- with a
+  //      synchronous TypeError ("Invalid attribute key"), thrown before any
+  //      fetch is even dispatched (a bad key never reaches the network, so
+  //      not even a Service Worker fetch handler gets a chance to
+  //      intervene).
+  //   2. Even that assumes the syntax parses at all: the current import
+  //      attributes grammar only permits *string* attribute values, so
+  //      `crossOriginStorage: []`/`crossOriginStorage: [...]` -- an array,
+  //      as the proposal itself specifies -- is a flat SyntaxError in a
+  //      real `type="module"` script, not merely a rejected TypeError.
+  // So a `with { crossOriginStorage }` import written exactly as the spec
+  // describes cannot be rescued once the browser starts on it, in any way,
+  // by any content script -- and for the same reason, it can never even
+  // appear inside a real `type="module"` script without taking down that
+  // script's entire parse.
+  //
+  // This instead follows the approach pioneered by es-module-shims
+  // (https://github.com/guybedford/es-module-shims): authors opt in with a
+  // non-standard `type="module-cos"` script type, which real browsers never
+  // try to parse or execute (so there's no race to lose, unlike the
+  // `<script>`/`<link>` case above). This polyfill fetches that script's
+  // source as plain text, rewrites every import specifier it can find to an
+  // absolute URL, resolves any `crossOriginStorage`-bearing import through
+  // the same 'resolveDeclarativeResource' bridge action the HTML integration
+  // uses (swapping in a blob: URL and stripping the now-meaningless
+  // `integrity`/`crossOriginStorage` keys -- COS has already verified the
+  // bytes, and the browser doesn't recognize those keys regardless), and
+  // finally executes the fully-rewritten, 100%-standard source as a real
+  // `type="module"` script. Dynamic `import(literal, { with: {...} })`
+  // calls inside that source are rewritten the same way -- this only works
+  // for a literal string specifier, not a computed one, which is a known,
+  // documented limitation (import specifiers are scanned as text, not
+  // evaluated).
+  //
+  // For code that can't adopt `type="module-cos"` (or needs a
+  // runtime-computed specifier),
+  // `navigator.crossOriginStorage.__non_standard__import()` below exposes
+  // the same resolution logic as a callable, non-standard
+  // stand-in for dynamic `import()`.
+
+  function findMatchingBrace(text, openIndex) {
+    let depth = 0;
+    for (let i = openIndex; i < text.length; i++) {
+      if (text[i] === '{') depth++;
+      else if (text[i] === '}') {
+        depth--;
+        if (depth === 0) return i;
+      }
+    }
+    return -1;
+  }
+
+  // Import attribute values are always literals (strings, arrays of
+  // strings, or '*') per the proposal, so evaluating the extracted object
+  // literal text is simpler and more robust than hand-rolling a parser for
+  // it -- this only ever runs on text the page's own <script type="module-
+  // cos"> already contained.
+  function evalLiteral(text) {
+    try {
+      return Function('"use strict"; return (' + text + ');')();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Matches static `import <clause>? from "specifier" with {...}?` (and the
+  // side-effect-only `import "specifier" with {...}?` form). Import
+  // attribute values are always flat (string/array-of-string/'*'), so the
+  // with-clause's own object literal never nests braces -- a non-greedy,
+  // non-nested match is sufficient there, unlike the specifier scanner
+  // above this comment wouldn't need to worry about. Requires the `d` flag
+  // (capture-group indices) to locate each piece precisely enough to splice
+  // without reconstructing the whole statement.
+  const STATIC_IMPORT_RE =
+    /import\s+(?:([\s\S]*?)\s+from\s+)?(["'])((?:(?!\2)[^\\\r\n]|\\.)*)\2(\s+with\s*\{[^{}]*\})?/dg;
+  // Matches dynamic `import("specifier", { with: {...} })?`.
+  const DYNAMIC_IMPORT_RE =
+    /import\s*\(\s*(["'])((?:(?!\1)[^\\\r\n]|\\.)*)\1(\s*,\s*\{\s*with\s*:\s*\{[^{}]*\}\s*\})?\s*\)/dg;
+
+  function attrsObjectTextFromWrapper(kind, wrapperText) {
+    if (!wrapperText) return null;
+    const m =
+      kind === 'static'
+        ? /\{[^{}]*\}/.exec(wrapperText)
+        : /with\s*:\s*(\{[^{}]*\})/.exec(wrapperText);
+    return m ? m[kind === 'static' ? 0 : 1] : null;
+  }
+
+  // Scans `source` for every import reference (static declarations and
+  // dynamic calls), returning enough position info to splice each one
+  // in-place without disturbing the rest of the source. Doesn't handle
+  // `export … from "specifier"` re-exports -- a documented scope limit,
+  // same as the CSS integration above only handling one specific pattern
+  // rather than parsing full CSS.
+  function scanModuleReferences(source) {
+    const refs = [];
+    let m;
+    STATIC_IMPORT_RE.lastIndex = 0;
+    while ((m = STATIC_IMPORT_RE.exec(source))) {
+      const wrapperRange = m.indices[4];
+      refs.push({
+        kind: 'static',
+        specifier: m[3],
+        specStart: m.indices[3][0],
+        specEnd: m.indices[3][1],
+        wrapperStart: wrapperRange ? wrapperRange[0] : -1,
+        wrapperEnd: wrapperRange ? wrapperRange[1] : -1,
+        attrsText: attrsObjectTextFromWrapper('static', m[4]),
+      });
+    }
+    DYNAMIC_IMPORT_RE.lastIndex = 0;
+    while ((m = DYNAMIC_IMPORT_RE.exec(source))) {
+      const wrapperRange = m.indices[3];
+      refs.push({
+        kind: 'dynamic',
+        specifier: m[2],
+        specStart: m.indices[2][0],
+        specEnd: m.indices[2][1],
+        wrapperStart: wrapperRange ? wrapperRange[0] : -1,
+        wrapperEnd: wrapperRange ? wrapperRange[1] : -1,
+        attrsText: attrsObjectTextFromWrapper('dynamic', m[3]),
+      });
+    }
+    refs.sort((a, b) => a.specStart - b.specStart);
+    return refs;
+  }
+
+  // Sentinel distinguishing "not a valid origins value" from every legal
+  // parsed result (including `undefined`, which is itself a legal result).
+  const INVALID_JS_ORIGINS = Symbol('invalid-js-origins');
+
+  // Mirrors the JS API's origins shape, but starting from an *array*
+  // (per the proposal, an empty array -- not an omitted key -- means
+  // same-site-only for the JS integration, unlike the HTML attribute form).
+  function parseJSImportOrigins(value) {
+    if (value === '*') return '*';
+    if (Array.isArray(value)) {
+      if (value.length === 0) return undefined; // same-site
+      if (value.every((v) => typeof v === 'string')) return value;
+    }
+    return INVALID_JS_ORIGINS;
+  }
+
+  // Resolves one scanned reference against `baseURL`, returning either
+  // `null` (nothing to rewrite -- leave the original text as-is, which for
+  // a crossOriginStorage-bearing import means the browser's own native
+  // "Invalid attribute key" rejection still applies, same as if this
+  // polyfill didn't exist) or a splice instruction for rewriteModuleSource.
+  async function resolveModuleRef(ref, baseURL) {
+    const attrs = ref.attrsText ? evalLiteral(ref.attrsText) : null;
+    const hasCOS = !!(
+      attrs &&
+      Object.prototype.hasOwnProperty.call(attrs, 'crossOriginStorage') &&
+      attrs.integrity
+    );
+
+    let absoluteSpecifier;
+    const isRelative =
+      /^\.{1,2}\//.test(ref.specifier) || ref.specifier.startsWith('/');
+    const isAbsolute = /^[a-z][a-z0-9+.-]*:/i.test(ref.specifier);
+    if (isAbsolute) {
+      absoluteSpecifier = ref.specifier;
+    } else if (isRelative || hasCOS) {
+      try {
+        absoluteSpecifier = new URL(ref.specifier, baseURL).href;
+      } catch (_) {
+        return null;
+      }
+    } else {
+      // Bare specifier (e.g. "lodash") with no crossOriginStorage attribute:
+      // needs an import map to resolve, which is outside this polyfill's
+      // scope -- leave it untouched for the browser to handle as it
+      // normally would.
+      return null;
+    }
+
+    if (!hasCOS) {
+      if (absoluteSpecifier === ref.specifier) return null; // nothing changed
+      return {
+        ref,
+        // ref.specStart/specEnd span only the text BETWEEN the original
+        // quote characters (which are left untouched in the source), so
+        // this must be the raw URL text, not a re-quoted JSON string --
+        // otherwise splicing it in doubles the quotes.
+        newSpecifierText: absoluteSpecifier,
+        wrapperReplacement: null, // leave any existing with-clause untouched
+      };
+    }
+
+    const sriToken = firstSupportedIntegrityToken(attrs.integrity);
+    if (!sriToken) return null;
+    const origins = parseJSImportOrigins(attrs.crossOriginStorage);
+    if (origins === INVALID_JS_ORIGINS) return null;
+
+    let result;
+    try {
+      result = await talkToBridge('resolveDeclarativeResource', {
+        url: absoluteSpecifier,
+        integrity: sriToken,
+        origins,
+        origin: location.origin,
+      });
+    } catch (_) {
+      return null;
+    }
+    if (!result || !result.dataChunks) return null;
+
+    const blobMimeType =
+      attrs.type === 'json'
+        ? 'application/json'
+        : attrs.type === 'css'
+          ? 'text/css'
+          : result.mimeType || 'text/javascript';
+    const blob = new Blob(result.dataChunks, { type: blobMimeType });
+    const blobUrl = URL.createObjectURL(blob);
+
+    const wrapperReplacement = attrs.type
+      ? ref.kind === 'static'
+        ? ` with { type: ${JSON.stringify(attrs.type)} }`
+        : `, { with: { type: ${JSON.stringify(attrs.type)} } }`
+      : '';
+
+    return { ref, newSpecifierText: blobUrl, wrapperReplacement };
+  }
+
+  // Resolves and splices every import reference in `source`, in
+  // right-to-left order so earlier splices don't invalidate the recorded
+  // offsets of ones still to be applied.
+  async function rewriteModuleSource(source, baseURL) {
+    const refs = scanModuleReferences(source);
+    const settled = await Promise.all(
+      refs.map((ref) => resolveModuleRef(ref, baseURL))
+    );
+    const rewrites = settled
+      .filter(Boolean)
+      .sort((a, b) => b.ref.specStart - a.ref.specStart);
+    let out = source;
+    for (const { ref, newSpecifierText, wrapperReplacement } of rewrites) {
+      if (ref.wrapperStart !== -1 && wrapperReplacement !== null) {
+        out =
+          out.slice(0, ref.wrapperStart) +
+          wrapperReplacement +
+          out.slice(ref.wrapperEnd);
+      }
+      out = out.slice(0, ref.specStart) + newSpecifierText + out.slice(ref.specEnd);
+    }
+    return out;
+  }
+
+  async function processModuleCosScript(el) {
+    if (el._cosModuleProcessed) return;
+    el._cosModuleProcessed = true;
+    const src = el.getAttribute('src');
+    const baseURL = src ? new URL(src, location.href).href : location.href;
+    let source;
+    if (src) {
+      try {
+        source = await fetch(src).then((r) => r.text());
+      } catch (_) {
+        return; // Leave inert -- same no-op outcome an unrecognized type would already have.
+      }
+    } else {
+      source = el.textContent;
+    }
+    let rewritten;
+    try {
+      rewritten = await rewriteModuleSource(source, baseURL);
+    } catch (_) {
+      return;
+    }
+    const blobUrl = URL.createObjectURL(
+      new Blob([rewritten], { type: 'text/javascript' })
+    );
+    const script = document.createElement('script');
+    script.type = 'module';
+    if (el.id) script.id = el.id;
+    script.addEventListener('load', () => URL.revokeObjectURL(blobUrl), {
+      once: true,
+    });
+    script.addEventListener('error', () => URL.revokeObjectURL(blobUrl), {
+      once: true,
+    });
+    script.src = blobUrl;
+    el.replaceWith(script);
+  }
+
+  function scanForModuleCosScripts(root) {
+    if (root.tagName === 'SCRIPT' && root.getAttribute('type') === 'module-cos') {
+      processModuleCosScript(root);
+    }
+    if (root.querySelectorAll) {
+      root
+        .querySelectorAll('script[type="module-cos"]')
+        .forEach(processModuleCosScript);
+    }
+  }
+
+  const cosModuleObserver = new MutationObserver((mutations) => {
+    for (const mut of mutations) {
+      for (const node of mut.addedNodes) {
+        if (node.nodeType !== Node.ELEMENT_NODE) continue;
+        scanForModuleCosScripts(node);
+      }
+    }
+  });
+  cosModuleObserver.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+  });
+
+  // Not part of the COS explainer's public surface — a non-standard,
+  // callable stand-in for dynamic `import(specifier, { with: {
+  // crossOriginStorage } })`, since native import() can't be intercepted or
+  // monkey-patched (see the comment on processModuleCosScript above). For
+  // callers that can't use a <script type="module-cos"> (e.g. a
+  // runtime-computed specifier, or code that isn't itself inside one).
+  // Mirrors native dynamic import()'s shape as closely as possible: same
+  // two positional arguments, same resolved module namespace object. Not
+  // spec'd, not stable, and not for production use by page scripts.
+  crossOriginStorage.__non_standard__import = async (specifier, options = {}) => {
+    let absoluteSpecifier;
+    try {
+      absoluteSpecifier = new URL(specifier, location.href).href;
+    } catch (_) {
+      throw new TypeError(
+        `Failed to execute '__non_standard__import': '${specifier}' is not a valid URL.`
+      );
+    }
+    const attrs = (options && options.with) || {};
+    if (!attrs.crossOriginStorage || !attrs.integrity) {
+      return import(absoluteSpecifier); // No COS attributes -- behave like a plain dynamic import.
+    }
+    const sriToken = firstSupportedIntegrityToken(attrs.integrity);
+    if (!sriToken) {
+      throw new TypeError(
+        `Failed to execute '__non_standard__import': 'integrity' must be a supported SRI hash string.`
+      );
+    }
+    const origins = parseJSImportOrigins(attrs.crossOriginStorage);
+    if (origins === INVALID_JS_ORIGINS) {
+      throw new TypeError(
+        `Failed to execute '__non_standard__import': 'crossOriginStorage' must be '*' or an array of origin strings.`
+      );
+    }
+    const result = await talkToBridge('resolveDeclarativeResource', {
+      url: absoluteSpecifier,
+      integrity: sriToken,
+      origins,
+      origin: location.origin,
+    });
+    if (!result || !result.dataChunks) {
+      // Fall back to a real network import -- lets native fetch/integrity
+      // semantics apply if it also fails, same as the HTML integration's
+      // restoreNative() fallback.
+      return import(absoluteSpecifier);
+    }
+    const blobMimeType =
+      attrs.type === 'json'
+        ? 'application/json'
+        : attrs.type === 'css'
+          ? 'text/css'
+          : result.mimeType || 'text/javascript';
+    const blob = new Blob(result.dataChunks, { type: blobMimeType });
+    const blobUrl = URL.createObjectURL(blob);
+    try {
+      return await import(blobUrl);
+    } finally {
+      URL.revokeObjectURL(blobUrl);
+    }
+  };
 })();

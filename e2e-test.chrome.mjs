@@ -52,10 +52,16 @@ const MOPHL_CONTENT = {
 const DECL_XORIGIN_GLOBAL_CSS =
   '#cos-decl-xorigin-marker { color: rgb(1, 2, 3); } /* xorigin-global */';
 
+// Same idea, for the declarative JavaScript integration tests' cross-origin
+// global-visibility check -- must match DECL_JS_XORIGIN_GLOBAL_CONTENT in
+// docs/test.html.
+const DECL_JS_XORIGIN_GLOBAL_CONTENT = 'export default "js-xorigin-global-value";';
+
 // Only the globalAllowed/declarative-global hashes go into the mock PHL.
 const MOCK_PHL_HASHES = [
   sha256Hex(MOPHL_CONTENT.globalAllowed),
   sha256Hex(DECL_XORIGIN_GLOBAL_CSS),
+  sha256Hex(DECL_JS_XORIGIN_GLOBAL_CONTENT),
 ];
 
 // Mock PSL: 'test' as the sole extra TLD so a.test and b.test are separate
@@ -230,6 +236,7 @@ async function main() {
       '#mophl-results .badge',
       '#css-results .badge',
       '#declarative-results .badge',
+      '#declarative-js-results .badge',
     ].join(', ');
     const badges = [...document.querySelectorAll(sel)];
     return badges.length > 0 && badges.every(b => !b.textContent.match(/pending|running/));
@@ -247,6 +254,7 @@ async function main() {
       '#mophl-results tr[id]',
       '#css-results tr[id]',
       '#declarative-results tr[id]',
+      '#declarative-js-results tr[id]',
     ].join(', ');
     return [...document.querySelectorAll(selector)].map(tr => ({
       label:  tr.querySelector('td:nth-child(2)')?.textContent?.trim(),
