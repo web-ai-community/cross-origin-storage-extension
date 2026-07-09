@@ -1,0 +1,28 @@
+/* Copyright 2026 Google LLC. */
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Stylesheet for progressive-enhancement-demo.html's declarative CSS
+   integration example. The comma-separated src list gives browsers
+   without any COS implementation a plain, always-valid fallback: an
+   unrecognized cross-origin-storage()/integrity() component invalidates
+   only the *list item* it appears in (per CSS's forgiving handling of
+   comma-separated values), not the whole declaration -- so the second,
+   plain url() below is still picked up. Browsers/extensions that DO
+   understand the first item use that one instead (rewritten to a COS-
+   served blob: URL) and never fetch the second at all.
+
+   Font choice: this is Mozilla's COLRv0 build of Twemoji, not Google's
+   Noto Color Emoji -- verified empirically that (at least the specific
+   Noto Color Emoji subset previously used here) is COLRv1, which real
+   Safari currently fails to paint at all (glyph reports as loaded/present,
+   but nothing renders) regardless of COS. That failure was unrelated to
+   the cross-origin-storage()/integrity() syntax: a COS-free control with
+   the same Noto file failed identically. This COLRv0 font renders
+   correctly in Safari, Chrome, and Firefox alike. */
+/* SAMPLE:css-rule:START */
+@font-face {
+  font-family: 'PE Demo Emoji';
+  src:
+    url('https://cdn.jsdelivr.net/npm/twemoji-colr-font@15.0.3/twemoji.woff2' integrity('sha256-WYtoZ9R5VKyrRu3WqXc9c0uETSIdOpWDTadELV32T5g=') cross-origin-storage(*)) format('woff2'),
+    url('https://cdn.jsdelivr.net/npm/twemoji-colr-font@15.0.3/twemoji.woff2') format('woff2');
+}
+/* SAMPLE:css-rule:END */

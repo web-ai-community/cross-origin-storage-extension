@@ -47,7 +47,7 @@
       import staticValue from "test-declarative-module.js" with { integrity: "sha256-sZI4b8NEw374NAnJDa6fK6mkE+Dev3yB4ndsCXKq+wA=", crossOriginStorage: [] };
       window.__cosModuleStaticValue = staticValue;
     </script>
-    <title>Cross-Origin Storage — Test Page</title>
+    <title>Cross-Origin Storage — test page</title>
     <style>
       :root {
         color-scheme: dark light;
@@ -205,7 +205,7 @@
     </style>
   </head>
   <body>
-    <h1>Cross-Origin Storage — Test Page</h1>
+    <h1>Cross-Origin Storage — test page</h1>
     <p>
       This page tests <code>navigator.crossOriginStorage.requestFileHandle()</code>
       (singular, current API) and the deprecated plural
@@ -244,7 +244,7 @@
       </tbody>
     </table>
 
-    <h2>Worker Thread Test Results</h2>
+    <h2>Worker thread test results</h2>
     <p>
       The same five tests, run inside a <code>Worker</code> to verify that
       <code>navigator.crossOriginStorage</code> is also available on worker
@@ -267,7 +267,7 @@
       </tbody>
     </table>
 
-    <h2>Worker Initialization Variants</h2>
+    <h2>Worker initialization variants</h2>
     <p>
       Each row creates a worker using a different URL scheme or type and runs a
       minimal store-then-read COS operation to confirm that
@@ -337,7 +337,7 @@
       </tbody>
     </table>
 
-    <h2>Stress Tests</h2>
+    <h2>Stress tests</h2>
     <p>
       Large-file tests that exercise the streaming-hash write path and the
       Blob-based read path. Each test creates a file on the fly, stores it in
@@ -361,7 +361,7 @@
       </tbody>
     </table>
 
-    <h2>Origins Visibility &amp; PHL Gate Tests</h2>
+    <h2>Origins visibility &amp; PHL gate tests</h2>
     <p>
       Tests for the three <code>origins</code> visibility tiers —
       <code>'*'</code> (global), an explicit list, and omitted (same-site) —
@@ -389,7 +389,7 @@
       </tbody>
     </table>
 
-    <h2>Multi-Origin PHL Gate Tests</h2>
+    <h2>Multi-origin PHL gate tests</h2>
     <p>
       Tests the full cross-origin read matrix for all three
       <code>origins</code> tiers across a same-origin, a same-site subdomain,
@@ -425,7 +425,7 @@
       </tbody>
     </table>
 
-    <h2>CSS <code>cross-origin-storage()</code> Polyfill Tests</h2>
+    <h2>CSS <code>cross-origin-storage()</code> polyfill tests</h2>
     <p>
       Tests the CSS <code>cross-origin-storage()</code> modifier polyfill. A
       <code>&lt;link rel="stylesheet" data-cos&gt;</code> in this page's
@@ -461,7 +461,7 @@
       </tbody>
     </table>
 
-    <h2>Declarative HTML Integration Tests</h2>
+    <h2>Declarative HTML integration tests</h2>
     <p>
       Tests the
       <code>&lt;link integrity crossoriginstorage&gt;</code> /
@@ -511,7 +511,7 @@
       </tbody>
     </table>
 
-    <h2>Declarative JavaScript Integration Tests</h2>
+    <h2>Declarative JavaScript integration tests</h2>
     <p>
       Tests import attributes (see the README's
       <a
@@ -1214,7 +1214,7 @@
         });
 
       // ---------------------------------------------------------------------------
-      // Worker Initialization Variants
+      // Worker initialization variants
       // ---------------------------------------------------------------------------
 
       // Inline source shared by the blob: and data: variant workers.
@@ -1490,7 +1490,7 @@
         });
 
       // ---------------------------------------------------------------------------
-      // Stress Tests
+      // Stress tests
       // ---------------------------------------------------------------------------
 
       // Builds a large-file stress test for a given size, so the same
@@ -2305,7 +2305,7 @@
           }
         });
 
-      // ── Multi-Origin PHL Gate Tests ──────────────────────────────────────────
+      // ── Multi-origin PHL gate tests ──────────────────────────────────────────
       //
       // When this page is loaded as a cross-origin iframe at sub.a.test or
       // b.test, respond to read commands from the outer test.html using the
@@ -2696,7 +2696,7 @@
         mophlRows.forEach(rowEl => (rowEl.querySelector('.run-btn').disabled = true));
       }
 
-      // ── Declarative HTML Integration Tests ───────────────────────────────────
+      // ── Declarative HTML integration tests ───────────────────────────────────
       //
       // Tests <link integrity crossoriginstorage> / <script integrity
       // crossoriginstorage> (see the README's "Declarative HTML Integration"
@@ -3038,7 +3038,7 @@
           }
         });
 
-      // ── Declarative JavaScript Integration Tests ─────────────────────────────
+      // ── Declarative JavaScript integration tests ─────────────────────────────
       //
       // Tests import attributes (see the README's "Declarative JavaScript
       // Integration" section): <script type="module-cos"> static-import

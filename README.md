@@ -199,6 +199,22 @@ COS still gets seeded from it for other same-hash readers, but this
 particular element doesn't benefit from a cache hit. The `<link>` form has
 no such limitation and works as a genuine cache hit end to end.
 
+**Don't combine this with `data-cos` on the same `<link>`.** Both this and
+the CSS integration above target `<link rel="stylesheet">`, which makes it
+tempting to add `data-cos`, `integrity`, and `crossoriginstorage` all to
+one tag and get both at once. Verified empirically that this doesn't work:
+the two polyfill mechanisms are independent `MutationObserver` callbacks
+that each see the *same* element and each think they own it. Both remove
+`href` and start their own fetch; whichever runs first wins that part, but
+neither knows about the other, so the `<link>` is left with `href=""`
+afterward (a real, reproducible bug — not just a theoretical race), plus a
+spurious extra request. The styles can still end up applying regardless,
+only because the CSS integration injects its own `<style>` element rather
+than depending on the original `<link>`'s `href` — that's incidental, not
+something to rely on. Use two separate `<link>` tags, one per integration,
+each pointing at its own file — [the demo](progressive-enhancement-demo.html)
+does exactly this.
+
 ### Declarative JavaScript integration
 
 The literal spec syntax can't be supported at all: real browsers reject any
@@ -302,6 +318,141 @@ const mod = await navigator.crossOriginStorage.__non_standard__import(
 );
 // Resolves exactly the same way, regardless of where `filename` came from:
 //   import("blob:https://example.com/9c8d7e6f-...", { with: { type: "json" } })
+```
+
+## Using COS today as a progressive enhancement
+
+All three declarative integrations can be written today, in any browser, so
+that a page works identically whether or not the visitor has this extension
+(or, eventually, a native COS implementation) — verified empirically for
+each form below, not just asserted. A working
+[demo of all three](progressive-enhancement-demo.html) is included; try
+loading it with the extension enabled, then disabled, and compare.
+
+### HTML integration — already progressive, no extra code
+
+This one needs nothing special: an unrecognized `crossoriginstorage`
+attribute is just inert HTML attribute data to a browser that doesn't
+understand it, per ordinary attribute-parsing rules — the element loads via
+its plain `src`/`href` either way. Write it exactly as shown
+[above](#declarative-html-integration) and it already behaves as a
+progressive enhancement.
+
+### CSS integration — needs a fallback in the `src` list
+
+Unlike the HTML form, this one is *not* safe as written: a browser that
+doesn't recognize `cross-origin-storage()`/`integrity()` drops the
+**entire** `src` declaration, not just those modifiers —
+
+```css
+/* In a browser with no COS implementation, the whole `src` becomes empty --
+   verified empirically, not merely a modifier being ignored: */
+@font-face {
+  font-family: 'Example';
+  src: url('font.woff2' integrity('sha256-...') cross-origin-storage(*));
+}
+```
+
+The fix is a plain fallback `url()` in the same comma-separated list.
+CSS's forgiving handling of comma-separated values drops only the
+*list item* an unrecognized component appears in, not the whole
+declaration:
+
+```css
+@font-face {
+  font-family: 'Example';
+  src:
+    url('font.woff2' integrity('sha256-...') cross-origin-storage(*)) format('woff2'),
+    url('font.woff2') format('woff2');
+}
+```
+
+**Order matters here, and matters a lot — the COS-enhanced `url()` must
+come first.** For graceful degradation alone, order is irrelevant: a
+browser with no COS implementation drops whichever list item it can't
+parse and falls through to the other one either way, verified in both
+directions. But `src` is a *prioritized* list — a browser uses the first
+alternative that successfully loads and never even attempts the rest, also
+verified directly by watching network requests: with the plain fallback
+listed first, only it was ever fetched, and the COS-enhanced alternative
+was never loaded by the page at all, even with this extension installed
+and the resource already available in COS. List the COS-enhanced source
+first (as above) so it's the one actually tried; the plain fallback is
+reached only when the first can't be parsed at all. (This extension's own
+CSS integration doesn't care which position it's in — it scans the whole
+declaration regardless of order — but the *browser's* own font-loading
+behavior does.)
+
+### JavaScript integration — needs explicit feature detection
+
+The literal spec syntax (`with { crossOriginStorage }`) can't degrade at
+all — as covered [above](#declarative-javascript-integration), it's a hard
+`TypeError`/`SyntaxError` in every current browser, not a gracefully
+ignored attribute. Progressive enhancement here means writing code that
+explicitly checks for COS support before ever using COS-specific syntax.
+
+For a static import inside a whole `<script type="module-cos">` (see
+[above](#declarative-javascript-integration)), the risk is different from
+the other two integrations: to a browser with no COS implementation,
+`module-cos` is just as inert as any other unrecognized type, so **the
+entire script would silently never run at all** — not a graceful
+degradation. An early detector script placed right after it can strip the
+unsupported `with { crossOriginStorage }` clause and run the rest as a
+plain import instead, so the script's own logic — and the value it
+imports — ends up running the same way either way:
+
+```html
+<script type="module-cos">
+  // Rewritten and executed in place by the polyfill when COS is available.
+  // Without it, the detector below strips the unsupported "with { … }"
+  // clause and runs the rest as a plain import over the network instead.
+  import staticData from 'resource.json' with {
+    type: 'json',
+    integrity: 'sha256-...',
+    crossOriginStorage: '*',
+  };
+  // ... use staticData ...
+</script>
+<script>
+  // Only take over if nothing else (this extension, or a future native
+  // implementation) already claimed COS support.
+  if (!navigator.crossOriginStorage?.requestFileHandle) {
+    document.querySelectorAll('script[type="module-cos"]').forEach((script) => {
+      // A static "with { … }" clause is only ever valid once COS has
+      // rewritten it, so strip it and run the rest as a plain import
+      // instead. This simple regex assumes one "with { … }" clause with no
+      // nested braces -- a script with a more complex shape would need a
+      // real parser, like the one this polyfill itself uses.
+      const rewritten = script.textContent.replace(
+        /\swith\s*\{[\s\S]*?\}\s*;/,
+        ';'
+      );
+      const replacement = document.createElement('script');
+      replacement.type = 'module';
+      replacement.textContent = rewritten;
+      script.replaceWith(replacement);
+    });
+  }
+</script>
+```
+
+`type="module-cos"` plus this detector is therefore a genuine progressive
+enhancement for static-import ergonomics too: `staticData` ends up the
+same either way, fetched via COS when it's available and over the network
+when it isn't — just without COS's caching benefits in the latter case. A
+page that doesn't specifically need static-import syntax (and most don't)
+can skip both and use a plain `<script type="module">` with a
+feature-detected dynamic `import()` instead, which degrades safely on its
+own with no special type or detector needed:
+
+```js
+const supportsCOS = !!navigator.crossOriginStorage?.requestFileHandle;
+
+const mod = supportsCOS
+  ? await navigator.crossOriginStorage.__non_standard__import('resource.json', {
+      with: { type: 'json', integrity: 'sha256-...', crossOriginStorage: '*' },
+    })
+  : await import('resource.json');
 ```
 
 ## License

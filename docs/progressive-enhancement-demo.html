@@ -1,0 +1,379 @@
+<!--
+  Copyright 2026 Google LLC.
+  SPDX-License-Identifier: Apache-2.0
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌱</text></svg>"
+    />
+    <title>Cross-Origin Storage — progressive enhancement demo</title>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/default.min.css"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
+    <!--
+      CSS integration: the same syntax the README documents, with a plain
+      fallback url() in case no COS implementation is present. Needs a
+      data-cos marker for this extension's polyfill to intercept an
+      *external* stylesheet (see the README's CSS integration section) --
+      a real native implementation wouldn't need that marker.
+    -->
+    <!-- SAMPLE:css-link:START -->
+    <link rel="stylesheet" href="pe-demo-style.css" data-cos />
+    <!-- SAMPLE:css-link:END -->
+
+    <!--
+      Declarative HTML integration, <script> form: works with zero extra
+      code in any browser, with or without a COS implementation -- an
+      unrecognized `crossoriginstorage` attribute is simply ignored by
+      HTML's normal attribute-parsing rules, and the script loads via its
+      plain src. `defer` just lets this script safely reference
+      #html-script-status further down the page regardless of where in
+      <head> it's declared.
+    -->
+    <!-- SAMPLE:html-script:START -->
+    <script
+      src="pe-demo-script.js"
+      integrity="sha256-NDFkFtKeZCKtK3XKGa58d0kJVjCIrfdQGvPCW9HXt4s="
+      crossoriginstorage="*"
+      defer
+    ></script>
+    <!-- SAMPLE:html-script:END -->
+
+    <!--
+      Declarative HTML integration, <link> form: same mechanism as the
+      <script> above, just for a whole stylesheet instead of a whole
+      script. Deliberately a *different* <link>, to a *different* file,
+      than the data-cos one above -- see pe-demo-html-style.css for why
+      combining data-cos with integrity/crossoriginstorage on the very same
+      tag doesn't work.
+    -->
+    <!-- SAMPLE:html-link:START -->
+    <link
+      rel="stylesheet"
+      href="pe-demo-html-style.css"
+      integrity="sha256-mXPhVm4mG5NhYQge+hY7V7c9Uy2mejppXiKq24un6AA="
+      crossoriginstorage="*"
+    />
+    <!-- SAMPLE:html-link:END -->
+
+    <style>
+      :root {
+        color-scheme: dark light;
+      }
+      html {
+        box-sizing: border-box;
+      }
+      *,
+      *::before,
+      *::after {
+        box-sizing: inherit;
+      }
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: clamp(320px, 90%, 800px);
+        margin: auto;
+        padding-block-end: 4rem;
+        line-height: 1.5;
+      }
+      section {
+        border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+        border-radius: 0.5rem;
+        padding: 1rem 1.25rem;
+        margin-block: 1.25rem;
+      }
+      section > h2 {
+        margin-block-start: 0;
+      }
+      .status {
+        font-family: ui-monospace, monospace;
+        padding: 0.5rem 0.75rem;
+        border-radius: 0.375rem;
+        background: color-mix(in srgb, currentColor 8%, transparent);
+        white-space: pre-wrap;
+      }
+      code {
+        font-family: ui-monospace, monospace;
+      }
+      .emoji-sample {
+        font-family: 'PE Demo Emoji', sans-serif;
+        font-size: 2.5rem;
+      }
+      .sample-caption {
+        font-size: 0.875rem;
+        font-weight: bold;
+        margin-block-end: 0.25rem;
+      }
+      pre {
+        margin-block: 0.5rem 1rem;
+      }
+      pre code.hljs {
+        border-radius: 0.375rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Cross-Origin Storage — progressive enhancement demo</h1>
+    <p>
+      Every example on this page works the same way whether or not you have
+      this extension installed and enabled — install/enable it, reload, and
+      compare against a plain browser tab (or disable the extension and
+      reload). Each section shows the exact code that was authored for it,
+      extracted live from this page's own source so it can never drift out
+      of sync with what's actually running. See the README's
+      <a href="../README.md#using-cos-today-as-a-progressive-enhancement"
+        >"Using COS today as a progressive enhancement"</a
+      >
+      section for the full explanation of each technique below.
+    </p>
+    <section>
+      <h2>COS availability</h2>
+      <p class="status" id="cos-status">Checking…</p>
+    </section>
+
+    <section>
+      <h2>1. Declarative HTML integration</h2>
+      <p>
+        Works as-is, no extra code needed, for both <code>&lt;script&gt;</code>
+        and <code>&lt;link&gt;</code>. An unrecognized
+        <code>crossoriginstorage</code> attribute is just inert HTML
+        attribute data to a browser that doesn't understand it.
+      </p>
+      <p class="sample-caption">A whole script:</p>
+      <pre><code class="language-html" id="sample-html-script"></code></pre>
+      <p class="status" id="html-script-status">⏳ Waiting for script…</p>
+      <p class="sample-caption">A whole stylesheet:</p>
+      <pre><code class="language-html" id="sample-html-link"></code></pre>
+      <p id="link-integration-marker">
+        This text should be pink — the stylesheet above loads the same way
+        whether or not COS is available, so this always applies.
+      </p>
+    </section>
+
+    <section>
+      <h2>2. CSS integration</h2>
+      <p>
+        A plain fallback <code>url()</code> after the COS-enhanced one in
+        the same comma-separated list. An unrecognized
+        <code>cross-origin-storage()</code>/<code>integrity()</code>
+        modifier invalidates only its own list item, not the whole
+        declaration, so the fallback still applies. Order matters here — see
+        the README for why the COS-enhanced <code>url()</code> has to come
+        first.
+      </p>
+      <p class="sample-caption">In <code>&lt;head&gt;</code>:</p>
+      <pre><code class="language-html" id="sample-css-link"></code></pre>
+      <p class="sample-caption">In <code>pe-demo-style.css</code>:</p>
+      <pre><code class="language-css" id="sample-css-rule"></code></pre>
+      <p>
+        Sample text using the loaded font (should render as color emoji
+        either way):
+      </p>
+      <p class="emoji-sample">🥰🌴🐢🍄🎨</p>
+    </section>
+
+    <section>
+      <h2>3a. Declarative JavaScript integration — static import</h2>
+      <p>
+        This extension's polyfill recognizes <code>type="module-cos"</code>
+        and rewrites/executes it as a real module, including a literal
+        static <code>import … with { crossOriginStorage }</code>
+        declaration — rewritten in place before this script ever executes.
+        Without a COS implementation, <code>module-cos</code> is otherwise
+        inert and the script would never run at all — so an early,
+        always-safe detector script, placed right after it, strips the
+        unsupported <code>with { crossOriginStorage }</code> clause (a
+        static import can't have one until COS has already rewritten it)
+        and runs the result as a plain import instead. Either way, the
+        status below ends up reporting the same imported value — via COS
+        when it's available, over the network when it isn't.
+      </p>
+      <p class="sample-caption">A static <code>import</code>:</p>
+      <pre><code class="language-html" id="sample-js-static"></code></pre>
+      <p class="status" id="js-static-status">⏳ Loading…</p>
+      <p class="sample-caption">The early detector, immediately after it:</p>
+      <pre><code class="language-html" id="sample-js-detector"></code></pre>
+      <p class="status" id="js-detector-status">⏳ Waiting…</p>
+    </section>
+
+    <section>
+      <h2>3b. Declarative JavaScript integration — dynamic import()</h2>
+      <p>
+        Feature-detect, then choose the non-standard COS helper or plain
+        <code>import()</code> — this needs no special script type or
+        detector, since it degrades safely on its own either way.
+      </p>
+      <p class="sample-caption">A dynamic <code>import()</code>:</p>
+      <pre><code class="language-html" id="sample-js-dynamic"></code></pre>
+      <p class="status" id="js-dynamic-status">⏳ Loading…</p>
+    </section>
+
+    <!--
+      Sets the top status banner. Not itself one of the "authored code"
+      samples above -- it's this demo page's own plumbing, not part of any
+      COS integration technique.
+    -->
+    <script type="module">
+      const supportsCOS = !!navigator.crossOriginStorage?.requestFileHandle;
+      document.getElementById('cos-status').textContent = supportsCOS
+        ? '✅ navigator.crossOriginStorage is available — resources below are shared via COS.'
+        : 'ℹ️ navigator.crossOriginStorage is not available — resources below load over the network as normal.';
+    </script>
+
+    <!--
+      3a. <script type="module-cos"> -- inert to every browser that doesn't
+      specifically recognize this non-standard type (see the README). With
+      COS, the polyfill rewrites and runs the static import as-is; without
+      COS, the detector script below strips its "with { … }" clause and
+      runs the plain import instead, over the network.
+    -->
+    <!-- SAMPLE:js-static:START -->
+    <script type="module-cos" id="js-static-demo">
+      import staticData from './pe-demo-module-2.js' with {
+        integrity: 'sha256-7HGnlStuPZ/8EcjfOpWsy5k1FEie7Z72P5RLOez7C/w=',
+        crossOriginStorage: '*',
+      };
+      document.getElementById('js-static-status').textContent =
+        `✅ Imported default export: ${JSON.stringify(staticData)}`;
+    </script>
+    <!-- SAMPLE:js-static:END -->
+    <!--
+      Early detector: runs immediately after the module-cos script above.
+      If nothing has claimed COS support by now, that script is otherwise
+      inert and would never run at all -- so this strips its unsupported
+      "with { … }" clause and runs the resulting plain import as a real
+      module instead, achieving the same end result (the status update
+      below runs either way) without COS's benefits.
+    -->
+    <!-- SAMPLE:js-detector:START -->
+    <script>
+      (function () {
+        const status = document.getElementById('js-detector-status');
+        if (navigator.crossOriginStorage?.requestFileHandle) {
+          status.textContent =
+            'ℹ️ Not needed — the polyfill already rewrote the module-cos script above and replaced it with a real type="module" script, so there was nothing left for the detector to do.';
+          return;
+        }
+        // A static "with { … }" clause is only ever valid once COS has
+        // rewritten it, so without COS, strip it and fall back to a plain
+        // import over the network instead. (This simple regex assumes one
+        // "with { … }" clause with no nested braces, matching the sample
+        // above -- the polyfill's own rewriter handles the general case.)
+        document
+          .querySelectorAll('script[type="module-cos"]')
+          .forEach((script) => {
+            const rewritten = script.textContent.replace(
+              /\swith\s*\{[\s\S]*?\}\s*;/,
+              ';'
+            );
+            const replacement = document.createElement('script');
+            replacement.type = 'module';
+            replacement.textContent = rewritten;
+            script.replaceWith(replacement);
+          });
+        status.textContent =
+          '✅ Rewrote the module-cos script above, stripping its with { … } clause, and ran the result as a plain import over the network.';
+      })();
+    </script>
+    <!-- SAMPLE:js-detector:END -->
+
+    <!--
+      3b. Plain <script type="module"> -- no special type or detector
+      needed, since a feature-detected dynamic import() degrades safely on
+      its own either way.
+    -->
+    <!-- SAMPLE:js-dynamic:START -->
+    <script type="module">
+      const supportsCOS = !!navigator.crossOriginStorage?.requestFileHandle;
+      const mod = supportsCOS
+        ? await navigator.crossOriginStorage.__non_standard__import(
+            './pe-demo-module.js',
+            {
+              with: {
+                integrity:
+                  'sha256-YKd8aU4ILF6re6EiM6lTEdAiGTFjVgVk9867zPSCAhs=',
+                crossOriginStorage: '*',
+              },
+            }
+          )
+        : await import('./pe-demo-module.js');
+      document.getElementById('js-dynamic-status').textContent =
+        `✅ Imported default export: ${JSON.stringify(mod.default)}`;
+    </script>
+    <!-- SAMPLE:js-dynamic:END -->
+
+    <script type="module">
+      // Populates the <pre><code> placeholders above with the exact
+      // authored source for each technique, extracted live from this
+      // page's own markup (and pe-demo-style.css for the CSS sample) so
+      // the displayed snippets can never drift out of sync with what
+      // actually runs. Each region is delimited by a same-line
+      // "SAMPLE:<name>:START"/"SAMPLE:<name>:END" marker -- written as
+      // whatever comment syntax is valid at that point in the source
+      // (HTML, CSS, or JS) -- and the text strictly between those two
+      // marker lines (exclusive) is what gets displayed. `cache: 'no-store'`
+      // avoids ever showing a stale, cached copy of a sample after an edit.
+      function extractSample(source, name) {
+        const startRe = new RegExp(`SAMPLE:${name}:START.*\\n`);
+        const endRe = new RegExp(`\\n[^\\n]*SAMPLE:${name}:END`);
+        const startMatch = startRe.exec(source);
+        const endMatch = endRe.exec(source);
+        if (!startMatch || !endMatch) return null;
+        return source.slice(
+          startMatch.index + startMatch[0].length,
+          endMatch.index
+        );
+      }
+
+      // Strips whatever leading whitespace is common to every non-empty
+      // line, so a deeply-indented region (e.g. inside a try block) still
+      // displays flush left.
+      function dedent(text) {
+        const lines = text.replace(/^\n+|\n+$/g, '').split('\n');
+        const indents = lines
+          .filter((line) => line.trim().length > 0)
+          .map((line) => line.match(/^\s*/)[0].length);
+        const common = indents.length ? Math.min(...indents) : 0;
+        return lines.map((line) => line.slice(common)).join('\n');
+      }
+
+      const sourceCache = new Map();
+      async function getSource(url) {
+        if (!sourceCache.has(url)) {
+          sourceCache.set(
+            url,
+            fetch(url, { cache: 'no-store' }).then((r) => r.text())
+          );
+        }
+        return sourceCache.get(url);
+      }
+
+      async function renderSample(url, name, targetId) {
+        const source = await getSource(url);
+        const extracted = extractSample(source, name);
+        const target = document.getElementById(targetId);
+        if (!target || extracted == null) return;
+        target.textContent = dedent(extracted);
+      }
+
+      await Promise.all([
+        renderSample(location.href, 'html-script', 'sample-html-script'),
+        renderSample(location.href, 'html-link', 'sample-html-link'),
+        renderSample(location.href, 'css-link', 'sample-css-link'),
+        renderSample('pe-demo-style.css', 'css-rule', 'sample-css-rule'),
+        renderSample(location.href, 'js-static', 'sample-js-static'),
+        renderSample(location.href, 'js-detector', 'sample-js-detector'),
+        renderSample(location.href, 'js-dynamic', 'sample-js-dynamic'),
+      ]);
+      hljs.highlightAll();
+    </script>
+  </body>
+</html>

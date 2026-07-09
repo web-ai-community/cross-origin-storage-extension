@@ -1,0 +1,17 @@
+/* Copyright 2026 Google LLC. */
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Stylesheet for progressive-enhancement-demo.html's declarative HTML
+   integration example -- a <link integrity crossoriginstorage> loading a
+   whole file via COS, same mechanism as <script integrity
+   crossoriginstorage>. Deliberately a separate file (and a separate
+   <link>) from pe-demo-style.css/section 2's data-cos link: combining
+   data-cos with integrity/crossoriginstorage on the very same <link>
+   makes this extension's two independent polyfill mechanisms both try to
+   claim it, and they step on each other's href handling. */
+#link-integration-marker {
+  /* A single fixed color can't have good contrast against both a light and
+     a dark page background, so pick a distinct shade per color scheme --
+     both chosen for clear contrast against white and near-black alike. */
+  color: light-dark(rgb(176, 34, 96), rgb(255, 148, 199));
+  font-weight: bold;
+}
