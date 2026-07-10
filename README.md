@@ -43,12 +43,14 @@ and the reasoning are in code comments in `main-world.js`.
 
 | Integration | Matches the spec syntax exactly? | Caveat |
 | --- | --- | --- |
-| [Imperative JS API](#imperative-js-api) (`navigator.crossOriginStorage`) | ✅ Yes | None — this is the extension's core, fully-supported surface. |
-| [CSS `cross-origin-storage()`](#css-integration) | ✅ Yes | An external `<link rel="stylesheet">` needs an extra `data-cos` marker attribute — recommended for performance, not required by the syntax itself; see below. |
-| [Declarative HTML](#declarative-html-integration) (`crossoriginstorage` attribute) | ✅ Yes | For `<script>` (not `<link>`) elements, the browser's native fetch always wins execution — see caveat below. |
-| [Declarative JavaScript](#declarative-javascript-integration) (import attributes) | ❌ No | Requires a `<script type="module-cos">` opt-in, or the `navigator.crossOriginStorage.__non_standard__import()` helper, instead of literal `with { crossOriginStorage }` syntax. |
+| [Imperative JS API](#imperative-js-api) (`navigator.crossOriginStorage`) | ✅ Yes | None — this is the extension's core, fully-supported surface. [See details](#imperative-js-api). |
+| [CSS `cross-origin-storage()`](#css-integration) | ✅ Yes | An external `<link rel="stylesheet">` needs an extra `data-cos` marker attribute — recommended for performance, not required by the syntax itself. [See details](#css-integration). |
+| [Declarative HTML](#declarative-html-integration) (`crossoriginstorage` attribute) | ✅ Yes | For `<script>` (not `<link>`) elements, the browser's native fetch always wins execution. [See details](#declarative-html-integration). |
+| [Declarative JavaScript](#declarative-javascript-integration) (import attributes) | ⚠️ No | Works via shims — a `<script type="module-cos">` opt-in, or the `navigator.crossOriginStorage.__non_standard__import()` helper — instead of literal `with { crossOriginStorage }` syntax. [See details](#declarative-javascript-integration). |
 
 ### Imperative JS API
+
+> **Matches the spec syntax exactly?** ✅ Yes
 
 Works exactly as specified:
 
@@ -60,6 +62,8 @@ const handle = await navigator.crossOriginStorage.requestFileHandle(
 ```
 
 ### CSS integration
+
+> **Matches the spec syntax exactly?** ✅ Yes
 
 Spec syntax, inside a `<style>` block:
 
@@ -128,6 +132,8 @@ modifiers regardless — leaving a `url(...)` the browser can load exactly
 like any other same-origin resource.
 
 ### Declarative HTML integration
+
+> **Matches the spec syntax exactly?** ✅ Yes
 
 Works with the literal spec syntax:
 
@@ -216,6 +222,8 @@ each pointing at its own file — [the demo](progressive-enhancement-demo.html)
 does exactly this.
 
 ### Declarative JavaScript integration
+
+> **Matches the spec syntax exactly?** ⚠️ No
 
 The literal spec syntax can't be supported at all: real browsers reject any
 unrecognized import-attribute key (`integrity`, `crossOriginStorage`) with a
