@@ -50,10 +50,12 @@
 #
 # Credentials, in priority order:
 #   1. --key-path
-#   2. ASC_API_KEY_PATH (env var, e.g. from a gitignored .env file)
-#   3. macOS Keychain (see --store-key-in-keychain)
-#   4. A fallback search in ~/Downloads and ~/.appstoreconnect -- fine for
-#      one-off use, but the key sits in plaintext there; prefer Keychain.
+#   2. ASC_API_KEY_PATH (env var: path to the .p8 file)
+#   3. ASC_API_KEY (env var: the .p8 file's contents directly -- e.g. a
+#      gitignored .env with ASC_API_KEY="-----BEGIN PRIVATE KEY-----...")
+#   4. macOS Keychain (see --store-key-in-keychain)
+#   5. A fallback search in ~/Downloads and ~/.appstoreconnect -- fine for
+#      one-off use, but the key sits in plaintext there; prefer .env/Keychain.
 #
 # ASC_KEY_ID / ASC_ISSUER_ID / ASC_TEAM_ID identify the key and team --
 # not secret (visible in App Store Connect), so they default below to
@@ -136,6 +138,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
+if [ -z "$ASC_API_KEY_PATH" ] && [ -n "${ASC_API_KEY:-}" ]; then
+  KEY_TEMP_FILE="$(mktemp -t "AuthKey_${ASC_KEY_ID}")"
+  chmod 600 "$KEY_TEMP_FILE"
+  printf '%s' "$ASC_API_KEY" > "$KEY_TEMP_FILE"
+  ASC_API_KEY_PATH="$KEY_TEMP_FILE"
+  echo "==> Using API key from \$ASC_API_KEY (e.g. from .env)"
+fi
+
 if [ -z "$ASC_API_KEY_PATH" ]; then
   if KEY_MATERIAL="$(security find-generic-password -a "$ASC_KEY_ID" -s "$KEYCHAIN_SERVICE" -w 2>/dev/null)"; then
     KEY_TEMP_FILE="$(mktemp -t "AuthKey_${ASC_KEY_ID}")"
@@ -164,7 +174,7 @@ fi
 if [ -z "$ASC_API_KEY_PATH" ] || [ ! -f "$ASC_API_KEY_PATH" ]; then
   echo "error: couldn't find the App Store Connect API private key." >&2
   echo "Run: ./upload-safari-build.sh --store-key-in-keychain /path/to/AuthKey_${ASC_KEY_ID}.p8" >&2
-  echo "or pass --key-path, or set ASC_API_KEY_PATH (e.g. in a gitignored .env)." >&2
+  echo "or pass --key-path, or set ASC_API_KEY_PATH / ASC_API_KEY in a gitignored .env." >&2
   exit 1
 fi
 
