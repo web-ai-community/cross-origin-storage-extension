@@ -3,3 +3,15 @@
 _metadata/
 node_modules/
 .DS_Store
+.env
+
+# safari-app/xcode-project itself is committed; only its derived/ephemeral
+# parts are ignored -- safari-extension-src is regenerated from the repo
+# on every release, and build/upload/xcuserdata are local build output.
+safari-app/safari-extension-src/
+safari-app/logs/
+safari-app/upload/
+safari-app/UploadOptions.plist
+safari-app/xcode-project/build/
+safari-app/xcode-project/**/xcuserdata/
+safari-app/xcode-project/**/*.xcuserstate

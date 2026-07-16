@@ -1,0 +1,1097 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0C878DEB300931EE00C21123 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C878DEA300931EE00C21123 /* AppDelegate.swift */; };
+		0C878DED300931EE00C21123 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C878DEC300931EE00C21123 /* SceneDelegate.swift */; };
+		0C878DF0300931EE00C21123 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 0C878DEE300931EE00C21123 /* LaunchScreen.storyboard */; };
+		0C878DF3300931EE00C21123 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 0C878DF1300931EE00C21123 /* Main.storyboard */; };
+		0C878DFC300931EE00C21123 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C878DFB300931EE00C21123 /* AppDelegate.swift */; };
+		0C878DFF300931EE00C21123 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 0C878DFD300931EE00C21123 /* Main.storyboard */; };
+		0C878E06300931EE00C21123 /* Cross-Origin Storage Extension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 0C878E05300931EE00C21123 /* Cross-Origin Storage Extension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		0C878E10300931EE00C21123 /* Cross-Origin Storage Extension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 0C878E0F300931EE00C21123 /* Cross-Origin Storage Extension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		0C878E15300931EE00C21123 /* Main.html in Resources */ = {isa = PBXBuildFile; fileRef = 0C878DDA300931ED00C21123 /* Main.html */; };
+		0C878E16300931EE00C21123 /* Main.html in Resources */ = {isa = PBXBuildFile; fileRef = 0C878DDA300931ED00C21123 /* Main.html */; };
+		0C878E17300931EE00C21123 /* Icon.png in Resources */ = {isa = PBXBuildFile; fileRef = 0C878DDC300931ED00C21123 /* Icon.png */; };
+		0C878E18300931EE00C21123 /* Icon.png in Resources */ = {isa = PBXBuildFile; fileRef = 0C878DDC300931ED00C21123 /* Icon.png */; };
+		0C878E19300931EE00C21123 /* Style.css in Resources */ = {isa = PBXBuildFile; fileRef = 0C878DDD300931ED00C21123 /* Style.css */; };
+		0C878E1A300931EE00C21123 /* Style.css in Resources */ = {isa = PBXBuildFile; fileRef = 0C878DDD300931ED00C21123 /* Style.css */; };
+		0C878E1B300931EE00C21123 /* Script.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878DDE300931ED00C21123 /* Script.js */; };
+		0C878E1C300931EE00C21123 /* Script.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878DDE300931ED00C21123 /* Script.js */; };
+		0C878E1D300931EE00C21123 /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C878DDF300931ED00C21123 /* ViewController.swift */; };
+		0C878E1E300931EE00C21123 /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C878DDF300931ED00C21123 /* ViewController.swift */; };
+		0C878E1F300931EE00C21123 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0C878DE0300931EE00C21123 /* Assets.xcassets */; };
+		0C878E20300931EE00C21123 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0C878DE0300931EE00C21123 /* Assets.xcassets */; };
+		0C878E21300931EE00C21123 /* SafariWebExtensionHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C878DE2300931EE00C21123 /* SafariWebExtensionHandler.swift */; };
+		0C878E22300931EE00C21123 /* SafariWebExtensionHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C878DE2300931EE00C21123 /* SafariWebExtensionHandler.swift */; };
+		0C878E4B300931EE00C21123 /* sha256.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E34300931EE00C21123 /* sha256.js */; };
+		0C878E4C300931EE00C21123 /* popup.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E35300931EE00C21123 /* popup.js */; };
+		0C878E4D300931EE00C21123 /* relay-extension.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E36300931EE00C21123 /* relay-extension.js */; };
+		0C878E4E300931EE00C21123 /* resource-manager.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E37300931EE00C21123 /* resource-manager.js */; };
+		0C878E4F300931EE00C21123 /* styles.css in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E38300931EE00C21123 /* styles.css */; };
+		0C878E50300931EE00C21123 /* background.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E39300931EE00C21123 /* background.js */; };
+		0C878E51300931EE00C21123 /* logo-cos.png in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E3A300931EE00C21123 /* logo-cos.png */; };
+		0C878E52300931EE00C21123 /* input-switch-polyfill.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E3B300931EE00C21123 /* input-switch-polyfill.js */; };
+		0C878E53300931EE00C21123 /* logo-cos.svg in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E3C300931EE00C21123 /* logo-cos.svg */; };
+		0C878E54300931EE00C21123 /* popup.html in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E3D300931EE00C21123 /* popup.html */; };
+		0C878E55300931EE00C21123 /* options.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E3E300931EE00C21123 /* options.js */; };
+		0C878E56300931EE00C21123 /* relay-extension.html in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E3F300931EE00C21123 /* relay-extension.html */; };
+		0C878E57300931EE00C21123 /* viewer.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E40300931EE00C21123 /* viewer.js */; };
+		0C878E58300931EE00C21123 /* viewer.html in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E41300931EE00C21123 /* viewer.html */; };
+		0C878E59300931EE00C21123 /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E42300931EE00C21123 /* manifest.json */; };
+		0C878E5A300931EE00C21123 /* same-site.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E43300931EE00C21123 /* same-site.js */; };
+		0C878E5B300931EE00C21123 /* options.html in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E44300931EE00C21123 /* options.html */; };
+		0C878E5C300931EE00C21123 /* input-switch-polyfill.css in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E45300931EE00C21123 /* input-switch-polyfill.css */; };
+		0C878E5D300931EE00C21123 /* background.html in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E46300931EE00C21123 /* background.html */; };
+		0C878E5E300931EE00C21123 /* content.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E47300931EE00C21123 /* content.js */; };
+		0C878E5F300931EE00C21123 /* public-suffix-list.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E48300931EE00C21123 /* public-suffix-list.js */; };
+		0C878E60300931EE00C21123 /* main-world.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E49300931EE00C21123 /* main-world.js */; };
+		0C878E61300931EE00C21123 /* public-hash-list.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E4A300931EE00C21123 /* public-hash-list.js */; };
+		0C878E62300931EE00C21123 /* sha256.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E34300931EE00C21123 /* sha256.js */; };
+		0C878E63300931EE00C21123 /* popup.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E35300931EE00C21123 /* popup.js */; };
+		0C878E64300931EE00C21123 /* relay-extension.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E36300931EE00C21123 /* relay-extension.js */; };
+		0C878E65300931EE00C21123 /* resource-manager.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E37300931EE00C21123 /* resource-manager.js */; };
+		0C878E66300931EE00C21123 /* styles.css in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E38300931EE00C21123 /* styles.css */; };
+		0C878E67300931EE00C21123 /* background.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E39300931EE00C21123 /* background.js */; };
+		0C878E68300931EE00C21123 /* logo-cos.png in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E3A300931EE00C21123 /* logo-cos.png */; };
+		0C878E69300931EE00C21123 /* input-switch-polyfill.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E3B300931EE00C21123 /* input-switch-polyfill.js */; };
+		0C878E6A300931EE00C21123 /* logo-cos.svg in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E3C300931EE00C21123 /* logo-cos.svg */; };
+		0C878E6B300931EE00C21123 /* popup.html in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E3D300931EE00C21123 /* popup.html */; };
+		0C878E6C300931EE00C21123 /* options.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E3E300931EE00C21123 /* options.js */; };
+		0C878E6D300931EE00C21123 /* relay-extension.html in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E3F300931EE00C21123 /* relay-extension.html */; };
+		0C878E6E300931EE00C21123 /* viewer.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E40300931EE00C21123 /* viewer.js */; };
+		0C878E6F300931EE00C21123 /* viewer.html in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E41300931EE00C21123 /* viewer.html */; };
+		0C878E70300931EE00C21123 /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E42300931EE00C21123 /* manifest.json */; };
+		0C878E71300931EE00C21123 /* same-site.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E43300931EE00C21123 /* same-site.js */; };
+		0C878E72300931EE00C21123 /* options.html in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E44300931EE00C21123 /* options.html */; };
+		0C878E73300931EE00C21123 /* input-switch-polyfill.css in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E45300931EE00C21123 /* input-switch-polyfill.css */; };
+		0C878E74300931EE00C21123 /* background.html in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E46300931EE00C21123 /* background.html */; };
+		0C878E75300931EE00C21123 /* content.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E47300931EE00C21123 /* content.js */; };
+		0C878E76300931EE00C21123 /* public-suffix-list.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E48300931EE00C21123 /* public-suffix-list.js */; };
+		0C878E77300931EE00C21123 /* main-world.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E49300931EE00C21123 /* main-world.js */; };
+		0C878E78300931EE00C21123 /* public-hash-list.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C878E4A300931EE00C21123 /* public-hash-list.js */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		0C878E07300931EE00C21123 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0C878DD4300931ED00C21123 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0C878E04300931EE00C21123;
+			remoteInfo = "Cross-Origin Storage Extension (iOS)";
+		};
+		0C878E11300931EE00C21123 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0C878DD4300931ED00C21123 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0C878E0E300931EE00C21123;
+			remoteInfo = "Cross-Origin Storage Extension (macOS)";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		0C878E28300931EE00C21123 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				0C878E06300931EE00C21123 /* Cross-Origin Storage Extension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0C878E2F300931EE00C21123 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				0C878E10300931EE00C21123 /* Cross-Origin Storage Extension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		0C878DDB300931ED00C21123 /* Base */ = {isa = PBXFileReference; lastKnownFileType = text.html; name = Base; path = Base.lproj/Main.html; sourceTree = "<group>"; };
+		0C878DDC300931ED00C21123 /* Icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Icon.png; sourceTree = "<group>"; };
+		0C878DDD300931ED00C21123 /* Style.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; path = Style.css; sourceTree = "<group>"; };
+		0C878DDE300931ED00C21123 /* Script.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = Script.js; sourceTree = "<group>"; };
+		0C878DDF300931ED00C21123 /* ViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewController.swift; sourceTree = "<group>"; };
+		0C878DE0300931EE00C21123 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		0C878DE2300931EE00C21123 /* SafariWebExtensionHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariWebExtensionHandler.swift; sourceTree = "<group>"; };
+		0C878DE7300931EE00C21123 /* Cross-Origin Storage.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Cross-Origin Storage.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		0C878DEA300931EE00C21123 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		0C878DEC300931EE00C21123 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
+		0C878DEF300931EE00C21123 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
+		0C878DF2300931EE00C21123 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
+		0C878DF4300931EE00C21123 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		0C878DF9300931EE00C21123 /* Cross-Origin Storage.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Cross-Origin Storage.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		0C878DFB300931EE00C21123 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		0C878DFE300931EE00C21123 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
+		0C878E00300931EE00C21123 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		0C878E05300931EE00C21123 /* Cross-Origin Storage Extension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Cross-Origin Storage Extension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+		0C878E0A300931EE00C21123 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		0C878E0F300931EE00C21123 /* Cross-Origin Storage Extension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Cross-Origin Storage Extension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+		0C878E14300931EE00C21123 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		0C878E34300931EE00C21123 /* sha256.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = sha256.js; path = "../../../safari-extension-src/sha256.js"; sourceTree = "<group>"; };
+		0C878E35300931EE00C21123 /* popup.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = popup.js; path = "../../../safari-extension-src/popup.js"; sourceTree = "<group>"; };
+		0C878E36300931EE00C21123 /* relay-extension.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = "relay-extension.js"; path = "../../../safari-extension-src/relay-extension.js"; sourceTree = "<group>"; };
+		0C878E37300931EE00C21123 /* resource-manager.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = "resource-manager.js"; path = "../../../safari-extension-src/resource-manager.js"; sourceTree = "<group>"; };
+		0C878E38300931EE00C21123 /* styles.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; name = styles.css; path = "../../../safari-extension-src/styles.css"; sourceTree = "<group>"; };
+		0C878E39300931EE00C21123 /* background.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = background.js; path = "../../../safari-extension-src/background.js"; sourceTree = "<group>"; };
+		0C878E3A300931EE00C21123 /* logo-cos.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "logo-cos.png"; path = "../../../safari-extension-src/logo-cos.png"; sourceTree = "<group>"; };
+		0C878E3B300931EE00C21123 /* input-switch-polyfill.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = "input-switch-polyfill.js"; path = "../../../safari-extension-src/input-switch-polyfill.js"; sourceTree = "<group>"; };
+		0C878E3C300931EE00C21123 /* logo-cos.svg */ = {isa = PBXFileReference; lastKnownFileType = text; name = "logo-cos.svg"; path = "../../../safari-extension-src/logo-cos.svg"; sourceTree = "<group>"; };
+		0C878E3D300931EE00C21123 /* popup.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; name = popup.html; path = "../../../safari-extension-src/popup.html"; sourceTree = "<group>"; };
+		0C878E3E300931EE00C21123 /* options.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = options.js; path = "../../../safari-extension-src/options.js"; sourceTree = "<group>"; };
+		0C878E3F300931EE00C21123 /* relay-extension.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; name = "relay-extension.html"; path = "../../../safari-extension-src/relay-extension.html"; sourceTree = "<group>"; };
+		0C878E40300931EE00C21123 /* viewer.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = viewer.js; path = "../../../safari-extension-src/viewer.js"; sourceTree = "<group>"; };
+		0C878E41300931EE00C21123 /* viewer.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; name = viewer.html; path = "../../../safari-extension-src/viewer.html"; sourceTree = "<group>"; };
+		0C878E42300931EE00C21123 /* manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = manifest.json; path = "../../../safari-extension-src/manifest.json"; sourceTree = "<group>"; };
+		0C878E43300931EE00C21123 /* same-site.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = "same-site.js"; path = "../../../safari-extension-src/same-site.js"; sourceTree = "<group>"; };
+		0C878E44300931EE00C21123 /* options.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; name = options.html; path = "../../../safari-extension-src/options.html"; sourceTree = "<group>"; };
+		0C878E45300931EE00C21123 /* input-switch-polyfill.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; name = "input-switch-polyfill.css"; path = "../../../safari-extension-src/input-switch-polyfill.css"; sourceTree = "<group>"; };
+		0C878E46300931EE00C21123 /* background.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; name = background.html; path = "../../../safari-extension-src/background.html"; sourceTree = "<group>"; };
+		0C878E47300931EE00C21123 /* content.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = content.js; path = "../../../safari-extension-src/content.js"; sourceTree = "<group>"; };
+		0C878E48300931EE00C21123 /* public-suffix-list.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = "public-suffix-list.js"; path = "../../../safari-extension-src/public-suffix-list.js"; sourceTree = "<group>"; };
+		0C878E49300931EE00C21123 /* main-world.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = "main-world.js"; path = "../../../safari-extension-src/main-world.js"; sourceTree = "<group>"; };
+		0C878E4A300931EE00C21123 /* public-hash-list.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = "public-hash-list.js"; path = "../../../safari-extension-src/public-hash-list.js"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		0C878DE4300931EE00C21123 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0C878DF6300931EE00C21123 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0C878E02300931EE00C21123 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0C878E0C300931EE00C21123 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		0C878DD3300931ED00C21123 = {
+			isa = PBXGroup;
+			children = (
+				0C878DD8300931ED00C21123 /* Shared (App) */,
+				0C878DE1300931EE00C21123 /* Shared (Extension) */,
+				0C878DE9300931EE00C21123 /* iOS (App) */,
+				0C878DFA300931EE00C21123 /* macOS (App) */,
+				0C878E09300931EE00C21123 /* iOS (Extension) */,
+				0C878E13300931EE00C21123 /* macOS (Extension) */,
+				0C878DE8300931EE00C21123 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		0C878DD8300931ED00C21123 /* Shared (App) */ = {
+			isa = PBXGroup;
+			children = (
+				0C878DDF300931ED00C21123 /* ViewController.swift */,
+				0C878DE0300931EE00C21123 /* Assets.xcassets */,
+				0C878DD9300931ED00C21123 /* Resources */,
+			);
+			path = "Shared (App)";
+			sourceTree = "<group>";
+		};
+		0C878DD9300931ED00C21123 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				0C878DDA300931ED00C21123 /* Main.html */,
+				0C878DDC300931ED00C21123 /* Icon.png */,
+				0C878DDD300931ED00C21123 /* Style.css */,
+				0C878DDE300931ED00C21123 /* Script.js */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		0C878DE1300931EE00C21123 /* Shared (Extension) */ = {
+			isa = PBXGroup;
+			children = (
+				0C878E33300931EE00C21123 /* Resources */,
+				0C878DE2300931EE00C21123 /* SafariWebExtensionHandler.swift */,
+			);
+			path = "Shared (Extension)";
+			sourceTree = "<group>";
+		};
+		0C878DE8300931EE00C21123 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				0C878DE7300931EE00C21123 /* Cross-Origin Storage.app */,
+				0C878DF9300931EE00C21123 /* Cross-Origin Storage.app */,
+				0C878E05300931EE00C21123 /* Cross-Origin Storage Extension.appex */,
+				0C878E0F300931EE00C21123 /* Cross-Origin Storage Extension.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		0C878DE9300931EE00C21123 /* iOS (App) */ = {
+			isa = PBXGroup;
+			children = (
+				0C878DEA300931EE00C21123 /* AppDelegate.swift */,
+				0C878DEC300931EE00C21123 /* SceneDelegate.swift */,
+				0C878DEE300931EE00C21123 /* LaunchScreen.storyboard */,
+				0C878DF1300931EE00C21123 /* Main.storyboard */,
+				0C878DF4300931EE00C21123 /* Info.plist */,
+			);
+			path = "iOS (App)";
+			sourceTree = "<group>";
+		};
+		0C878DFA300931EE00C21123 /* macOS (App) */ = {
+			isa = PBXGroup;
+			children = (
+				0C878DFB300931EE00C21123 /* AppDelegate.swift */,
+				0C878DFD300931EE00C21123 /* Main.storyboard */,
+				0C878E00300931EE00C21123 /* Info.plist */,
+			);
+			path = "macOS (App)";
+			sourceTree = "<group>";
+		};
+		0C878E09300931EE00C21123 /* iOS (Extension) */ = {
+			isa = PBXGroup;
+			children = (
+				0C878E0A300931EE00C21123 /* Info.plist */,
+			);
+			path = "iOS (Extension)";
+			sourceTree = "<group>";
+		};
+		0C878E13300931EE00C21123 /* macOS (Extension) */ = {
+			isa = PBXGroup;
+			children = (
+				0C878E14300931EE00C21123 /* Info.plist */,
+			);
+			path = "macOS (Extension)";
+			sourceTree = "<group>";
+		};
+		0C878E33300931EE00C21123 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				0C878E34300931EE00C21123 /* sha256.js */,
+				0C878E35300931EE00C21123 /* popup.js */,
+				0C878E36300931EE00C21123 /* relay-extension.js */,
+				0C878E37300931EE00C21123 /* resource-manager.js */,
+				0C878E38300931EE00C21123 /* styles.css */,
+				0C878E39300931EE00C21123 /* background.js */,
+				0C878E3A300931EE00C21123 /* logo-cos.png */,
+				0C878E3B300931EE00C21123 /* input-switch-polyfill.js */,
+				0C878E3C300931EE00C21123 /* logo-cos.svg */,
+				0C878E3D300931EE00C21123 /* popup.html */,
+				0C878E3E300931EE00C21123 /* options.js */,
+				0C878E3F300931EE00C21123 /* relay-extension.html */,
+				0C878E40300931EE00C21123 /* viewer.js */,
+				0C878E41300931EE00C21123 /* viewer.html */,
+				0C878E42300931EE00C21123 /* manifest.json */,
+				0C878E43300931EE00C21123 /* same-site.js */,
+				0C878E44300931EE00C21123 /* options.html */,
+				0C878E45300931EE00C21123 /* input-switch-polyfill.css */,
+				0C878E46300931EE00C21123 /* background.html */,
+				0C878E47300931EE00C21123 /* content.js */,
+				0C878E48300931EE00C21123 /* public-suffix-list.js */,
+				0C878E49300931EE00C21123 /* main-world.js */,
+				0C878E4A300931EE00C21123 /* public-hash-list.js */,
+			);
+			name = Resources;
+			path = "Shared (Extension)";
+			sourceTree = SOURCE_ROOT;
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0C878DE6300931EE00C21123 /* Cross-Origin Storage (iOS) */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0C878E29300931EE00C21123 /* Build configuration list for PBXNativeTarget "Cross-Origin Storage (iOS)" */;
+			buildPhases = (
+				0C878DE3300931EE00C21123 /* Sources */,
+				0C878DE4300931EE00C21123 /* Frameworks */,
+				0C878DE5300931EE00C21123 /* Resources */,
+				0C878E28300931EE00C21123 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				0C878E08300931EE00C21123 /* PBXTargetDependency */,
+			);
+			name = "Cross-Origin Storage (iOS)";
+			packageProductDependencies = (
+			);
+			productName = "Cross-Origin Storage (iOS)";
+			productReference = 0C878DE7300931EE00C21123 /* Cross-Origin Storage.app */;
+			productType = "com.apple.product-type.application";
+		};
+		0C878DF8300931EE00C21123 /* Cross-Origin Storage (macOS) */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0C878E30300931EE00C21123 /* Build configuration list for PBXNativeTarget "Cross-Origin Storage (macOS)" */;
+			buildPhases = (
+				0C878DF5300931EE00C21123 /* Sources */,
+				0C878DF6300931EE00C21123 /* Frameworks */,
+				0C878DF7300931EE00C21123 /* Resources */,
+				0C878E2F300931EE00C21123 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				0C878E12300931EE00C21123 /* PBXTargetDependency */,
+			);
+			name = "Cross-Origin Storage (macOS)";
+			packageProductDependencies = (
+			);
+			productName = "Cross-Origin Storage (macOS)";
+			productReference = 0C878DF9300931EE00C21123 /* Cross-Origin Storage.app */;
+			productType = "com.apple.product-type.application";
+		};
+		0C878E04300931EE00C21123 /* Cross-Origin Storage Extension (iOS) */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0C878E25300931EE00C21123 /* Build configuration list for PBXNativeTarget "Cross-Origin Storage Extension (iOS)" */;
+			buildPhases = (
+				0C878E01300931EE00C21123 /* Sources */,
+				0C878E02300931EE00C21123 /* Frameworks */,
+				0C878E03300931EE00C21123 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "Cross-Origin Storage Extension (iOS)";
+			packageProductDependencies = (
+			);
+			productName = "Cross-Origin Storage Extension (iOS)";
+			productReference = 0C878E05300931EE00C21123 /* Cross-Origin Storage Extension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		0C878E0E300931EE00C21123 /* Cross-Origin Storage Extension (macOS) */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0C878E2C300931EE00C21123 /* Build configuration list for PBXNativeTarget "Cross-Origin Storage Extension (macOS)" */;
+			buildPhases = (
+				0C878E0B300931EE00C21123 /* Sources */,
+				0C878E0C300931EE00C21123 /* Frameworks */,
+				0C878E0D300931EE00C21123 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "Cross-Origin Storage Extension (macOS)";
+			packageProductDependencies = (
+			);
+			productName = "Cross-Origin Storage Extension (macOS)";
+			productReference = 0C878E0F300931EE00C21123 /* Cross-Origin Storage Extension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		0C878DD4300931ED00C21123 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					0C878DE6300931EE00C21123 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					0C878DF8300931EE00C21123 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					0C878E04300931EE00C21123 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					0C878E0E300931EE00C21123 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+				};
+			};
+			buildConfigurationList = 0C878DD7300931ED00C21123 /* Build configuration list for PBXProject "Cross-Origin Storage" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 0C878DD3300931ED00C21123;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 0C878DE8300931EE00C21123 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				0C878DE6300931EE00C21123 /* Cross-Origin Storage (iOS) */,
+				0C878DF8300931EE00C21123 /* Cross-Origin Storage (macOS) */,
+				0C878E04300931EE00C21123 /* Cross-Origin Storage Extension (iOS) */,
+				0C878E0E300931EE00C21123 /* Cross-Origin Storage Extension (macOS) */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		0C878DE5300931EE00C21123 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0C878E17300931EE00C21123 /* Icon.png in Resources */,
+				0C878DF0300931EE00C21123 /* LaunchScreen.storyboard in Resources */,
+				0C878E15300931EE00C21123 /* Main.html in Resources */,
+				0C878E1B300931EE00C21123 /* Script.js in Resources */,
+				0C878E1F300931EE00C21123 /* Assets.xcassets in Resources */,
+				0C878DF3300931EE00C21123 /* Main.storyboard in Resources */,
+				0C878E19300931EE00C21123 /* Style.css in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0C878DF7300931EE00C21123 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0C878E18300931EE00C21123 /* Icon.png in Resources */,
+				0C878E1A300931EE00C21123 /* Style.css in Resources */,
+				0C878DFF300931EE00C21123 /* Main.storyboard in Resources */,
+				0C878E1C300931EE00C21123 /* Script.js in Resources */,
+				0C878E20300931EE00C21123 /* Assets.xcassets in Resources */,
+				0C878E16300931EE00C21123 /* Main.html in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0C878E03300931EE00C21123 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0C878E62300931EE00C21123 /* sha256.js in Resources */,
+				0C878E6B300931EE00C21123 /* popup.html in Resources */,
+				0C878E6D300931EE00C21123 /* relay-extension.html in Resources */,
+				0C878E64300931EE00C21123 /* relay-extension.js in Resources */,
+				0C878E75300931EE00C21123 /* content.js in Resources */,
+				0C878E74300931EE00C21123 /* background.html in Resources */,
+				0C878E72300931EE00C21123 /* options.html in Resources */,
+				0C878E6C300931EE00C21123 /* options.js in Resources */,
+				0C878E76300931EE00C21123 /* public-suffix-list.js in Resources */,
+				0C878E6A300931EE00C21123 /* logo-cos.svg in Resources */,
+				0C878E78300931EE00C21123 /* public-hash-list.js in Resources */,
+				0C878E69300931EE00C21123 /* input-switch-polyfill.js in Resources */,
+				0C878E70300931EE00C21123 /* manifest.json in Resources */,
+				0C878E77300931EE00C21123 /* main-world.js in Resources */,
+				0C878E65300931EE00C21123 /* resource-manager.js in Resources */,
+				0C878E6E300931EE00C21123 /* viewer.js in Resources */,
+				0C878E66300931EE00C21123 /* styles.css in Resources */,
+				0C878E67300931EE00C21123 /* background.js in Resources */,
+				0C878E68300931EE00C21123 /* logo-cos.png in Resources */,
+				0C878E6F300931EE00C21123 /* viewer.html in Resources */,
+				0C878E63300931EE00C21123 /* popup.js in Resources */,
+				0C878E71300931EE00C21123 /* same-site.js in Resources */,
+				0C878E73300931EE00C21123 /* input-switch-polyfill.css in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0C878E0D300931EE00C21123 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0C878E4B300931EE00C21123 /* sha256.js in Resources */,
+				0C878E54300931EE00C21123 /* popup.html in Resources */,
+				0C878E56300931EE00C21123 /* relay-extension.html in Resources */,
+				0C878E4D300931EE00C21123 /* relay-extension.js in Resources */,
+				0C878E5E300931EE00C21123 /* content.js in Resources */,
+				0C878E5D300931EE00C21123 /* background.html in Resources */,
+				0C878E5B300931EE00C21123 /* options.html in Resources */,
+				0C878E55300931EE00C21123 /* options.js in Resources */,
+				0C878E5F300931EE00C21123 /* public-suffix-list.js in Resources */,
+				0C878E53300931EE00C21123 /* logo-cos.svg in Resources */,
+				0C878E61300931EE00C21123 /* public-hash-list.js in Resources */,
+				0C878E52300931EE00C21123 /* input-switch-polyfill.js in Resources */,
+				0C878E59300931EE00C21123 /* manifest.json in Resources */,
+				0C878E60300931EE00C21123 /* main-world.js in Resources */,
+				0C878E4E300931EE00C21123 /* resource-manager.js in Resources */,
+				0C878E57300931EE00C21123 /* viewer.js in Resources */,
+				0C878E4F300931EE00C21123 /* styles.css in Resources */,
+				0C878E50300931EE00C21123 /* background.js in Resources */,
+				0C878E51300931EE00C21123 /* logo-cos.png in Resources */,
+				0C878E58300931EE00C21123 /* viewer.html in Resources */,
+				0C878E4C300931EE00C21123 /* popup.js in Resources */,
+				0C878E5A300931EE00C21123 /* same-site.js in Resources */,
+				0C878E5C300931EE00C21123 /* input-switch-polyfill.css in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		0C878DE3300931EE00C21123 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0C878E1D300931EE00C21123 /* ViewController.swift in Sources */,
+				0C878DEB300931EE00C21123 /* AppDelegate.swift in Sources */,
+				0C878DED300931EE00C21123 /* SceneDelegate.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0C878DF5300931EE00C21123 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0C878E1E300931EE00C21123 /* ViewController.swift in Sources */,
+				0C878DFC300931EE00C21123 /* AppDelegate.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0C878E01300931EE00C21123 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0C878E21300931EE00C21123 /* SafariWebExtensionHandler.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0C878E0B300931EE00C21123 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0C878E22300931EE00C21123 /* SafariWebExtensionHandler.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		0C878E08300931EE00C21123 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 0C878E04300931EE00C21123 /* Cross-Origin Storage Extension (iOS) */;
+			targetProxy = 0C878E07300931EE00C21123 /* PBXContainerItemProxy */;
+		};
+		0C878E12300931EE00C21123 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 0C878E0E300931EE00C21123 /* Cross-Origin Storage Extension (macOS) */;
+			targetProxy = 0C878E11300931EE00C21123 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXVariantGroup section */
+		0C878DDA300931ED00C21123 /* Main.html */ = {
+			isa = PBXVariantGroup;
+			children = (
+				0C878DDB300931ED00C21123 /* Base */,
+			);
+			name = Main.html;
+			sourceTree = "<group>";
+		};
+		0C878DEE300931EE00C21123 /* LaunchScreen.storyboard */ = {
+			isa = PBXVariantGroup;
+			children = (
+				0C878DEF300931EE00C21123 /* Base */,
+			);
+			name = LaunchScreen.storyboard;
+			sourceTree = "<group>";
+		};
+		0C878DF1300931EE00C21123 /* Main.storyboard */ = {
+			isa = PBXVariantGroup;
+			children = (
+				0C878DF2300931EE00C21123 /* Base */,
+			);
+			name = Main.storyboard;
+			sourceTree = "<group>";
+		};
+		0C878DFD300931EE00C21123 /* Main.storyboard */ = {
+			isa = PBXVariantGroup;
+			children = (
+				0C878DFE300931EE00C21123 /* Base */,
+			);
+			name = Main.storyboard;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
+/* Begin XCBuildConfiguration section */
+		0C878E23300931EE00C21123 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		0C878E24300931EE00C21123 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		0C878E26300931EE00C21123 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "iOS (Extension)/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Cross-Origin Storage Extension";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.1;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tomayac.crossoriginstorage.Extension;
+				PRODUCT_NAME = "Cross-Origin Storage Extension";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		0C878E27300931EE00C21123 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "iOS (Extension)/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Cross-Origin Storage Extension";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.1;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tomayac.crossoriginstorage.Extension;
+				PRODUCT_NAME = "Cross-Origin Storage Extension";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		0C878E2A300931EE00C21123 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "iOS (App)/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Cross-Origin Storage";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				INFOPLIST_KEY_UIMainStoryboardFile = Main;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.1;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+					"-framework",
+					WebKit,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tomayac.crossoriginstorage;
+				PRODUCT_NAME = "Cross-Origin Storage";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		0C878E2B300931EE00C21123 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "iOS (App)/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Cross-Origin Storage";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				INFOPLIST_KEY_UIMainStoryboardFile = Main;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.1;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+					"-framework",
+					WebKit,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tomayac.crossoriginstorage;
+				PRODUCT_NAME = "Cross-Origin Storage";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		0C878E2D300931EE00C21123 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "macOS (Extension)/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Cross-Origin Storage Extension";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.14;
+				MARKETING_VERSION = 1.1;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tomayac.crossoriginstorage.Extension;
+				PRODUCT_NAME = "Cross-Origin Storage Extension";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		0C878E2E300931EE00C21123 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "macOS (Extension)/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Cross-Origin Storage Extension";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.14;
+				MARKETING_VERSION = 1.1;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tomayac.crossoriginstorage.Extension;
+				PRODUCT_NAME = "Cross-Origin Storage Extension";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		0C878E31300931EE00C21123 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "macOS (App)/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Cross-Origin Storage";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSMainStoryboardFile = Main;
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.14;
+				MARKETING_VERSION = 1.1;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+					"-framework",
+					WebKit,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tomayac.crossoriginstorage;
+				PRODUCT_NAME = "Cross-Origin Storage";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		0C878E32300931EE00C21123 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "macOS (App)/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Cross-Origin Storage";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSMainStoryboardFile = Main;
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.14;
+				MARKETING_VERSION = 1.1;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+					"-framework",
+					WebKit,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tomayac.crossoriginstorage;
+				PRODUCT_NAME = "Cross-Origin Storage";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		0C878DD7300931ED00C21123 /* Build configuration list for PBXProject "Cross-Origin Storage" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0C878E23300931EE00C21123 /* Debug */,
+				0C878E24300931EE00C21123 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		0C878E25300931EE00C21123 /* Build configuration list for PBXNativeTarget "Cross-Origin Storage Extension (iOS)" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0C878E26300931EE00C21123 /* Debug */,
+				0C878E27300931EE00C21123 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		0C878E29300931EE00C21123 /* Build configuration list for PBXNativeTarget "Cross-Origin Storage (iOS)" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0C878E2A300931EE00C21123 /* Debug */,
+				0C878E2B300931EE00C21123 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		0C878E2C300931EE00C21123 /* Build configuration list for PBXNativeTarget "Cross-Origin Storage Extension (macOS)" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0C878E2D300931EE00C21123 /* Debug */,
+				0C878E2E300931EE00C21123 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		0C878E30300931EE00C21123 /* Build configuration list for PBXNativeTarget "Cross-Origin Storage (macOS)" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0C878E31300931EE00C21123 /* Debug */,
+				0C878E32300931EE00C21123 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 0C878DD4300931ED00C21123 /* Project object */;
+}

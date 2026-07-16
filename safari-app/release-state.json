@@ -1,0 +1,9 @@
+{
+  "marketingVersion": "1.1",
+  "macos": {
+    "buildNumber": 1
+  },
+  "ios": {
+    "buildNumber": 1
+  }
+}

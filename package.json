@@ -14,7 +14,8 @@
     "use-safari": "cp manifest.safari.json manifest.json",
     "build:chrome": "bash zip-extension.sh chrome",
     "build:firefox": "bash zip-extension.sh firefox",
-    "build:safari": "bash zip-extension.sh safari"
+    "build:safari": "bash zip-extension.sh safari",
+    "release:safari": "bash upload-safari-build.sh"
   },
   "repository": {
     "type": "git",
