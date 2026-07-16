@@ -463,6 +463,20 @@ const mod = supportsCOS
   : await import('resource.json');
 ```
 
+## Privacy: Public Hash List gating
+
+`requestFileHandle()` lets any origin ask whether a given hash is already
+cached, which can turn cache presence into a cross-site probing oracle for
+rare files. This extension has an opt-in setting (off by default, in
+`options.html`) that closes that hole for globally-shared (`origins: '*'`)
+resources: when enabled, a hash is only revealed as available if it's also
+on the [Public Hash List](https://github.com/tomayac/public-hash-list)
+(PHL) — a vendor-neutral, openly licensed allowlist of resource hashes so
+widely deployed that confirming their presence reveals nothing about an
+individual user. See the
+[PHL design explainer](https://github.com/WICG/cross-origin-storage/blob/main/public-hash-list/phl-explainer.md)
+for the full rationale, data format, and proposed governance model.
+
 ## License
 
 Apache 2.0.

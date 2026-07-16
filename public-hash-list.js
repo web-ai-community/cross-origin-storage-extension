@@ -4,10 +4,12 @@
 // Optional gate that checks a requested resource hash against the
 // Public Hash List (PHL) — https://github.com/tomayac/public-hash-list —
 // before the extension reveals whether that hash is available in the
-// local COS cache. Off by default; see options.html.
+// local COS cache. Off by default; see options.html. Design rationale
+// and governance model:
+// https://github.com/WICG/cross-origin-storage/blob/main/public-hash-list/phl-explainer.md
 //
 // The PHL is a flat, Public-Suffix-List-style text file. Parsing rules,
-// per the PHL README:
+// per the PHL explainer's Data format section:
 //   - Lines starting with `//` are comments and are ignored, EXCEPT for
 //     the `===BEGIN <SECTION>===` / `===END <SECTION>===` delimiters,
 //     which mark section boundaries.
