@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Cross-Origin Storage",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "description": "Implements the proposed Cross-Origin Storage API for sharing files across sites with consent.",
   "options_page": "options.html",
   "permissions": ["storage", "unlimitedStorage", "tabs"],
