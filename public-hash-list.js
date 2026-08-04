@@ -2,10 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Optional gate that checks a requested resource hash against the
-// Public Hash List (PHL) — https://github.com/tomayac/public-hash-list —
-// before the extension reveals whether that hash is available in the
-// local COS cache. Off by default; see options.html. Design rationale
-// and governance model:
+// Public Hash List (PHL) before the extension reveals whether that hash is
+// available in the local COS cache. Off by default; see options.html. Design
+// rationale, governance model, and reference implementation:
 // https://github.com/WICG/cross-origin-storage/blob/main/public-hash-list/phl-explainer.md
 //
 // The PHL is a flat, Public-Suffix-List-style text file. Parsing rules,
@@ -21,7 +20,7 @@
 //     since AI model weights are a primary COS use case.
 
 const PHL_URL =
-  'https://media.githubusercontent.com/media/tomayac/public-hash-list/main/data/public-hash-list-lfs.dat';
+  'https://media.githubusercontent.com/media/WICG/cross-origin-storage/main/public-hash-list/implementation/data/public-hash-list.dat';
 
 // Stale-while-revalidate: serve whatever is cached immediately (even if
 // stale), and kick off a background refetch once the cache is older than

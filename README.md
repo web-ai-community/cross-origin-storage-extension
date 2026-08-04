@@ -478,7 +478,7 @@ cached, which can turn cache presence into a cross-site probing oracle for
 rare files. This extension has an opt-in setting (off by default, in
 `options.html`) that closes that hole for globally-shared (`origins: '*'`)
 resources: when enabled, a hash is only revealed as available if it's also
-on the [Public Hash List](https://github.com/tomayac/public-hash-list)
+on the [Public Hash List](https://github.com/WICG/cross-origin-storage/tree/main/public-hash-list/implementation)
 (PHL) — a vendor-neutral, openly licensed allowlist of resource hashes so
 widely deployed that confirming their presence reveals nothing about an
 individual user. See the
