@@ -2,6 +2,14 @@
 
 <img src="https://raw.githubusercontent.com/web-ai-community/cross-origin-storage-extension/refs/heads/main/logo-cos.svg" alt="Cross-Origin Storage API logo" width="60" height="60">
 
+## Available on
+
+| Browser | Link |
+| --- | --- |
+| <img src="https://raw.githubusercontent.com/alrra/browser-logos/main/src/chrome/chrome_48x48.png" width="24" height="24" alt=""> Chrome (and Chromium-based browsers) | [Chrome Web Store](https://chromewebstore.google.com/detail/cross-origin-storage/denpnpcgjgikjpoglpjefakmdcbmlgih) |
+| <img src="https://raw.githubusercontent.com/alrra/browser-logos/main/src/firefox/firefox_48x48.png" width="24" height="24" alt=""> Firefox (desktop & Android) | [Firefox Add-ons](https://addons.mozilla.org/en-US/firefox/addon/cross-origin-storage/) |
+| <img src="https://raw.githubusercontent.com/alrra/browser-logos/main/src/safari/safari_48x48.png" width="24" height="24" alt=""> Safari (macOS, iOS & iPadOS) | [App Store](https://apps.apple.com/us/app/cross-origin-storage/id6788319695) |
+
 ## Usage
 
 1. Choose between the developer or the end user flow:
@@ -11,8 +19,8 @@
        [Load an unpacked extension](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked)
        instructions.
    - End user:
-     - Install the extension from the
-       [Chrome Web Store](https://chromewebstore.google.com/detail/cross-origin-storage/denpnpcgjgikjpoglpjefakmdcbmlgih).
+     - Install the extension from one of the stores listed
+       [above](#available-on).
 1. Navigate to the demo app on
    [https://web-ai-community.github.io](https://web-ai-community.github.io/cross-origin-storage-extension/)
    (or try the more realistic
