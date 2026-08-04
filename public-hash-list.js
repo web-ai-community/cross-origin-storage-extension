@@ -21,7 +21,7 @@
 //     since AI model weights are a primary COS use case.
 
 const PHL_URL =
-  'https://raw.githubusercontent.com/tomayac/public-hash-list/main/data/public-hash-list.dat';
+  'https://media.githubusercontent.com/media/tomayac/public-hash-list/main/data/public-hash-list.dat';
 
 // Stale-while-revalidate: serve whatever is cached immediately (even if
 // stale), and kick off a background refetch once the cache is older than

@@ -146,7 +146,7 @@ async function main() {
 
   // Safety net: intercept any accidental PHL / PSL network refreshes so
   // _maybeRefreshInBackground() cannot overwrite the seeded mock data.
-  await context.route('https://raw.githubusercontent.com/tomayac/public-hash-list/**', route =>
+  await context.route('https://media.githubusercontent.com/media/tomayac/public-hash-list/**', route =>
     route.fulfill({
       status:      200,
       contentType: 'text/plain',
