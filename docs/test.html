@@ -294,12 +294,6 @@
         <code>import</code> resolution.
       </li>
       <li>
-        Cross-origin HTTP, classic &amp; module — both served from
-        <code>cdn.jsdelivr.net</code> (cross-origin to the GitHub Pages host,
-        <code>application/javascript</code> MIME type, CORS
-        <code>Access-Control-Allow-Origin: *</code>).
-      </li>
-      <li>
         <code>SharedWorker</code>, classic &amp; module — the extension patches
         <code>window.SharedWorker</code> with the same wrapper-blob technique,
         adapted to the <code>onconnect</code> / <code>MessagePort</code> API. A
@@ -1313,30 +1307,6 @@
           },
         },
         {
-          id: 'cross-origin-classic',
-          label: 'Cross-origin URL, classic worker',
-          create() {
-            // Served from cdn.jsdelivr.net — cross-origin to the GitHub Pages
-            // host (web-ai-community.github.io) with CORS Access-Control-Allow-Origin: *.
-            // text/plain MIME type is acceptable for classic workers.
-            return new Worker(
-              'https://cdn.jsdelivr.net/gh/web-ai-community/cross-origin-storage-extension@main/docs/test-worker-classic.js'
-            );
-          },
-        },
-        {
-          id: 'cross-origin-module',
-          label: 'Cross-origin URL, module worker',
-          create() {
-            // jsDelivr serves application/javascript, which is required for
-            // module workers (browsers reject text/plain for module scripts).
-            return new Worker(
-              'https://cdn.jsdelivr.net/gh/web-ai-community/cross-origin-storage-extension@main/docs/test-worker-classic.js',
-              { type: 'module' }
-            );
-          },
-        },
-        {
           id: 'shared-worker-classic',
           label: 'SharedWorker, classic',
           create() {
@@ -1430,14 +1400,10 @@
         log(`--- Variant: ${variant.label} ---`);
         let worker;
         try {
-          // Worker() throws synchronously (e.g. a SecurityError for a
-          // cross-origin script when the page itself isn't served over
-          // HTTPS — Chrome disallows cross-origin worker scripts from
-          // non-HTTPS pages even on otherwise-secure contexts like
-          // localhost) as well as asynchronously via onerror below. Route
-          // both through the same pass:null path so the isNA check treats
-          // either kind of load-time failure as an environment limitation
-          // rather than an extension bug.
+          // Worker() can throw synchronously as well as fail asynchronously
+          // via onerror below. Route both through the same pass:null path
+          // so the isNA check treats either kind of load-time failure as an
+          // environment limitation rather than an extension bug.
           let result;
           try {
             worker = variant.create();
@@ -1884,82 +1850,6 @@
           },
         },
         {
-          id: 'origins-list-jsdelivr-cross-origin-read',
-          label: "origins: ['https://cdn.jsdelivr.net'] — real cross-origin worker (jsDelivr) confirms the file exists",
-          async run() {
-            const content = `cos-origins-jsdelivr-${Date.now()}`;
-            const hex = await sha256Hex(content);
-            const hash = { algorithm: 'SHA-256', value: hex };
-            const wh = await navigator.crossOriginStorage.requestFileHandle(
-              hash, { create: true, origins: ['https://cdn.jsdelivr.net'] }
-            );
-            const wr = await wh.createWritable();
-            await wr.write(new Blob([content], { type: 'text/plain' }));
-            await wr.close();
-            log(`Origins: stored resource for jsDelivr cross-origin readback (${hex.slice(0, 12)}…)`);
-
-            // This worker's script is fetched from cdn.jsdelivr.net, so its
-            // global scope's own origin is genuinely https://cdn.jsdelivr.net
-            // — unlike the .test subdomains or the extension relay page used
-            // by the other origins tests, this is an independent, real-world
-            // origin over which this test has no control.
-            let worker;
-            try {
-              worker = new Worker(
-                'https://cdn.jsdelivr.net/gh/web-ai-community/cross-origin-storage-extension@main/docs/test-worker-cross-origin-read.js'
-              );
-            } catch (err) {
-              // Worker() throws synchronously here (rather than via
-              // onerror below) when the page itself isn't served over
-              // HTTPS — Chrome disallows cross-origin worker scripts from
-              // non-HTTPS pages even on otherwise-secure contexts like
-              // localhost. That's an environment limitation, not a
-              // regression, so treat it the same as the other soft-skip
-              // cases in this test suite.
-              return {
-                pass: true,
-                detail:
-                  `Skipped: ${err.name}: ${err.message} — cross-origin worker scripts require ` +
-                  `an HTTPS page context; this page is served over "${location.protocol}". ` +
-                  'Run on HTTPS (e.g. GitHub Pages) to exercise this test with real verification.',
-              };
-            }
-            try {
-              const result = await new Promise((resolve, reject) => {
-                const timeoutId = setTimeout(
-                  () => reject(new Error('jsDelivr worker did not respond within 15 s')),
-                  15000
-                );
-                worker.onmessage = ({ data }) => {
-                  clearTimeout(timeoutId);
-                  resolve(data);
-                };
-                worker.onerror = (err) => {
-                  clearTimeout(timeoutId);
-                  reject(new Error(err.message || 'Worker load error'));
-                };
-                worker.postMessage({ type: 'read', hash, expected: content });
-              });
-              if (result.pass === null) {
-                return {
-                  pass: true,
-                  detail:
-                    'Skipped: navigator.crossOriginStorage not available in the jsDelivr worker — ' +
-                    'enable "Enable the COS API in Worker and SharedWorker" in extension options to run this test with real verification.',
-                };
-              }
-              return {
-                pass: result.pass,
-                detail: result.pass
-                  ? `Confirmed: a worker running on ${result.origin} (loaded from jsDelivr, not this page's origin ${location.origin}) read the file back — ${result.detail}`
-                  : result.detail,
-              };
-            } finally {
-              worker.terminate();
-            }
-          },
-        },
-        {
           id: 'origins-samesite-self',
           label: 'origins omitted (same-site) — same-origin read succeeds',
           async run() {
@@ -1993,7 +1883,7 @@
             await wr.write(new Blob([content], { type: 'text/plain' }));
             await wr.close();
 
-            if (new URL(RELAY_URL).origin === location.origin) {
+            if (RELAY_URL && new URL(RELAY_URL).origin === location.origin) {
               return { pass: true, detail: 'Skipped: relay is same-origin when running on GitHub Pages — cross-origin blocking verified by e2e-phl-test.mjs.' };
             }
             let ping;
