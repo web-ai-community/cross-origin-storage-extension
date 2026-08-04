@@ -22,6 +22,11 @@
 const PHL_URL =
   'https://media.githubusercontent.com/media/WICG/cross-origin-storage/main/public-hash-list/implementation/data/public-hash-list.dat';
 
+// The repo publishes a `sha256sum`-format sidecar next to the data file;
+// verifying against it catches a corrupted or tampered download before it
+// ever reaches parsePublicHashList().
+const PHL_SHA256_URL = `${PHL_URL}.sha256`;
+
 // Stale-while-revalidate: serve whatever is cached immediately (even if
 // stale), and kick off a background refetch once the cache is older than
 // this. A failed background refetch just leaves the existing cache in
@@ -68,6 +73,13 @@ function parsePublicHashList(text) {
   }
 
   return { hashes, version };
+}
+
+async function sha256Hex(buffer) {
+  const digest = await crypto.subtle.digest('SHA-256', buffer);
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 class PublicHashList {
@@ -121,11 +133,33 @@ class PublicHashList {
   }
 
   async _refresh() {
-    const response = await fetch(PHL_URL, { cache: 'no-cache' });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status} fetching Public Hash List`);
+    const [datResponse, sha256Response] = await Promise.all([
+      fetch(PHL_URL, { cache: 'no-cache' }),
+      fetch(PHL_SHA256_URL, { cache: 'no-cache' }),
+    ]);
+    if (!datResponse.ok) {
+      throw new Error(`HTTP ${datResponse.status} fetching Public Hash List`);
     }
-    const text = await response.text();
+    if (!sha256Response.ok) {
+      throw new Error(
+        `HTTP ${sha256Response.status} fetching Public Hash List checksum`
+      );
+    }
+
+    const buffer = await datResponse.arrayBuffer();
+    const sha256Text = await sha256Response.text();
+    const expectedHash = sha256Text.trim().split(/\s+/)[0]?.toLowerCase();
+    if (!expectedHash || !/^[a-f0-9]{64}$/.test(expectedHash)) {
+      throw new Error('Malformed Public Hash List checksum file');
+    }
+    const actualHash = await sha256Hex(buffer);
+    if (actualHash !== expectedHash) {
+      throw new Error(
+        `Public Hash List checksum mismatch: expected ${expectedHash}, got ${actualHash}`
+      );
+    }
+
+    const text = new TextDecoder('utf-8').decode(buffer);
     const { hashes, version } = parsePublicHashList(text);
     if (hashes.size === 0) {
       // Parsed-but-empty almost certainly means a format change upstream
@@ -155,4 +189,10 @@ class PublicHashList {
   }
 }
 
-export { PublicHashList, parsePublicHashList, PHL_URL, REFRESH_INTERVAL_MS };
+export {
+  PublicHashList,
+  parsePublicHashList,
+  PHL_URL,
+  PHL_SHA256_URL,
+  REFRESH_INTERVAL_MS,
+};

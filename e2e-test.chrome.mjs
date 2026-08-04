@@ -146,13 +146,18 @@ async function main() {
 
   // Safety net: intercept any accidental PHL / PSL network refreshes so
   // _maybeRefreshInBackground() cannot overwrite the seeded mock data.
-  await context.route('https://media.githubusercontent.com/media/WICG/cross-origin-storage/**', route =>
-    route.fulfill({
-      status:      200,
-      contentType: 'text/plain',
-      body:        `// VERSION: test-v1\n// ===BEGIN SHA-256===\n${MOCK_PHL_HASHES.join('\n')}\n// ===END SHA-256===\n`,
-    })
-  );
+  const MOCK_PHL_BODY = `// VERSION: test-v1\n// ===BEGIN SHA-256===\n${MOCK_PHL_HASHES.join('\n')}\n// ===END SHA-256===\n`;
+  await context.route('https://media.githubusercontent.com/media/WICG/cross-origin-storage/**', route => {
+    const url = route.request().url();
+    if (url.endsWith('.sha256')) {
+      return route.fulfill({
+        status:      200,
+        contentType: 'text/plain',
+        body:        `${sha256Hex(MOCK_PHL_BODY)}  public-hash-list.dat\n`,
+      });
+    }
+    return route.fulfill({ status: 200, contentType: 'text/plain', body: MOCK_PHL_BODY });
+  });
   await context.route('https://raw.githubusercontent.com/publicsuffix/list/**', route =>
     route.fulfill({ status: 200, contentType: 'text/plain', body: 'test\n' })
   );
