@@ -246,7 +246,8 @@
 
     <h2>Worker thread test results</h2>
     <p>
-      The same five tests, run inside a <code>Worker</code> to verify that
+      The same singular + plural tests as above, run inside a
+      <code>Worker</code> to verify that
       <code>navigator.crossOriginStorage</code> is also available on worker
       threads.
     </p>
@@ -1124,7 +1125,13 @@
 
       const workerTbody = document.getElementById('worker-results');
 
-      const workerRows = TESTS.map((test, idx) => {
+      // Singular tests (current API) first, then the plural/deprecated ones —
+      // same ordering as the main-thread table above. The worker's own copy
+      // of these arrays (in #worker-src) drives execution; this outer copy
+      // only supplies labels/ids for the table and logging.
+      const WORKER_TESTS = [...SINGULAR_TESTS, ...TESTS];
+
+      const workerRows = WORKER_TESTS.map((test, idx) => {
         const tr = document.createElement('tr');
         tr.id = `worker-row-${test.id}`;
         tr.innerHTML = `
@@ -1177,7 +1184,7 @@
         const btn = rowEl.querySelector('.run-btn');
         btn.disabled = true;
         setRowStatus(rowEl, 'running', '');
-        log(`--- Running in Worker: ${TESTS[testIdx].label} ---`);
+        log(`--- Running in Worker: ${WORKER_TESTS[testIdx].label} ---`);
         try {
           const result = await new Promise((resolve) => {
             pendingWorkerTests.set(testIdx, resolve);
@@ -1208,7 +1215,7 @@
       document
         .getElementById('run-all-worker')
         .addEventListener('click', async () => {
-          for (let i = 0; i < TESTS.length; i++) {
+          for (let i = 0; i < WORKER_TESTS.length; i++) {
             await runWorkerTest(i, workerRows[i]);
           }
         });
@@ -1698,7 +1705,7 @@
         for (let i = 0; i < TESTS.length; i++) {
           await runTest(TESTS[i], rows[i]);
         }
-        for (let i = 0; i < TESTS.length; i++) {
+        for (let i = 0; i < WORKER_TESTS.length; i++) {
           await runWorkerTest(i, workerRows[i]);
         }
         for (let i = 0; i < WORKER_VARIANTS.length; i++) {
@@ -3410,6 +3417,170 @@
       const MISSING_HASH_1 = hashObj('a'.repeat(64));
       const MISSING_HASH_2 = hashObj('b'.repeat(64));
 
+      const SINGULAR_TESTS = [
+        {
+          id: 'singular-exists',
+          label: 'requestFileHandle() — resource exists',
+          async run() {
+            log('Worker Singular test 1: storing file S-A…');
+            const content = 'cos-test-singular-A';
+            const blob = new Blob([content], { type: 'text/plain' });
+            const hexValue = await sha256Hex(content);
+            const hash = hashObj(hexValue);
+            const wh = await navigator.crossOriginStorage.requestFileHandle(
+              hash,
+              { create: true }
+            );
+            const writable = await wh.createWritable();
+            await writable.write(blob);
+            await writable.close();
+            log(
+              `Worker Singular test 1: stored with hash ${hash.value.slice(0, 16)}…`
+            );
+            const handle =
+              await navigator.crossOriginStorage.requestFileHandle(hash);
+            const file = await handle.getFile();
+            const text = await file.text();
+            if (text !== content) {
+              return {
+                pass: false,
+                detail: `Expected "${content}", got "${text}"`,
+              };
+            }
+            return {
+              pass: true,
+              detail: `Returned File with correct content: "${text}"`,
+            };
+          },
+        },
+
+        {
+          id: 'singular-missing',
+          label: 'requestFileHandle() — resource does not exist',
+          async run() {
+            log('Worker Singular test 2: requesting non-existent hash…');
+            try {
+              await navigator.crossOriginStorage.requestFileHandle(
+                MISSING_HASH_1
+              );
+              return {
+                pass: false,
+                detail:
+                  'Expected NotFoundError but call resolved without error.',
+              };
+            } catch (err) {
+              if (err.name === 'NotFoundError') {
+                return {
+                  pass: true,
+                  detail: `Correctly threw ${err.name}: ${err.message}`,
+                };
+              }
+              return {
+                pass: false,
+                detail: `Threw unexpected error ${err.name}: ${err.message}`,
+              };
+            }
+          },
+        },
+
+        {
+          id: 'singular-write-read',
+          label: 'requestFileHandle() — write then read roundtrip',
+          async run() {
+            log('Worker Singular test 3: write+read roundtrip…');
+            const content = 'cos-test-singular-B';
+            const blob = new Blob([content], { type: 'text/plain' });
+            const hash = hashObj(await sha256Hex(content));
+            const wh = await navigator.crossOriginStorage.requestFileHandle(
+              hash,
+              { create: true }
+            );
+            const writable = await wh.createWritable();
+            await writable.write(blob);
+            await writable.close();
+            const rh =
+              await navigator.crossOriginStorage.requestFileHandle(hash);
+            const text = await (await rh.getFile()).text();
+            if (text !== content) {
+              return {
+                pass: false,
+                detail: `Expected "${content}", got "${text}"`,
+              };
+            }
+            return {
+              pass: true,
+              detail: `Write+read roundtrip succeeded: "${text}"`,
+            };
+          },
+        },
+
+        {
+          id: 'singular-get-file-before-write',
+          label: 'requestFileHandle({create:true}) — getFile() before any write throws NotAllowedError',
+          async run() {
+            log('Worker Singular test 4: getFile() on unwritten handle…');
+            const content = 'cos-test-singular-C';
+            const hash = hashObj(await sha256Hex(content));
+            const handle = await navigator.crossOriginStorage.requestFileHandle(
+              hash,
+              { create: true }
+            );
+            try {
+              await handle.getFile();
+              return {
+                pass: false,
+                detail: 'Expected NotAllowedError but getFile() resolved without error.',
+              };
+            } catch (err) {
+              if (err.name === 'NotAllowedError') {
+                return {
+                  pass: true,
+                  detail: `Correctly threw ${err.name}: ${err.message}`,
+                };
+              }
+              return {
+                pass: false,
+                detail: `Threw unexpected error ${err.name}: ${err.message}`,
+              };
+            }
+          },
+        },
+
+        {
+          id: 'singular-hash-mismatch',
+          label: 'requestFileHandle({create:true}) — writing data that does not match the hash throws DataError',
+          async run() {
+            log('Worker Singular test 5: writing mismatched data…');
+            const content = 'cos-test-singular-D';
+            const hash = hashObj(await sha256Hex(content));
+            const handle = await navigator.crossOriginStorage.requestFileHandle(
+              hash,
+              { create: true }
+            );
+            const writable = await handle.createWritable();
+            await writable.write(new Blob(['this is not the right content'], { type: 'text/plain' }));
+            try {
+              await writable.close();
+              return {
+                pass: false,
+                detail: 'Expected DataError on close() but it resolved without error.',
+              };
+            } catch (err) {
+              if (err.name === 'DataError') {
+                return {
+                  pass: true,
+                  detail: `Correctly threw ${err.name}: ${err.message}`,
+                };
+              }
+              return {
+                pass: false,
+                detail: `Threw unexpected error ${err.name}: ${err.message}`,
+              };
+            }
+          },
+        },
+      ];
+
       const TESTS = [
         {
           id: 'single-exists',
@@ -3592,6 +3763,10 @@
         },
       ];
 
+      // Singular tests first, then plural/deprecated — same ordering as the
+      // main-thread WORKER_TESTS array, so postMessage indices line up.
+      const ALL_TESTS = [...SINGULAR_TESTS, ...TESTS];
+
       self.onmessage = async ({ data }) => {
         if (data.type !== 'run') return;
         if (!self.navigator?.crossOriginStorage) {
@@ -3603,7 +3778,7 @@
           });
           return;
         }
-        const test = TESTS[data.index];
+        const test = ALL_TESTS[data.index];
         if (!test) {
           self.postMessage({
             type: 'result',
