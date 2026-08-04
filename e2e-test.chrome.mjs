@@ -12,6 +12,9 @@
 //   • Multi-origin PHL gate tests (iframes at sub.a.test and b.test)
 //   • CSS tests
 //
+// It then drives test-legacy.html the same way, which covers the deprecated
+// plural requestFileHandles() API (main thread + Worker).
+//
 // The .test hostnames are mapped to 127.0.0.1 via --host-resolver-rules so
 // the single local server answers for all three fake-TLD origins.
 //
@@ -115,6 +118,35 @@ async function seedStorage(sw) {
     },
     [MOCK_PHL_HASHES, MOCK_PSL_EXACT]
   );
+}
+
+// ── Test-page runner ────────────────────────────────────────────────────────
+
+// Clicks #run-all on an already-navigated `page`, waits for every badge
+// under `resultIds` to leave pending/running, then collects each row's
+// label/status/detail. Shared by test.html and test-legacy.html since both
+// pages use the same "table of rows with a badge + Run button" convention.
+async function runAllAndCollect(page, resultIds) {
+  await page.click('#run-all');
+
+  const badgeSel = resultIds.map(id => `#${id} .badge`).join(', ');
+  // Timeout: 30 minutes to accommodate the large stress test on test.html.
+  // NOTE: Playwright's waitForFunction(fn, arg?, options?) — pass the
+  // selector as arg so the options object lands in the correct (third)
+  // position.
+  await page.waitForFunction((sel) => {
+    const badges = [...document.querySelectorAll(sel)];
+    return badges.length > 0 && badges.every(b => !b.textContent.match(/pending|running/));
+  }, badgeSel, { timeout: 1_800_000 });
+
+  const rowSel = resultIds.map(id => `#${id} tr[id]`).join(', ');
+  return page.evaluate((sel) => {
+    return [...document.querySelectorAll(sel)].map(tr => ({
+      label:  tr.querySelector('td:nth-child(2)')?.textContent?.trim(),
+      status: tr.querySelector('.badge')?.textContent?.trim(),
+      detail: tr.querySelector('.detail')?.textContent?.trim(),
+    }));
+  }, rowSel);
 }
 
 // ── Main ────────────────────────────────────────────────────────────────────
@@ -225,52 +257,43 @@ async function main() {
   // Single click runs every test group in sequence: main + singular, worker,
   // worker variants, stress (3 GiB), origins, MOPHL, CSS, declarative HTML.
   console.log('\nRunning all tests (this may take ~10–15 min for the 3 GiB stress test)…');
-  await page.click('#run-all');
+  const results = await runAllAndCollect(page, [
+    'results',
+    'worker-results',
+    'variant-results',
+    'stress-results',
+    'origins-results',
+    'mophl-results',
+    'css-results',
+    'declarative-results',
+    'declarative-js-results',
+  ]);
+  await page.close();
 
-  // Wait for every badge in every result table to leave pending/running state.
-  // Timeout: 30 minutes to accommodate the large stress test.
-  // NOTE: Playwright's waitForFunction(fn, arg?, options?) — pass null as arg
-  // so the options object is received in the correct (third) position.
-  await page.waitForFunction(() => {
-    const sel = [
-      '#results .badge',
-      '#worker-results .badge',
-      '#variant-results .badge',
-      '#stress-results .badge',
-      '#origins-results .badge',
-      '#mophl-results .badge',
-      '#css-results .badge',
-      '#declarative-results .badge',
-      '#declarative-js-results .badge',
-    ].join(', ');
-    const badges = [...document.querySelectorAll(sel)];
-    return badges.length > 0 && badges.every(b => !b.textContent.match(/pending|running/));
-  }, null, { timeout: 1_800_000 });
+  // ── test-legacy.html: deprecated plural requestFileHandles() API ──────────
+
+  const legacyPage = await context.newPage();
+  console.log(`\nNavigating to http://a.test:${PORT}/test-legacy.html …`);
+  await legacyPage.goto(`http://a.test:${PORT}/test-legacy.html`, { waitUntil: 'load' });
+  legacyPage.on('console', (msg) => {
+    const text = msg.text();
+    if (msg.type() === 'error') {
+      console.error(text);
+    } else {
+      console.log(text);
+    }
+  });
+  console.log('Running legacy (plural API) tests…');
+  const legacyResults = (
+    await runAllAndCollect(legacyPage, ['results', 'worker-results'])
+  ).map(r => ({ ...r, label: `[Legacy] ${r.label}` }));
+  await legacyPage.close();
 
   // ── Collect + report all results ──────────────────────────────────────────
 
-  const results = await page.evaluate(() => {
-    const selector = [
-      '#results tr[id]',
-      '#worker-results tr[id]',
-      '#variant-results tr[id]',
-      '#stress-results tr[id]',
-      '#origins-results tr[id]',
-      '#mophl-results tr[id]',
-      '#css-results tr[id]',
-      '#declarative-results tr[id]',
-      '#declarative-js-results tr[id]',
-    ].join(', ');
-    return [...document.querySelectorAll(selector)].map(tr => ({
-      label:  tr.querySelector('td:nth-child(2)')?.textContent?.trim(),
-      status: tr.querySelector('.badge')?.textContent?.trim(),
-      detail: tr.querySelector('.detail')?.textContent?.trim(),
-    }));
-  });
-
   console.log('\n── Test Results ──────────────────────────────────────');
   let passed = 0, failed = 0;
-  for (const r of results) {
+  for (const r of [...results, ...legacyResults]) {
     if (r.status === 'n/a') continue;
     const icon = r.status === 'pass' ? '✅' : '❌';
     console.log(`${icon} [${r.status}] ${r.label}`);
