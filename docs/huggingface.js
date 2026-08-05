@@ -103,7 +103,9 @@ env.customCache = {
     );
     const handle = await navigator.crossOriginStorage.requestFileHandle(
       hash,
-      { create: true }
+      { create: true,
+        origins: '*',
+      },
     );
     const writableStream = await handle.createWritable();
     await writableStream.write(blob);
