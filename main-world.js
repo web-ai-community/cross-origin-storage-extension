@@ -1460,25 +1460,22 @@ self.addEventListener('message', function __cosBufferFn(e) {
   // as request-time interception at all: there's no DOM node to react to,
   // and `import` isn't a monkey-patchable property the way fetch/Worker/
   // XMLHttpRequest are (`const f = import;` is a SyntaxError -- dynamic
-  // import is a syntactic form, not a callable reference). Worse, this is
-  // broken two levels deeper than that, both verified empirically against
-  // Chrome:
-  //   1. Every browser today rejects *any* unrecognized import-attribute
-  //      key -- including `integrity`, which isn't COS-specific -- with a
-  //      synchronous TypeError ("Invalid attribute key"), thrown before any
-  //      fetch is even dispatched (a bad key never reaches the network, so
-  //      not even a Service Worker fetch handler gets a chance to
-  //      intervene).
-  //   2. Even that assumes the syntax parses at all: the current import
-  //      attributes grammar only permits *string* attribute values, so
-  //      `crossOriginStorage: []`/`crossOriginStorage: [...]` -- an array,
-  //      as the proposal itself specifies -- is a flat SyntaxError in a
-  //      real `type="module"` script, not merely a rejected TypeError.
-  // So a `with { crossOriginStorage }` import written exactly as the spec
-  // describes cannot be rescued once the browser starts on it, in any way,
-  // by any content script -- and for the same reason, it can never even
-  // appear inside a real `type="module"` script without taking down that
-  // script's entire parse.
+  // import is a syntactic form, not a callable reference). Worse, even a
+  // syntactically valid `with { crossOriginStorage }` clause can't be
+  // rescued once the browser starts on it, verified empirically against
+  // Chrome: every browser today rejects *any* unrecognized import-attribute
+  // key -- including `integrity`, which isn't COS-specific -- with a
+  // synchronous TypeError ("Invalid attribute key"), thrown before any
+  // fetch is even dispatched (a bad key never reaches the network, so not
+  // even a Service Worker fetch handler gets a chance to intervene). (An
+  // earlier draft of the explainer also specified an array-valued
+  // `crossOriginStorage: []`/`[...]`, which would have been a flat
+  // SyntaxError under the real import-attributes grammar -- string values
+  // only -- before even reaching that TypeError; the explainer now uses a
+  // space-separated string instead, matching the HTML integration's
+  // `crossoriginstorage` attribute.) So a `with { crossOriginStorage }`
+  // import can never appear inside a real `type="module"` script without
+  // taking down that script's entire parse.
   //
   // This instead follows the approach pioneered by es-module-shims
   // (https://github.com/guybedford/es-module-shims): authors opt in with a
@@ -1516,11 +1513,11 @@ self.addEventListener('message', function __cosBufferFn(e) {
     return -1;
   }
 
-  // Import attribute values are always literals (strings, arrays of
-  // strings, or '*') per the proposal, so evaluating the extracted object
-  // literal text is simpler and more robust than hand-rolling a parser for
-  // it -- this only ever runs on text the page's own <script type="module-
-  // cos"> already contained.
+  // Import attribute values are always string literals (a space-separated
+  // origin list, '*', or '') per the proposal, so evaluating the extracted
+  // object literal text is simpler and more robust than hand-rolling a
+  // parser for it -- this only ever runs on text the page's own <script
+  // type="module-cos"> already contained.
   function evalLiteral(text) {
     try {
       return Function('"use strict"; return (' + text + ');')();
@@ -1531,8 +1528,8 @@ self.addEventListener('message', function __cosBufferFn(e) {
 
   // Matches static `import <clause>? from "specifier" with {...}?` (and the
   // side-effect-only `import "specifier" with {...}?` form). Import
-  // attribute values are always flat (string/array-of-string/'*'), so the
-  // with-clause's own object literal never nests braces -- a non-greedy,
+  // attribute values are always flat string literals, so the with-clause's
+  // own object literal never nests braces -- a non-greedy,
   // non-nested match is sufficient there, unlike the specifier scanner
   // above this comment wouldn't need to worry about. Requires the `d` flag
   // (capture-group indices) to locate each piece precisely enough to splice
@@ -1595,16 +1592,16 @@ self.addEventListener('message', function __cosBufferFn(e) {
   // parsed result (including `undefined`, which is itself a legal result).
   const INVALID_JS_ORIGINS = Symbol('invalid-js-origins');
 
-  // Mirrors the JS API's origins shape, but starting from an *array*
-  // (per the proposal, an empty array -- not an omitted key -- means
-  // same-site-only for the JS integration, unlike the HTML attribute form).
+  // Same space-separated-string grammar as the HTML integration's
+  // `crossoriginstorage` attribute (per the proposal, an empty string --
+  // not an omitted key -- means same-site-only for the JS integration,
+  // since import attribute values can't themselves be omitted once the key
+  // is present). Unlike `getAttribute()`, which always returns a string or
+  // null, `value` here comes from evaluating page-authored JS, so it could
+  // be any type; anything but a string is rejected.
   function parseJSImportOrigins(value) {
-    if (value === '*') return '*';
-    if (Array.isArray(value)) {
-      if (value.length === 0) return undefined; // same-site
-      if (value.every((v) => typeof v === 'string')) return value;
-    }
-    return INVALID_JS_ORIGINS;
+    if (typeof value !== 'string') return INVALID_JS_ORIGINS;
+    return parseCrossOriginStorageAttr(value);
   }
 
   // Resolves one scanned reference against `baseURL`, returning either
@@ -1793,7 +1790,14 @@ self.addEventListener('message', function __cosBufferFn(e) {
       );
     }
     const attrs = (options && options.with) || {};
-    if (!attrs.crossOriginStorage || !attrs.integrity) {
+    // Checked with hasOwnProperty, not truthiness: an empty string is a
+    // legal, meaningful `crossOriginStorage` value (same-site-only), and
+    // `!''` is true, so a truthiness check would wrongly treat it as "no
+    // COS attributes" and skip COS entirely.
+    if (
+      !Object.prototype.hasOwnProperty.call(attrs, 'crossOriginStorage') ||
+      !attrs.integrity
+    ) {
       return import(absoluteSpecifier); // No COS attributes -- behave like a plain dynamic import.
     }
     const sriToken = firstSupportedIntegrityToken(attrs.integrity);
@@ -1805,7 +1809,7 @@ self.addEventListener('message', function __cosBufferFn(e) {
     const origins = parseJSImportOrigins(attrs.crossOriginStorage);
     if (origins === INVALID_JS_ORIGINS) {
       throw new TypeError(
-        `Failed to execute '__non_standard__import': 'crossOriginStorage' must be '*' or an array of origin strings.`
+        `Failed to execute '__non_standard__import': 'crossOriginStorage' must be '*' or a space-separated string of origins.`
       );
     }
     const result = await talkToBridge('resolveDeclarativeResource', {

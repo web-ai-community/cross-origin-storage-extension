@@ -235,12 +235,14 @@ does exactly this.
 
 The literal spec syntax can't be supported at all: real browsers reject any
 unrecognized import-attribute key (`integrity`, `crossOriginStorage`) with a
-synchronous `TypeError` before any fetch is dispatched, and — one level
-deeper — the current import-attributes grammar only permits *string*
-attribute values, so `crossOriginStorage: []`/`[...]` (an array, as the
-proposal itself specifies) is an outright `SyntaxError`, not just a rejected
-attribute. Dynamic `import()` also isn't something a content script can
-monkey-patch (`const f = import;` is itself a `SyntaxError`).
+synchronous `TypeError` before any fetch is dispatched. (An earlier draft of
+the explainer specified an array-valued `crossOriginStorage: []`/`[...]`,
+which would have been an outright `SyntaxError` under the real
+import-attributes grammar — string values only — before even reaching that
+`TypeError`; the explainer now uses a space-separated string instead,
+matching the HTML integration's `crossoriginstorage` attribute.) Dynamic
+`import()` also isn't something a content script can monkey-patch (`const f
+= import;` is itself a `SyntaxError`).
 
 ```js
 // Spec syntax -- throws in every current browser, can't be polyfilled:
@@ -403,9 +405,9 @@ behavior does.)
 
 The literal spec syntax (`with { crossOriginStorage }`) can't degrade at
 all — as covered [above](#declarative-javascript-integration), it's a hard
-`TypeError`/`SyntaxError` in every current browser, not a gracefully
-ignored attribute. Progressive enhancement here means writing code that
-explicitly checks for COS support before ever using COS-specific syntax.
+`TypeError` in every current browser, not a gracefully ignored attribute.
+Progressive enhancement here means writing code that explicitly checks for
+COS support before ever using COS-specific syntax.
 
 For a static import inside a whole `<script type="module-cos">` (see
 [above](#declarative-javascript-integration)), the risk is different from

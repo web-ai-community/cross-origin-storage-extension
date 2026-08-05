@@ -44,7 +44,7 @@
       `module-shim` convention.
     -->
     <script type="module-cos" id="decl-module-static">
-      import staticValue from "test-declarative-module.js" with { integrity: "sha256-sZI4b8NEw374NAnJDa6fK6mkE+Dev3yB4ndsCXKq+wA=", crossOriginStorage: [] };
+      import staticValue from "test-declarative-module.js" with { integrity: "sha256-sZI4b8NEw374NAnJDa6fK6mkE+Dev3yB4ndsCXKq+wA=", crossOriginStorage: "" };
       window.__cosModuleStaticValue = staticValue;
     </script>
     <title>Cross-Origin Storage — test page</title>
@@ -2776,7 +2776,7 @@
         {
           id: 'decl-js-static-module',
           label:
-            'Static &lt;script type="module-cos"&gt; import with crossOriginStorage: [] (same-site) — polyfill intercepts at parse time',
+            'Static &lt;script type="module-cos"&gt; import with crossOriginStorage: "" (same-site) — polyfill intercepts at parse time',
           async run() {
             const deadline = Date.now() + 8000;
             while (
@@ -2834,7 +2834,7 @@
             script.type = 'module-cos';
             script.textContent =
               `import bad from ${JSON.stringify(DECL_JS_MODULE_SRC)} with ` +
-              `{ integrity: ${JSON.stringify(DECL_JS_WRONG_INTEGRITY)}, crossOriginStorage: [] };\n` +
+              `{ integrity: ${JSON.stringify(DECL_JS_WRONG_INTEGRITY)}, crossOriginStorage: "" };\n` +
               `window.__cosModuleMismatchRan = true;`;
             document.head.appendChild(script);
             // Give the polyfill's fetch+verify round-trip, and the native
@@ -2853,7 +2853,7 @@
           async run() {
             try {
               const mod = await navigator.crossOriginStorage.__non_standard__import(DECL_JS_MODULE_SRC, {
-                with: { integrity: DECL_JS_MODULE_INTEGRITY, crossOriginStorage: [] },
+                with: { integrity: DECL_JS_MODULE_INTEGRITY, crossOriginStorage: "" },
               });
               const pass = mod.default === 'module-cos-static-value';
               return { pass, detail: `Imported default export: ${JSON.stringify(mod.default)}` };
@@ -2888,7 +2888,7 @@
         {
           id: 'decl-js-samesite-cross-origin',
           label:
-            'navigator.crossOriginStorage.__non_standard__import(), crossOriginStorage: [] (same-site): sub.a.test reads via COS, b.test cannot',
+            'navigator.crossOriginStorage.__non_standard__import(), crossOriginStorage: "" (same-site): sub.a.test reads via COS, b.test cannot',
           async run() {
             if (!MOPHL_AVAILABLE) {
               return { pass: null, detail: 'n/a — requires the a.test/b.test e2e setup' };
@@ -2900,12 +2900,12 @@
               declarativeJsRemoteCheck(`http://sub.a.test:${location.port}`, {
                 specifier: DECL_JS_MISSING_SPECIFIER,
                 integrity,
-                crossOriginStorageAttr: [],
+                crossOriginStorageAttr: '',
               }),
               declarativeJsRemoteCheck(`http://b.test:${location.port}`, {
                 specifier: DECL_JS_MISSING_SPECIFIER,
                 integrity,
-                crossOriginStorageAttr: [],
+                crossOriginStorageAttr: '',
               }),
             ]);
             const pass =
