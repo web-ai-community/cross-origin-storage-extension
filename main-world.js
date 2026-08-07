@@ -1451,10 +1451,10 @@ self.addEventListener('message', function __cosBufferFn(e) {
     subtree: true,
   });
 
-  // Declarative JavaScript integration: import attributes
+  // JavaScript import attribute integration: import attributes
   // (`import … from "url" with { crossOriginStorage }` and
   // `import(url, { with: { crossOriginStorage } })`).
-  // See https://github.com/WICG/cross-origin-storage#declarative-javascript-integration
+  // See https://github.com/WICG/cross-origin-storage#javascript-import-attribute-integration
   //
   // Unlike the CSS/HTML integrations above, this one cannot be implemented
   // as request-time interception at all: there's no DOM node to react to,

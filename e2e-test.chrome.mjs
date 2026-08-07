@@ -55,16 +55,16 @@ const MOPHL_CONTENT = {
 const DECL_XORIGIN_GLOBAL_CSS =
   '#cos-decl-xorigin-marker { color: rgb(1, 2, 3); } /* xorigin-global */';
 
-// Same idea, for the declarative JavaScript integration tests' cross-origin
-// global-visibility check -- must match DECL_JS_XORIGIN_GLOBAL_CONTENT in
-// docs/test.html.
-const DECL_JS_XORIGIN_GLOBAL_CONTENT = 'export default "js-xorigin-global-value";';
+// Same idea, for the JavaScript import attribute integration tests'
+// cross-origin global-visibility check -- must match
+// IMPORT_ATTR_XORIGIN_GLOBAL_CONTENT in docs/test.html.
+const IMPORT_ATTR_XORIGIN_GLOBAL_CONTENT = 'export default "js-xorigin-global-value";';
 
 // Only the globalAllowed/declarative-global hashes go into the mock PHL.
 const MOCK_PHL_HASHES = [
   sha256Hex(MOPHL_CONTENT.globalAllowed),
   sha256Hex(DECL_XORIGIN_GLOBAL_CSS),
-  sha256Hex(DECL_JS_XORIGIN_GLOBAL_CONTENT),
+  sha256Hex(IMPORT_ATTR_XORIGIN_GLOBAL_CONTENT),
 ];
 
 // Mock PSL: 'test' as the sole extra TLD so a.test and b.test are separate
@@ -266,7 +266,7 @@ async function main() {
     'mophl-results',
     'css-results',
     'declarative-results',
-    'declarative-js-results',
+    'import-attribute-results',
   ]);
   await page.close();
 

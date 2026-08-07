@@ -36,15 +36,15 @@
       id="decl-static-script"
     ></script>
     <!--
-      Declarative JavaScript integration (see the README's "Declarative
-      JavaScript Integration" section): import attributes. Real browsers
-      can't parse/execute this natively (see main-world.js's comment on
-      processModuleCosScript), so the polyfill only activates for the
-      non-standard `type="module-cos"` opt-in, mirroring es-module-shims'
+      JavaScript import attribute integration (see the README's "JavaScript
+      Import Attribute Integration" section): import attributes. Real
+      browsers can't parse/execute this natively (see main-world.js's
+      comment on processModuleCosScript), so the polyfill only activates for
+      the non-standard `type="module-cos"` opt-in, mirroring es-module-shims'
       `module-shim` convention.
     -->
     <script type="module-cos" id="decl-module-static">
-      import staticValue from "test-declarative-module.js" with { integrity: "sha256-sZI4b8NEw374NAnJDa6fK6mkE+Dev3yB4ndsCXKq+wA=", crossOriginStorage: "" };
+      import staticValue from "test-import-attribute-module.js" with { integrity: "sha256-sZI4b8NEw374NAnJDa6fK6mkE+Dev3yB4ndsCXKq+wA=", crossOriginStorage: "" };
       window.__cosModuleStaticValue = staticValue;
     </script>
     <title>Cross-Origin Storage — test page</title>
@@ -495,12 +495,12 @@
       </tbody>
     </table>
 
-    <h2>Declarative JavaScript integration tests</h2>
+    <h2>JavaScript import attribute integration tests</h2>
     <p>
       Tests import attributes (see the README's
       <a
-        href="https://github.com/WICG/cross-origin-storage#declarative-javascript-integration"
-        >"Declarative JavaScript Integration"</a
+        href="https://github.com/WICG/cross-origin-storage#javascript-import-attribute-integration"
+        >"JavaScript Import Attribute Integration"</a
       >
       section):
       <code>import x from "url" with { integrity, crossOriginStorage }</code>
@@ -522,8 +522,8 @@
       iframes above, and call the helper with a non-existent URL so a pass
       is only possible via COS.
     </p>
-    <button class="run-all" id="run-all-declarative-js">
-      Run declarative JavaScript integration tests
+    <button class="run-all" id="run-all-import-attribute">
+      Run JavaScript import attribute integration tests
     </button>
     <table>
       <thead>
@@ -535,7 +535,7 @@
           <th>Detail</th>
         </tr>
       </thead>
-      <tbody id="declarative-js-results">
+      <tbody id="import-attribute-results">
         <!-- rows injected by JS -->
       </tbody>
     </table>
@@ -1462,8 +1462,8 @@
         for (let i = 0; i < DECLARATIVE_TESTS.length; i++) {
           await runDeclarativeTest(DECLARATIVE_TESTS[i], declarativeRows[i]);
         }
-        for (let i = 0; i < DECLARATIVE_JS_TESTS.length; i++) {
-          await runDeclarativeJsTest(DECLARATIVE_JS_TESTS[i], declarativeJsRows[i]);
+        for (let i = 0; i < IMPORT_ATTRIBUTE_TESTS.length; i++) {
+          await runImportAttributeTest(IMPORT_ATTRIBUTE_TESTS[i], importAttributeRows[i]);
         }
       });
 
@@ -2037,7 +2037,7 @@
           }
           reply({ matched: color === expectedColor, color });
         }
-        if (action === 'declarative-js-import') {
+        if (action === 'import-attribute-import') {
           // Calls navigator.crossOriginStorage.__non_standard__import() in THIS document
           // (this frame may be sub.a.test or b.test) and reports the
           // resolved module's default export, or the thrown error.
@@ -2701,80 +2701,81 @@
           }
         });
 
-      // ── Declarative JavaScript integration tests ─────────────────────────────
+      // ── JavaScript import attribute integration tests ────────────────────────
       //
-      // Tests import attributes (see the README's "Declarative JavaScript
-      // Integration" section): <script type="module-cos"> static-import
-      // rewriting, dynamic import() rewriting, hash-mismatch rejection, the
-      // navigator.crossOriginStorage.__non_standard__import() helper, and (reusing the
-      // sub.a.test/b.test iframes above) cross-origin visibility.
+      // Tests import attributes (see the README's "JavaScript Import
+      // Attribute Integration" section): <script type="module-cos">
+      // static-import rewriting, dynamic import() rewriting, hash-mismatch
+      // rejection, the navigator.crossOriginStorage.__non_standard__import()
+      // helper, and (reusing the sub.a.test/b.test iframes above)
+      // cross-origin visibility.
 
-      const DECL_JS_MODULE_SRC = 'test-declarative-module.js';
-      const DECL_JS_MODULE_INTEGRITY =
+      const IMPORT_ATTR_MODULE_SRC = 'test-import-attribute-module.js';
+      const IMPORT_ATTR_MODULE_INTEGRITY =
         'sha256-sZI4b8NEw374NAnJDa6fK6mkE+Dev3yB4ndsCXKq+wA=';
-      const DECL_JS_MODULE2_SRC = 'test-declarative-module-2.js';
-      const DECL_JS_MODULE2_INTEGRITY =
+      const IMPORT_ATTR_MODULE2_SRC = 'test-import-attribute-module-2.js';
+      const IMPORT_ATTR_MODULE2_INTEGRITY =
         'sha256-9qCP700H7mesY81c0pG4yRjQqwPGIQAXzJxmhu3aXJw=';
-      const DECL_JS_WRONG_INTEGRITY =
+      const IMPORT_ATTR_WRONG_INTEGRITY =
         'sha256-eGh+30Z4WIxoIqA948RuV83ijFx26LX3nmRq2jVw6r8=';
       // Deliberately 404s -- the cross-origin checks below use it so a pass
       // is only possible if the module was actually served from COS.
-      const DECL_JS_MISSING_SPECIFIER = 'test-declarative-module-does-not-exist.js';
+      const IMPORT_ATTR_MISSING_SPECIFIER = 'test-import-attribute-module-does-not-exist.js';
 
       // Distinct (never touched by the local tests above) module source for
       // the two cross-origin visibility checks, so their upgrade-only
       // visibility tiers ('*' vs same-site) can't collide with each other or
-      // with DECL_JS_MODULE_SRC's own tier.
-      const DECL_JS_XORIGIN_GLOBAL_CONTENT = 'export default "js-xorigin-global-value";';
-      const DECL_JS_XORIGIN_SAMESITE_CONTENT = 'export default "js-xorigin-samesite-value";';
+      // with IMPORT_ATTR_MODULE_SRC's own tier.
+      const IMPORT_ATTR_XORIGIN_GLOBAL_CONTENT = 'export default "js-xorigin-global-value";';
+      const IMPORT_ATTR_XORIGIN_SAMESITE_CONTENT = 'export default "js-xorigin-samesite-value";';
 
-      let _jsGlobalDeclarativeStorePromise = null;
-      function ensureJsGlobalDeclarativeStored() {
-        if (!_jsGlobalDeclarativeStorePromise) {
-          _jsGlobalDeclarativeStorePromise = storeDeclarativeContent(
-            DECL_JS_XORIGIN_GLOBAL_CONTENT,
+      let _importAttributeGlobalStorePromise = null;
+      function ensureImportAttributeGlobalStored() {
+        if (!_importAttributeGlobalStorePromise) {
+          _importAttributeGlobalStorePromise = storeDeclarativeContent(
+            IMPORT_ATTR_XORIGIN_GLOBAL_CONTENT,
             '*',
             'text/javascript'
           );
         }
-        return _jsGlobalDeclarativeStorePromise;
+        return _importAttributeGlobalStorePromise;
       }
 
-      let _jsSamesiteDeclarativeStorePromise = null;
-      function ensureJsSamesiteDeclarativeStored() {
-        if (!_jsSamesiteDeclarativeStorePromise) {
-          _jsSamesiteDeclarativeStorePromise = storeDeclarativeContent(
-            DECL_JS_XORIGIN_SAMESITE_CONTENT,
+      let _importAttributeSamesiteStorePromise = null;
+      function ensureImportAttributeSamesiteStored() {
+        if (!_importAttributeSamesiteStorePromise) {
+          _importAttributeSamesiteStorePromise = storeDeclarativeContent(
+            IMPORT_ATTR_XORIGIN_SAMESITE_CONTENT,
             undefined,
             'text/javascript'
           );
         }
-        return _jsSamesiteDeclarativeStorePromise;
+        return _importAttributeSamesiteStorePromise;
       }
 
-      // Sends a declarative-js-import command to an already-created MOPHL
+      // Sends an import-attribute-import command to an already-created MOPHL
       // iframe (sub.a.test / b.test) and awaits its { ok, value|error }
       // result, reusing the cos-mophl-cmd/-result postMessage plumbing.
-      function declarativeJsRemoteCheck(origin, payload, timeout = 8000) {
+      function importAttributeRemoteCheck(origin, payload, timeout = 8000) {
         return new Promise((resolve, reject) => {
           const fr = _mophlIframes.get(origin);
           if (!fr) { reject(new Error(`No iframe for ${origin}`)); return; }
           const id = crypto.randomUUID();
           const t = setTimeout(() => {
             _pendingMophlReads.delete(id);
-            reject(new Error(`declarative-js check timeout (${origin})`));
+            reject(new Error(`import-attribute check timeout (${origin})`));
           }, timeout);
           _pendingMophlReads.set(id, (data) => { clearTimeout(t); resolve(data); });
           fr.contentWindow?.postMessage(
-            { source: 'cos-mophl-cmd', id, action: 'declarative-js-import', ...payload },
+            { source: 'cos-mophl-cmd', id, action: 'import-attribute-import', ...payload },
             '*'
           );
         });
       }
 
-      const DECLARATIVE_JS_TESTS = [
+      const IMPORT_ATTRIBUTE_TESTS = [
         {
-          id: 'decl-js-static-module',
+          id: 'import-attr-static-module',
           label:
             'Static &lt;script type="module-cos"&gt; import with crossOriginStorage: "" (same-site) — polyfill intercepts at parse time',
           async run() {
@@ -2800,7 +2801,7 @@
           },
         },
         {
-          id: 'decl-js-dynamic-module',
+          id: 'import-attr-dynamic-module',
           label:
             'Dynamic import() inside &lt;script type="module-cos"&gt; with crossOriginStorage: "*" — polyfill intercepts MutationObserver event',
           async run() {
@@ -2808,8 +2809,8 @@
             const script = document.createElement('script');
             script.type = 'module-cos';
             script.textContent =
-              `const mod = await import(${JSON.stringify(DECL_JS_MODULE2_SRC)}, ` +
-              `{ with: { integrity: ${JSON.stringify(DECL_JS_MODULE2_INTEGRITY)}, crossOriginStorage: '*' } });\n` +
+              `const mod = await import(${JSON.stringify(IMPORT_ATTR_MODULE2_SRC)}, ` +
+              `{ with: { integrity: ${JSON.stringify(IMPORT_ATTR_MODULE2_INTEGRITY)}, crossOriginStorage: '*' } });\n` +
               `window.__cosModuleDynamicValue = mod.default;`;
             document.head.appendChild(script);
             const deadline = Date.now() + 8000;
@@ -2825,7 +2826,7 @@
           },
         },
         {
-          id: 'decl-js-hash-mismatch',
+          id: 'import-attr-hash-mismatch',
           label:
             '&lt;script type="module-cos"&gt; import with a wrong hash — must NOT execute',
           async run() {
@@ -2833,8 +2834,8 @@
             const script = document.createElement('script');
             script.type = 'module-cos';
             script.textContent =
-              `import bad from ${JSON.stringify(DECL_JS_MODULE_SRC)} with ` +
-              `{ integrity: ${JSON.stringify(DECL_JS_WRONG_INTEGRITY)}, crossOriginStorage: "" };\n` +
+              `import bad from ${JSON.stringify(IMPORT_ATTR_MODULE_SRC)} with ` +
+              `{ integrity: ${JSON.stringify(IMPORT_ATTR_WRONG_INTEGRITY)}, crossOriginStorage: "" };\n` +
               `window.__cosModuleMismatchRan = true;`;
             document.head.appendChild(script);
             // Give the polyfill's fetch+verify round-trip, and the native
@@ -2848,12 +2849,12 @@
           },
         },
         {
-          id: 'decl-js-helper-import',
+          id: 'import-attr-helper-import',
           label: 'navigator.crossOriginStorage.__non_standard__import() explicit helper (same-site)',
           async run() {
             try {
-              const mod = await navigator.crossOriginStorage.__non_standard__import(DECL_JS_MODULE_SRC, {
-                with: { integrity: DECL_JS_MODULE_INTEGRITY, crossOriginStorage: "" },
+              const mod = await navigator.crossOriginStorage.__non_standard__import(IMPORT_ATTR_MODULE_SRC, {
+                with: { integrity: IMPORT_ATTR_MODULE_INTEGRITY, crossOriginStorage: "" },
               });
               const pass = mod.default === 'module-cos-static-value';
               return { pass, detail: `Imported default export: ${JSON.stringify(mod.default)}` };
@@ -2863,7 +2864,7 @@
           },
         },
         {
-          id: 'decl-js-global-cross-origin',
+          id: 'import-attr-global-cross-origin',
           label:
             'navigator.crossOriginStorage.__non_standard__import(), crossOriginStorage: "*": b.test (cross-site) reads via COS despite a broken specifier',
           async run() {
@@ -2871,10 +2872,10 @@
               return { pass: null, detail: 'n/a — requires the a.test/b.test e2e setup' };
             }
             await ensureMophlResources();
-            await ensureJsGlobalDeclarativeStored();
-            const integrity = await sriFor(DECL_JS_XORIGIN_GLOBAL_CONTENT);
-            const result = await declarativeJsRemoteCheck(`http://b.test:${location.port}`, {
-              specifier: DECL_JS_MISSING_SPECIFIER,
+            await ensureImportAttributeGlobalStored();
+            const integrity = await sriFor(IMPORT_ATTR_XORIGIN_GLOBAL_CONTENT);
+            const result = await importAttributeRemoteCheck(`http://b.test:${location.port}`, {
+              specifier: IMPORT_ATTR_MISSING_SPECIFIER,
               integrity,
               crossOriginStorageAttr: '*',
             });
@@ -2886,7 +2887,7 @@
           },
         },
         {
-          id: 'decl-js-samesite-cross-origin',
+          id: 'import-attr-samesite-cross-origin',
           label:
             'navigator.crossOriginStorage.__non_standard__import(), crossOriginStorage: "" (same-site): sub.a.test reads via COS, b.test cannot',
           async run() {
@@ -2894,16 +2895,16 @@
               return { pass: null, detail: 'n/a — requires the a.test/b.test e2e setup' };
             }
             await ensureMophlResources();
-            await ensureJsSamesiteDeclarativeStored();
-            const integrity = await sriFor(DECL_JS_XORIGIN_SAMESITE_CONTENT);
+            await ensureImportAttributeSamesiteStored();
+            const integrity = await sriFor(IMPORT_ATTR_XORIGIN_SAMESITE_CONTENT);
             const [sameSite, crossSite] = await Promise.all([
-              declarativeJsRemoteCheck(`http://sub.a.test:${location.port}`, {
-                specifier: DECL_JS_MISSING_SPECIFIER,
+              importAttributeRemoteCheck(`http://sub.a.test:${location.port}`, {
+                specifier: IMPORT_ATTR_MISSING_SPECIFIER,
                 integrity,
                 crossOriginStorageAttr: '',
               }),
-              declarativeJsRemoteCheck(`http://b.test:${location.port}`, {
-                specifier: DECL_JS_MISSING_SPECIFIER,
+              importAttributeRemoteCheck(`http://b.test:${location.port}`, {
+                specifier: IMPORT_ATTR_MISSING_SPECIFIER,
                 integrity,
                 crossOriginStorageAttr: '',
               }),
@@ -2923,10 +2924,10 @@
         },
       ];
 
-      const declarativeJsTbody = document.getElementById('declarative-js-results');
-      const declarativeJsRows = DECLARATIVE_JS_TESTS.map((test, idx) => {
+      const importAttributeTbody = document.getElementById('import-attribute-results');
+      const importAttributeRows = IMPORT_ATTRIBUTE_TESTS.map((test, idx) => {
         const tr = document.createElement('tr');
-        tr.id = `declarative-js-row-${test.id}`;
+        tr.id = `import-attribute-row-${test.id}`;
         tr.innerHTML = `
           <td>${idx + 1}</td>
           <td>${test.label}</td>
@@ -2934,11 +2935,11 @@
           <td><button class="run-btn">Run</button></td>
           <td><pre class="detail"></pre></td>
         `;
-        declarativeJsTbody.append(tr);
+        importAttributeTbody.append(tr);
         return tr;
       });
 
-      async function runDeclarativeJsTest(test, rowEl) {
+      async function runImportAttributeTest(test, rowEl) {
         const btn = rowEl.querySelector('.run-btn');
         btn.disabled = true;
         if (!navigator.crossOriginStorage) {
@@ -2947,35 +2948,35 @@
           return;
         }
         setRowStatus(rowEl, 'running', '');
-        log(`--- Declarative JS: ${test.label} ---`);
+        log(`--- Import Attribute: ${test.label} ---`);
         try {
           const { pass, detail } = await test.run();
           const isNA = pass == null;
           setRowStatus(rowEl, isNA ? 'n/a' : pass ? 'pass' : 'fail', detail);
           log(
-            `Declarative JS Result: ${isNA ? 'N/A' : pass ? 'PASS' : 'FAIL'}${detail ? ' — ' + detail.split('\n')[0] : ''}`,
+            `Import Attribute Result: ${isNA ? 'N/A' : pass ? 'PASS' : 'FAIL'}${detail ? ' — ' + detail.split('\n')[0] : ''}`,
             !pass && !isNA
           );
         } catch (err) {
           const detail = `Uncaught ${err.name}: ${err.message}`;
           setRowStatus(rowEl, 'fail', detail);
-          log(`Declarative JS Result: FAIL — ${detail}`, true);
+          log(`Import Attribute Result: FAIL — ${detail}`, true);
         } finally {
           btn.disabled = false;
         }
       }
 
-      declarativeJsRows.forEach((rowEl, idx) => {
+      importAttributeRows.forEach((rowEl, idx) => {
         rowEl.querySelector('.run-btn').addEventListener('click', () => {
-          runDeclarativeJsTest(DECLARATIVE_JS_TESTS[idx], rowEl);
+          runImportAttributeTest(IMPORT_ATTRIBUTE_TESTS[idx], rowEl);
         });
       });
 
       document
-        .getElementById('run-all-declarative-js')
+        .getElementById('run-all-import-attribute')
         .addEventListener('click', async () => {
-          for (let i = 0; i < DECLARATIVE_JS_TESTS.length; i++) {
-            await runDeclarativeJsTest(DECLARATIVE_JS_TESTS[i], declarativeJsRows[i]);
+          for (let i = 0; i < IMPORT_ATTRIBUTE_TESTS.length; i++) {
+            await runImportAttributeTest(IMPORT_ATTRIBUTE_TESTS[i], importAttributeRows[i]);
           }
         });
     </script>

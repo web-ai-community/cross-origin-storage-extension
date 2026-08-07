@@ -42,10 +42,10 @@
 
 ## Supported integrations
 
-Cross-Origin Storage has one imperative API and three declarative forms (see
-the [explainer](https://github.com/WICG/cross-origin-storage)). A content
+Cross-Origin Storage has one imperative API and three additional integrations
+(see the [explainer](https://github.com/WICG/cross-origin-storage)). A content
 script can't intercept everything a real browser implementation could, so a
-couple of the declarative forms need a small, documented deviation from the
+couple of them need a small, documented deviation from the
 literal spec syntax to work at all. The table below summarizes it; details
 and the reasoning are in code comments in `main-world.js`.
 
@@ -54,7 +54,7 @@ and the reasoning are in code comments in `main-world.js`.
 | [Imperative JS API](#imperative-js-api) (`navigator.crossOriginStorage`) | ✅ Yes | None — this is the extension's core, fully-supported surface. [See details](#imperative-js-api). |
 | [CSS `cross-origin-storage()`](#css-integration) | ✅ Yes | An external `<link rel="stylesheet">` needs an extra `data-cos` marker attribute — recommended for performance, not required by the syntax itself. [See details](#css-integration). |
 | [Declarative HTML](#declarative-html-integration) (`crossoriginstorage` attribute) | ✅ Yes | For `<script>` (not `<link>`) elements, the browser's native fetch always wins execution. [See details](#declarative-html-integration). |
-| [Declarative JavaScript](#declarative-javascript-integration) (import attributes) | ⚠️ No | Works via shims — a `<script type="module-cos">` opt-in, or the `navigator.crossOriginStorage.__non_standard__import()` helper — instead of literal `with { crossOriginStorage }` syntax. [See details](#declarative-javascript-integration). |
+| [JavaScript import attribute](#javascript-import-attribute-integration) (import attributes) | ⚠️ No | Works via shims — a `<script type="module-cos">` opt-in, or the `navigator.crossOriginStorage.__non_standard__import()` helper — instead of literal `with { crossOriginStorage }` syntax. [See details](#javascript-import-attribute-integration). |
 
 ### Imperative JS API
 
@@ -229,7 +229,7 @@ something to rely on. Use two separate `<link>` tags, one per integration,
 each pointing at its own file — [the demo](progressive-enhancement-demo.html)
 does exactly this.
 
-### Declarative JavaScript integration
+### JavaScript import attribute integration
 
 > **Matches the spec syntax exactly?** ⚠️ No
 
@@ -340,7 +340,7 @@ const mod = await navigator.crossOriginStorage.__non_standard__import(
 
 ## Using COS today as a progressive enhancement
 
-All three declarative integrations can be written today, in any browser, so
+All three integrations can be written today, in any browser, so
 that a page works identically whether or not the visitor has this extension
 (or, eventually, a native COS implementation) — verified empirically for
 each form below, not just asserted. A working
@@ -404,13 +404,13 @@ behavior does.)
 ### JavaScript integration — needs explicit feature detection
 
 The literal spec syntax (`with { crossOriginStorage }`) can't degrade at
-all — as covered [above](#declarative-javascript-integration), it's a hard
+all — as covered [above](#javascript-import-attribute-integration), it's a hard
 `TypeError` in every current browser, not a gracefully ignored attribute.
 Progressive enhancement here means writing code that explicitly checks for
 COS support before ever using COS-specific syntax.
 
 For a static import inside a whole `<script type="module-cos">` (see
-[above](#declarative-javascript-integration)), the risk is different from
+[above](#javascript-import-attribute-integration)), the risk is different from
 the other two integrations: to a browser with no COS implementation,
 `module-cos` is just as inert as any other unrecognized type, so **the
 entire script would silently never run at all** — not a graceful
