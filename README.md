@@ -233,16 +233,20 @@ does exactly this.
 
 > **Matches the spec syntax exactly?** ⚠️ No
 
-The literal spec syntax can't be supported at all: real browsers reject any
-unrecognized import-attribute key (`integrity`, `crossOriginStorage`) with a
-synchronous `TypeError` before any fetch is dispatched. (An earlier draft of
-the explainer specified an array-valued `crossOriginStorage: []`/`[...]`,
-which would have been an outright `SyntaxError` under the real
-import-attributes grammar — string values only — before even reaching that
-`TypeError`; the explainer now uses a space-separated string instead,
-matching the HTML integration's `crossoriginstorage` attribute.) Dynamic
-`import()` also isn't something a content script can monkey-patch (`const f
-= import;` is itself a `SyntaxError`).
+The literal spec syntax can't be supported at all, and the failure mode
+differs by form. For a **static** `import … with { crossOriginStorage }`,
+an unrecognized attribute key — or a non-string value, such as an array —
+is a `SyntaxError`: an early error thrown while parsing the module, before
+any of its code runs. For a **dynamic**
+`import(url, { with: { crossOriginStorage } })`, the identical problems
+instead surface as a runtime `TypeError`, since the `with` option there is
+an ordinary object value, not special grammar. (An earlier draft of the
+explainer specified an array-valued `crossOriginStorage: []`/`[...]`, which
+hit exactly this split: a `SyntaxError` for the static form, a `TypeError`
+for the dynamic one; the explainer now uses a space-separated string
+instead, matching the HTML integration's `crossoriginstorage` attribute.)
+Dynamic `import()` also isn't something a content script can monkey-patch
+(`const f = import;` is itself a `SyntaxError`).
 
 ```js
 // Spec syntax -- throws in every current browser, can't be polyfilled:

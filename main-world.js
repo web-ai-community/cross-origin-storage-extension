@@ -1462,20 +1462,28 @@ self.addEventListener('message', function __cosBufferFn(e) {
   // XMLHttpRequest are (`const f = import;` is a SyntaxError -- dynamic
   // import is a syntactic form, not a callable reference). Worse, even a
   // syntactically valid `with { crossOriginStorage }` clause can't be
-  // rescued once the browser starts on it, verified empirically against
-  // Chrome: every browser today rejects *any* unrecognized import-attribute
-  // key -- including `integrity`, which isn't COS-specific -- with a
-  // synchronous TypeError ("Invalid attribute key"), thrown before any
-  // fetch is even dispatched (a bad key never reaches the network, so not
-  // even a Service Worker fetch handler gets a chance to intervene). (An
-  // earlier draft of the explainer also specified an array-valued
-  // `crossOriginStorage: []`/`[...]`, which would have been a flat
-  // SyntaxError under the real import-attributes grammar -- string values
-  // only -- before even reaching that TypeError; the explainer now uses a
-  // space-separated string instead, matching the HTML integration's
-  // `crossoriginstorage` attribute.) So a `with { crossOriginStorage }`
-  // import can never appear inside a real `type="module"` script without
-  // taking down that script's entire parse.
+  // rescued once the browser starts on it -- verified empirically against
+  // Chrome, and consistent with MDN's documented exceptions for import
+  // attributes. A *static* `import … with { crossOriginStorage }` throws a
+  // SyntaxError for an unrecognized key (or a non-string value, e.g. an
+  // array) -- an early error, thrown while parsing the module and before
+  // any of its code runs, indistinguishable in effect from any other syntax
+  // error in the file. A *dynamic*
+  // `import(url, { with: { crossOriginStorage } })` instead throws a
+  // runtime TypeError for the same problems, since its `with` option is an
+  // ordinary object value rather than special grammar -- catchable, but
+  // with no standardized way to tell "host doesn't support this key" apart
+  // from any other TypeError (the message text, e.g. "Invalid attribute
+  // key", is not a stable API). Either way, nothing reaches the network
+  // first (a bad key never reaches the network, so not even a Service
+  // Worker fetch handler gets a chance to intervene). (An earlier draft of
+  // the explainer also specified an array-valued
+  // `crossOriginStorage: []`/`[...]`, which hit exactly this split: a
+  // SyntaxError for the static form, a TypeError for the dynamic one; the
+  // explainer now uses a space-separated string instead, matching the HTML
+  // integration's `crossoriginstorage` attribute.) So a
+  // `with { crossOriginStorage }` import can never appear inside a real
+  // `type="module"` script without taking down that script's entire parse.
   //
   // This instead follows the approach pioneered by es-module-shims
   // (https://github.com/guybedford/es-module-shims): authors opt in with a

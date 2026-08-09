@@ -505,9 +505,10 @@
       section):
       <code>import x from "url" with { integrity, crossOriginStorage }</code>
       and <code>import(url, { with: { integrity, crossOriginStorage } })</code>.
-      Real browsers reject any unrecognized import-attribute key with a
-      synchronous <code>TypeError</code> before any fetch is even
-      dispatched, and dynamic <code>import()</code> can't be monkey-patched
+      Real browsers reject any unrecognized import-attribute key before any
+      fetch is even dispatched — a <code>SyntaxError</code> for a static
+      import, a <code>TypeError</code> for dynamic <code>import()</code> —
+      and dynamic <code>import()</code> can't be monkey-patched
       the way <code>fetch</code>/<code>Worker</code> can — so, following the
       approach pioneered by
       <a href="https://github.com/guybedford/es-module-shims"
