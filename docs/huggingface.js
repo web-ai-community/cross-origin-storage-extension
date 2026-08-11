@@ -67,8 +67,7 @@ const getSHA256Hash = async (request) => {
   if (/\/resolve\/main\/onnx\//.test(request)) {
     request = request.replace(/\/resolve\//, '/raw/');
     const text = await fetch(request).then((response) => response.text());
-    const hash = text.replace(/.*?\n^oid sha256:(\w+)\n.*?$/gm, '$1');
-    return hash;
+    return text.match(/^oid sha256:([0-9a-f]{64})$/m)?.[1];
   }
 };
 
