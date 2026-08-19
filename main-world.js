@@ -595,6 +595,34 @@
     }
 
     async function _cosRequestFileHandles(hashes, create, origins) {
+      // A worker whose own origin is opaque -- one created from a data: URL --
+      // gets no access at all, matching the native implementation. COS keys
+      // entries by origin, and an opaque origin has no stable identity to key
+      // storing origins or same-site comparisons on, so there is nothing
+      // meaningful to grant it. Without this the relay would fall back to the
+      // creating page's origin and hand such a worker that page's whole COS
+      // view, which is strictly more than the native API allows.
+      //
+      // A blob: worker is deliberately unaffected: its self.location.origin is
+      // already its creator's real origin, not the blob: URL.
+      // Two ways to be opaque. A worker running directly from a data: URL
+      // reports an opaque origin itself. One the wrapper inlined reports this
+      // page's origin instead, because it is running from a blob: URL, so the
+      // wrapper records what the original was via __cosOpaqueOrigin.
+      let wrappedFromOpaque = false;
+      try {
+        wrappedFromOpaque =
+          typeof __cosOpaqueOrigin !== 'undefined' && __cosOpaqueOrigin === true;
+      } catch (_) {
+        wrappedFromOpaque = false;
+      }
+      const workerOrigin = self.location.origin;
+      if (!workerOrigin || workerOrigin === 'null' || wrappedFromOpaque) {
+        throw new DOMException(
+          'The requested file is not available in Cross-Origin Storage.',
+          'NotFoundError'
+        );
+      }
       // Internal wire action — matches the 'requestFileHandle' case in background.js.
       const { handleIds } = await cosRelay('requestFileHandle', {
         hashes,
@@ -1049,6 +1077,12 @@ ${xhr.responseText}`;
         const makeCOSWorker = (scriptURL, options) => {
           const absURL = new URL(scriptURL, location.href).href;
           const isModule = options?.type === 'module';
+          // Wrapping runs the script from a blob: URL, which carries this
+          // page's origin. A data: URL worker would otherwise have an opaque
+          // origin, so wrapping silently promotes it to a real one and would
+          // hand it this page's whole COS view -- strictly more than the
+          // native API grants. Record the original so the polyfill can refuse.
+          const isOpaqueOrigin = /^data:/i.test(absURL);
 
           // Strategy for loading the user's worker script without races:
           //
@@ -1072,6 +1106,7 @@ ${xhr.responseText}`;
               xhr.open('GET', absURL, /* async= */ false);
               xhr.send();
               loader = `const __cosWorkerBaseURL = ${JSON.stringify(absURL)};
+const __cosOpaqueOrigin = ${JSON.stringify(isOpaqueOrigin)};
 ${xhr.responseText}`;
             } catch (_) {
               // fall through to importScripts / import()
