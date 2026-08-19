@@ -274,7 +274,12 @@
       <li>
         <code>data:</code> URL, classic only — the module variant is not covered
         because browsers reject <code>data:</code> URLs as module-worker sources
-        (opaque origin).
+        (opaque origin). This row asserts a <em>refusal</em>: a
+        <code>data:</code> worker's origin is opaque, and COS keys entries by
+        origin, so such a context gets no access at all and must be rejected
+        with <code>NotFoundError</code>. It must also be rejected
+        <em>promptly</em> — the case this row guards against is the promise
+        never settling at all.
       </li>
       <li>
         Same-origin HTTP, classic &amp; module — the module variant imports a
@@ -1025,7 +1030,16 @@
         },
         {
           id: 'data-classic',
-          label: 'data: URL, classic worker',
+          label: 'data: URL, classic worker (opaque origin — denial expected)',
+          // A worker created from a data: URL has an opaque origin. COS keys
+          // entries by origin, and an opaque origin has no stable identity to
+          // key storing origins or same-site comparisons on, so it is given no
+          // access at all. The correct outcome is therefore a NotFoundError
+          // rejection rather than a successful roundtrip -- and a prompt one:
+          // this variant used to hang until the harness' 15 s timeout because
+          // the browser dropped the Mojo receiver without the renderer ever
+          // settling the promise.
+          expectsOpaqueOriginDenial: true,
           create() {
             const url =
               'data:text/javascript,' + encodeURIComponent(VARIANT_WORKER_CODE);
@@ -1203,6 +1217,24 @@
           }
           const isNA = result.pass == null ||
             (result.pass === false && /^navigator\.crossOriginStorage (is undefined|not available)$/.test(result.detail));
+          // Variants whose whole point is that the operation must be refused
+          // invert here: the refusal is the pass, and anything else -- a
+          // successful roundtrip, a different error, or a hang -- is the
+          // failure. Checked after isNA so an environment with no COS at all
+          // still reports n/a rather than passing for the wrong reason.
+          if (!isNA && variant.expectsOpaqueOriginDenial) {
+            result = /^NotFoundError\b/.test(result.detail || '')
+              ? {
+                  pass: true,
+                  detail: `Correctly refused for an opaque origin — ${result.detail}`,
+                }
+              : {
+                  pass: false,
+                  detail: result.pass
+                    ? 'Expected NotFoundError for an opaque origin, but the roundtrip succeeded'
+                    : `Expected NotFoundError for an opaque origin, got — ${result.detail}`,
+                };
+          }
           setRowStatus(rowEl, isNA ? 'n/a' : result.pass ? 'pass' : 'fail', result.detail);
           log(
             `Variant Result: ${isNA ? 'N/A' : result.pass ? 'PASS' : 'FAIL'}${result.detail ? ' — ' + result.detail : ''}`,
