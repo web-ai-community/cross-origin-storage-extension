@@ -16,6 +16,10 @@
 # which will discard any manual Xcode customizations (icons, entitlements)
 # made since the project was last generated.
 #
+# Note that the project file is rewritten on every run regardless, since the
+# marketing version and build number are stamped into it, so expect it dirty
+# after each upload and commit it along with release-state.json.
+#
 # Requires a Mac with Xcode installed, signed into an Apple ID that's a
 # member of the relevant App Store Connect team, and an App Store Connect
 # API key (.p8 file) for that team.
@@ -91,7 +95,12 @@ REGENERATE="false"
 STORE_KEY_PATH=""
 
 print_help() {
-  sed -n '2,63p' "$0" | sed 's/^# \{0,1\}//'
+  # Print the header comment block by deriving its extent rather than hardcoding
+  # it: every line from the second onward that is still a comment, stopping at
+  # the first line that isn't. The previous `sed -n '2,63p'` silently truncated
+  # the help mid-sentence once the header grew past line 63, dropping the note
+  # that the private key is the only real secret.
+  awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"
 }
 
 while [ $# -gt 0 ]; do
@@ -299,6 +308,11 @@ archive_and_upload() {
   build_number="$(next_build_number "$platform_key")"
 
   echo "==> [$platform_label] Setting version $MARKETING_VERSION ($build_number)"
+  # Rewrites the committed project.pbxproj in place, so it comes back dirty
+  # after every run. With --platform both this runs twice and the second pass
+  # overwrites the first's CURRENT_PROJECT_VERSION for every target -- harmless,
+  # since the authoritative per-platform build numbers live in release-state.json
+  # and are read from there, not from the project file.
   sed -i '' \
     -e "s/MARKETING_VERSION = [^;]*;/MARKETING_VERSION = $MARKETING_VERSION;/g" \
     -e "s/CURRENT_PROJECT_VERSION = [^;]*;/CURRENT_PROJECT_VERSION = $build_number;/g" \
@@ -366,6 +380,8 @@ if [ "$PLATFORM" = "ios" ] || [ "$PLATFORM" = "both" ]; then
 fi
 
 if [ $STATUS -eq 0 ]; then
-  echo "==> Done. $STATE_FILE was updated -- commit it (and the Xcode project, if regenerated)."
+  echo "==> Done. Commit both $STATE_FILE and the Xcode project:"
+  echo "    project.pbxproj carries the version and build number this run set, so"
+  echo "    it changes on every upload, not only when --regenerate rebuilds it."
 fi
 exit $STATUS
