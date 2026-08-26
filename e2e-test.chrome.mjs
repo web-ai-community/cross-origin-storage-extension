@@ -159,9 +159,62 @@ async function runAllAndCollect(page, resultIds) {
   }, rowSel);
 }
 
+// ── Manifest guard ──────────────────────────────────────────────────────────
+
+// The unpacked extension is loaded from this directory, so the suite runs
+// against whatever manifest.json currently is -- a copy of one of the
+// per-browser manifests, swapped by `npm run use-{chrome,firefox,safari}`.
+// Firefox and Safari declare a background *page* rather than a service worker,
+// which Chromium refuses to load; that surfaces several steps later as
+// "extension service worker not found", a failure whose cause is nowhere near
+// its symptom. `npm test` runs `use-chrome` first, but this catches the paths
+// that skip it -- invoking this file directly, or `npm test --ignore-scripts`.
+async function assertChromeManifest() {
+  const manifestPath = join(__dirname, 'manifest.json');
+  let manifest;
+  try {
+    manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  } catch (err) {
+    console.error(`FAIL: could not read ${manifestPath} — ${err.message}`);
+    process.exit(1);
+  }
+  if (manifest.background?.service_worker) return;
+
+  const found = Object.keys(manifest.background ?? {}).join(', ') || '<no background key>';
+
+  // Name the browser whose manifest this is, when it matches one exactly, so
+  // the message says which `use-*` was left behind rather than just "wrong".
+  let flavour = null;
+  for (const browser of ['firefox', 'safari']) {
+    try {
+      const other = JSON.parse(
+        await readFile(join(__dirname, `manifest.${browser}.json`), 'utf8')
+      );
+      if (JSON.stringify(other) === JSON.stringify(manifest)) {
+        flavour = browser;
+        break;
+      }
+    } catch {
+      // A missing or unreadable sibling manifest just means no name to report.
+    }
+  }
+  const what = flavour
+    ? `manifest.json is the ${flavour} manifest (background: ${found}), not the Chrome one.`
+    : `manifest.json is not the Chrome manifest (background: ${found}).`;
+  console.error(
+    `FAIL: ${what}\n` +
+    `      This suite loads the unpacked extension from ${__dirname}, and Chromium\n` +
+    `      cannot load a manifest declaring a background page instead of a service worker.\n` +
+    `      Fix: npm run use-chrome`
+  );
+  process.exit(1);
+}
+
 // ── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
+  await assertChromeManifest();
+
   console.log('Starting local server…');
   const server = await startServer();
 
