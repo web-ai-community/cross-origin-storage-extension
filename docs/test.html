@@ -546,6 +546,47 @@
       </tbody>
     </table>
 
+    <h2>Fetch integration tests</h2>
+    <p>
+      Tests the <code>crossOriginStorage</code> option on
+      <a href="https://fetch.spec.whatwg.org/#requestinit"><code>RequestInit</code></a>
+      (see the README's
+      <a
+        href="https://github.com/WICG/cross-origin-storage#fetch-integration"
+        >"Fetch Integration"</a
+      >
+      section):
+      <code>fetch(url, { integrity, crossOriginStorage })</code>. Unlike the
+      three integrations above, <code>fetch</code> is an ordinary property of
+      the global object, so the polyfill can patch it directly and decide the
+      outcome of every call rather than racing the browser's own loader. The
+      presence of the member — not its truthiness — is the opt-in, and its
+      value is the scope: <code>''</code> is same-site-only, <code>'*'</code>
+      is global, and an array restricts it to those origins. The list form is
+      an array here, not the space-separated string the HTML and import
+      attribute forms use, matching the imperative <code>origins</code> option
+      exactly. The last two tests are cross-origin, reusing the
+      <code>sub.a.test</code>/<code>b.test</code> iframes above, and fetch a
+      non-existent URL so a pass is only possible via COS.
+    </p>
+    <button class="run-all" id="run-all-fetch">
+      Run fetch integration tests
+    </button>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Scenario</th>
+          <th>Status</th>
+          <th>Run</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody id="fetch-results">
+        <!-- rows injected by JS -->
+      </tbody>
+    </table>
+
     <h2>Event log</h2>
     <pre id="log"></pre>
 
@@ -1498,6 +1539,9 @@
         for (let i = 0; i < IMPORT_ATTRIBUTE_TESTS.length; i++) {
           await runImportAttributeTest(IMPORT_ATTRIBUTE_TESTS[i], importAttributeRows[i]);
         }
+        for (let i = 0; i < FETCH_TESTS.length; i++) {
+          await runFetchTest(FETCH_TESTS[i], fetchRows[i]);
+        }
       });
 
       // -------------------------------------------------------------------------
@@ -2080,6 +2124,27 @@
               with: { integrity, crossOriginStorage: crossOriginStorageAttr },
             });
             reply({ ok: true, value: mod.default });
+          } catch (err) {
+            reply({ ok: false, error: `${err.name}: ${err.message}` });
+          }
+        }
+        if (action === 'fetch-cos') {
+          // Performs a fetch() with the crossOriginStorage option in THIS
+          // document (this frame may be sub.a.test or b.test) and reports the
+          // response body, or the thrown error. The caller passes a URL that
+          // 404s, so a successful read proves the bytes came from COS.
+          const { url, integrity, crossOriginStorage } = ev.data;
+          try {
+            const res = await fetch(url, { integrity, crossOriginStorage });
+            if (!res.ok) {
+              reply({ ok: false, error: `HTTP ${res.status}` });
+              return;
+            }
+            reply({
+              ok: true,
+              text: await res.text(),
+              contentType: res.headers.get('content-type'),
+            });
           } catch (err) {
             reply({ ok: false, error: `${err.name}: ${err.message}` });
           }
@@ -3080,6 +3145,468 @@
         .addEventListener('click', async () => {
           for (let i = 0; i < IMPORT_ATTRIBUTE_TESTS.length; i++) {
             await runImportAttributeTest(IMPORT_ATTRIBUTE_TESTS[i], importAttributeRows[i]);
+          }
+        });
+
+      // -------------------------------------------------------------------------
+      // Fetch integration tests
+      // -------------------------------------------------------------------------
+      //
+      // Tests the `crossOriginStorage` option on RequestInit (see the README's
+      // "Fetch Integration" section): fetch(url, { integrity,
+      // crossOriginStorage }). Unlike the three integrations above, `fetch` is
+      // an ordinary property of the global, so the polyfill patches it
+      // directly and there is no race with the browser's own loader to lose.
+      //
+      // Same-origin reads succeed whether or not COS was involved, so these
+      // tests prove COS involvement two ways: by checking the resource landed
+      // in COS afterwards (only the polyfill's store-on-miss path does that),
+      // and, for the cross-origin checks, by fetching a URL that 404s so a
+      // successful read is only possible from COS.
+
+      const FETCH_RESOURCE_SRC = 'test-fetch-resource.txt';
+      const FETCH_RESOURCE_CONTENT = 'cos-fetch-integration-resource\n';
+      // Fetched with `integrity` but WITHOUT `crossOriginStorage`, so it must
+      // never enter COS -- the test asserts exactly that.
+      const FETCH_UNTOUCHED_SRC = 'test-fetch-untouched.txt';
+      const FETCH_UNTOUCHED_CONTENT = 'cos-fetch-integration-untouched\n';
+      const FETCH_WORKER_SRC = 'test-fetch-worker.txt';
+      const FETCH_WORKER_CONTENT = 'cos-fetch-integration-worker\n';
+      // The minimal valid module (the 4-byte magic plus version 1), enough for
+      // WebAssembly.instantiateStreaming() to accept -- which it only does for
+      // an application/wasm Content-Type, making this the real test of the
+      // synthesized Response's headers.
+      const FETCH_WASM_SRC = 'test-fetch-module.wasm';
+      const FETCH_WRONG_INTEGRITY =
+        'sha256-eGh+30Z4WIxoIqA948RuV83ijFx26LX3nmRq2jVw6r8=';
+      // Deliberately 404s -- the cross-origin checks use it so a pass is only
+      // possible if the bytes were actually served from COS.
+      const FETCH_MISSING_URL = 'test-fetch-resource-does-not-exist.txt';
+
+      // Distinct (never touched by the same-origin tests above) content for
+      // the two cross-origin visibility checks, so their upgrade-only
+      // visibility tiers ('*' vs same-site) can't collide with each other or
+      // with FETCH_RESOURCE_CONTENT's own tier.
+      const FETCH_XORIGIN_GLOBAL_CONTENT = 'fetch-xorigin-global-value';
+      const FETCH_XORIGIN_SAMESITE_CONTENT = 'fetch-xorigin-samesite-value';
+
+      let _fetchGlobalStorePromise = null;
+      function ensureFetchGlobalStored() {
+        if (!_fetchGlobalStorePromise) {
+          _fetchGlobalStorePromise = storeDeclarativeContent(
+            FETCH_XORIGIN_GLOBAL_CONTENT,
+            '*',
+            'text/plain'
+          );
+        }
+        return _fetchGlobalStorePromise;
+      }
+
+      let _fetchSamesiteStorePromise = null;
+      function ensureFetchSamesiteStored() {
+        if (!_fetchSamesiteStorePromise) {
+          _fetchSamesiteStorePromise = storeDeclarativeContent(
+            FETCH_XORIGIN_SAMESITE_CONTENT,
+            undefined,
+            'text/plain'
+          );
+        }
+        return _fetchSamesiteStorePromise;
+      }
+
+      // Sends a fetch-cos command to an already-created MOPHL iframe
+      // (sub.a.test / b.test) and awaits its { ok, text|error } result,
+      // reusing the cos-mophl-cmd/-result postMessage plumbing above.
+      function fetchRemoteCheck(origin, payload, timeout = 8000) {
+        return new Promise((resolve, reject) => {
+          const fr = _mophlIframes.get(origin);
+          if (!fr) { reject(new Error(`No iframe for ${origin}`)); return; }
+          const id = crypto.randomUUID();
+          const t = setTimeout(() => {
+            _pendingMophlReads.delete(id);
+            reject(new Error(`fetch check timeout (${origin})`));
+          }, timeout);
+          _pendingMophlReads.set(id, (data) => { clearTimeout(t); resolve(data); });
+          fr.contentWindow?.postMessage(
+            { source: 'cos-mophl-cmd', id, action: 'fetch-cos', ...payload },
+            '*'
+          );
+        });
+      }
+
+      // The fetch integration is off by default (options.html), so ask the
+      // extension whether it's on and mark the whole group n/a when it isn't --
+      // otherwise every test here would simply report a plain network fetch as
+      // a failure. Uses the cos-settings-query protocol content.js exposes;
+      // resolves false when there's no extension to answer.
+      let _fetchEnabledProbe = null;
+      function probeFetchIntegrationEnabled(timeout = 1500) {
+        if (_fetchEnabledProbe) return _fetchEnabledProbe;
+        _fetchEnabledProbe = new Promise((resolve) => {
+          const id = crypto.randomUUID();
+          const done = (value) => {
+            clearTimeout(t);
+            window.removeEventListener('message', onMsg);
+            resolve(value);
+          };
+          const t = setTimeout(() => done(false), timeout);
+          function onMsg(ev) {
+            if (
+              ev.source !== window ||
+              ev.data?.source !== 'cos-settings-reply' ||
+              ev.data.id !== id
+            )
+              return;
+            done(!!ev.data.fetchPatchEnabled);
+          }
+          window.addEventListener('message', onMsg);
+          window.postMessage(
+            { source: 'cos-settings-query', action: 'getFetchPatchSetting', id },
+            '*'
+          );
+        });
+        return _fetchEnabledProbe;
+      }
+
+      // Reports whether `content`'s hash is readable from COS on this origin.
+      // A resource only gets there via the polyfill's store-on-miss path, so
+      // this is what separates "the fetch integration ran" from "the network
+      // returned the same bytes".
+      async function isInCOS(content) {
+        const hash = { algorithm: 'SHA-256', value: await sha256Hex(content) };
+        try {
+          const handle = await navigator.crossOriginStorage.requestFileHandle(hash);
+          return (await (await handle.getFile()).text()) === content;
+        } catch (_) {
+          return false;
+        }
+      }
+
+      const FETCH_TESTS = [
+        {
+          id: 'fetch-samesite',
+          label:
+            'fetch() with crossOriginStorage: "" (same-site) — resource is served and stored in COS',
+          async run() {
+            const res = await fetch(FETCH_RESOURCE_SRC, {
+              integrity: await sriFor(FETCH_RESOURCE_CONTENT),
+              crossOriginStorage: '',
+            });
+            const text = await res.text();
+            const stored = await isInCOS(FETCH_RESOURCE_CONTENT);
+            const pass = res.ok && text === FETCH_RESOURCE_CONTENT && stored;
+            return {
+              pass,
+              detail: [
+                `Response body matches: ${text === FETCH_RESOURCE_CONTENT}`,
+                `Resource readable from COS afterwards: ${stored}`,
+              ].join('\n'),
+            };
+          },
+        },
+        {
+          id: 'fetch-global-content-type',
+          label:
+            'fetch() with crossOriginStorage: "*" — COS hit carries the stored Content-Type',
+          async run() {
+            // Seeded by the test above (or by this call's own miss path);
+            // either way the Content-Type comes from the MIME type the
+            // extension recorded for the hash, which is the explainer's
+            // "store a user-agent-computed type alongside the bytes" answer
+            // to the open Response-fidelity question.
+            const integrity = await sriFor(FETCH_RESOURCE_CONTENT);
+            const res = await fetch(FETCH_RESOURCE_SRC, {
+              integrity,
+              crossOriginStorage: '*',
+            });
+            const text = await res.text();
+            const contentType = res.headers.get('content-type') || '';
+            const pass =
+              res.ok &&
+              text === FETCH_RESOURCE_CONTENT &&
+              contentType.startsWith('text/plain');
+            return {
+              pass,
+              detail: [
+                `Response body matches: ${text === FETCH_RESOURCE_CONTENT}`,
+                `Content-Type: ${JSON.stringify(contentType)} (expected text/plain…)`,
+                `Content-Length: ${res.headers.get('content-length')}`,
+              ].join('\n'),
+            };
+          },
+        },
+        {
+          id: 'fetch-origins-array',
+          label:
+            'fetch() with crossOriginStorage: [origin] — the array list form (not a space-separated string)',
+          async run() {
+            const res = await fetch(FETCH_RESOURCE_SRC, {
+              integrity: await sriFor(FETCH_RESOURCE_CONTENT),
+              crossOriginStorage: [location.origin],
+            });
+            const text = await res.text();
+            const pass = res.ok && text === FETCH_RESOURCE_CONTENT;
+            return { pass, detail: `Response body matches: ${text === FETCH_RESOURCE_CONTENT}` };
+          },
+        },
+        {
+          id: 'fetch-hash-mismatch',
+          label: 'fetch() with a wrong integrity hash — must reject, and must not store',
+          async run() {
+            let rejected = false;
+            let detail = '';
+            try {
+              const res = await fetch(FETCH_RESOURCE_SRC, {
+                integrity: FETCH_WRONG_INTEGRITY,
+                crossOriginStorage: '*',
+              });
+              detail = `Resolved with HTTP ${res.status} (expected a rejection)`;
+            } catch (err) {
+              rejected = true;
+              detail = `Correctly rejected: ${err.name}: ${err.message}`;
+            }
+            // The bytes on the wire are fine -- it's the declared hash that is
+            // wrong -- so nothing must have been stored under it either.
+            let storedUnderWrongHash = false;
+            try {
+              await navigator.crossOriginStorage.requestFileHandle({
+                algorithm: 'SHA-256',
+                // Hex form of FETCH_WRONG_INTEGRITY.
+                value: Array.from(
+                  atob(FETCH_WRONG_INTEGRITY.slice('sha256-'.length)),
+                  (c) => c.charCodeAt(0).toString(16).padStart(2, '0')
+                ).join(''),
+              });
+              storedUnderWrongHash = true;
+            } catch (_) {}
+            return {
+              pass: rejected && !storedUnderWrongHash,
+              detail: [
+                detail,
+                `Stored under the wrong hash: ${storedUnderWrongHash} (expected false)`,
+              ].join('\n'),
+            };
+          },
+        },
+        {
+          id: 'fetch-no-opt-in',
+          label:
+            'fetch() with integrity but no crossOriginStorage — COS is never consulted or written',
+          async run() {
+            const res = await fetch(FETCH_UNTOUCHED_SRC, {
+              integrity: await sriFor(FETCH_UNTOUCHED_CONTENT),
+            });
+            const text = await res.text();
+            const stored = await isInCOS(FETCH_UNTOUCHED_CONTENT);
+            const pass = res.ok && text === FETCH_UNTOUCHED_CONTENT && !stored;
+            return {
+              pass,
+              detail: [
+                `Response body matches: ${text === FETCH_UNTOUCHED_CONTENT}`,
+                `Entered COS: ${stored} (expected false -- omitting the member preserves today's behavior)`,
+              ].join('\n'),
+            };
+          },
+        },
+        {
+          id: 'fetch-wasm-streaming',
+          label:
+            'WebAssembly.instantiateStreaming(fetch(…, { integrity, crossOriginStorage: "*" })) — the motivating example',
+          async run() {
+            // instantiateStreaming() refuses anything that isn't
+            // application/wasm, so this only passes if the synthesized
+            // Response carries the stored MIME type. Run twice so the second
+            // call is a guaranteed COS hit, which is the case that actually
+            // exercises the synthesized headers.
+            const wasmIntegrity = await sriForURL(FETCH_WASM_SRC);
+            const init = () => ({
+              integrity: wasmIntegrity,
+              crossOriginStorage: '*',
+            });
+            try {
+              await WebAssembly.instantiateStreaming(
+                fetch(FETCH_WASM_SRC, init()),
+                {}
+              );
+              const { instance } = await WebAssembly.instantiateStreaming(
+                fetch(FETCH_WASM_SRC, init()),
+                {}
+              );
+              const pass = !!instance && !!instance.exports;
+              return {
+                pass,
+                detail: `Instantiated from a COS-served Response on the second (warm-cache) call: ${pass}`,
+              };
+            } catch (err) {
+              return { pass: false, detail: `${err.name}: ${err.message}` };
+            }
+          },
+        },
+        {
+          id: 'fetch-worker',
+          label: 'fetch() with crossOriginStorage inside a Worker',
+          async run() {
+            const worker = new Worker('./test-fetch-worker.js');
+            try {
+              const result = await new Promise((resolve, reject) => {
+                const t = setTimeout(
+                  () => reject(new Error('worker fetch timeout')),
+                  15000
+                );
+                worker.onmessage = ({ data }) => {
+                  if (data.type !== 'result') return;
+                  clearTimeout(t);
+                  resolve(data);
+                };
+                worker.onerror = (e) => { clearTimeout(t); reject(new Error(e.message)); };
+                (async () => {
+                  worker.postMessage({
+                    type: 'run',
+                    url: new URL(FETCH_WORKER_SRC, location.href).href,
+                    integrity: await sriFor(FETCH_WORKER_CONTENT),
+                  });
+                })();
+              });
+              if (result.pass === null) return { pass: null, detail: result.detail };
+              const stored = await isInCOS(FETCH_WORKER_CONTENT);
+              const pass =
+                !!result.ok && result.text === FETCH_WORKER_CONTENT && stored;
+              return {
+                pass,
+                detail: [
+                  `Worker response body matches: ${result.text === FETCH_WORKER_CONTENT} (error: ${result.error ?? 'none'})`,
+                  `Content-Type: ${JSON.stringify(result.contentType)}`,
+                  `Resource readable from COS afterwards: ${stored}`,
+                ].join('\n'),
+              };
+            } finally {
+              worker.terminate();
+            }
+          },
+        },
+        {
+          id: 'fetch-global-cross-origin',
+          label:
+            'fetch(), crossOriginStorage: "*": b.test (cross-site) reads via COS despite a 404 URL',
+          async run() {
+            if (!MOPHL_AVAILABLE) {
+              return { pass: null, detail: 'n/a — requires the a.test/b.test e2e setup' };
+            }
+            await ensureMophlResources();
+            await ensureFetchGlobalStored();
+            const integrity = await sriFor(FETCH_XORIGIN_GLOBAL_CONTENT);
+            const result = await fetchRemoteCheck(`http://b.test:${location.port}`, {
+              url: FETCH_MISSING_URL,
+              integrity,
+              crossOriginStorage: '*',
+            });
+            const pass = !!result.ok && result.text === FETCH_XORIGIN_GLOBAL_CONTENT;
+            return {
+              pass,
+              detail: `b.test resolved the resource via COS despite a 404 URL: ${!!result.ok} (body: ${JSON.stringify(result.text ?? result.error)})`,
+            };
+          },
+        },
+        {
+          id: 'fetch-samesite-cross-origin',
+          label:
+            'fetch(), crossOriginStorage: "" (same-site): sub.a.test reads via COS, b.test cannot',
+          async run() {
+            if (!MOPHL_AVAILABLE) {
+              return { pass: null, detail: 'n/a — requires the a.test/b.test e2e setup' };
+            }
+            await ensureMophlResources();
+            await ensureFetchSamesiteStored();
+            const integrity = await sriFor(FETCH_XORIGIN_SAMESITE_CONTENT);
+            const [sameSite, crossSite] = await Promise.all([
+              fetchRemoteCheck(`http://sub.a.test:${location.port}`, {
+                url: FETCH_MISSING_URL,
+                integrity,
+                crossOriginStorage: '',
+              }),
+              fetchRemoteCheck(`http://b.test:${location.port}`, {
+                url: FETCH_MISSING_URL,
+                integrity,
+                crossOriginStorage: '',
+              }),
+            ]);
+            const pass =
+              !!sameSite.ok &&
+              sameSite.text === FETCH_XORIGIN_SAMESITE_CONTENT &&
+              !crossSite.ok;
+            return {
+              pass,
+              detail: [
+                `sub.a.test (same-site sibling) resolved via COS: ${!!sameSite.ok} (body: ${JSON.stringify(sameSite.text ?? sameSite.error)})`,
+                `b.test (cross-site) resolved via COS: ${!!crossSite.ok} (expected false; error: ${crossSite.error})`,
+              ].join('\n'),
+            };
+          },
+        },
+      ];
+
+      const fetchTbody = document.getElementById('fetch-results');
+      const fetchRows = FETCH_TESTS.map((test, idx) => {
+        const tr = document.createElement('tr');
+        tr.id = `fetch-row-${test.id}`;
+        tr.innerHTML = `
+          <td>${idx + 1}</td>
+          <td>${test.label}</td>
+          <td class="status-cell"><span class="badge badge-pending">pending</span></td>
+          <td><button class="run-btn">Run</button></td>
+          <td><pre class="detail"></pre></td>
+        `;
+        fetchTbody.append(tr);
+        return tr;
+      });
+
+      async function runFetchTest(test, rowEl) {
+        const btn = rowEl.querySelector('.run-btn');
+        btn.disabled = true;
+        if (!navigator.crossOriginStorage) {
+          setRowStatus(rowEl, 'n/a', 'navigator.crossOriginStorage not available');
+          btn.disabled = false;
+          return;
+        }
+        if (!(await probeFetchIntegrationEnabled())) {
+          setRowStatus(
+            rowEl,
+            'n/a',
+            'fetch integration is disabled — enable it in the extension options (fetchPatchEnabled)'
+          );
+          btn.disabled = false;
+          return;
+        }
+        setRowStatus(rowEl, 'running', '');
+        log(`--- Fetch: ${test.label} ---`);
+        try {
+          const { pass, detail } = await test.run();
+          const isNA = pass == null;
+          setRowStatus(rowEl, isNA ? 'n/a' : pass ? 'pass' : 'fail', detail);
+          log(
+            `Fetch Result: ${isNA ? 'N/A' : pass ? 'PASS' : 'FAIL'}${detail ? ' — ' + detail.split('\n')[0] : ''}`,
+            !pass && !isNA
+          );
+        } catch (err) {
+          const detail = `Uncaught ${err.name}: ${err.message}`;
+          setRowStatus(rowEl, 'fail', detail);
+          log(`Fetch Result: FAIL — ${detail}`, true);
+        } finally {
+          btn.disabled = false;
+        }
+      }
+
+      fetchRows.forEach((rowEl, idx) => {
+        rowEl.querySelector('.run-btn').addEventListener('click', () => {
+          runFetchTest(FETCH_TESTS[idx], rowEl);
+        });
+      });
+
+      document
+        .getElementById('run-all-fetch')
+        .addEventListener('click', async () => {
+          for (let i = 0; i < FETCH_TESTS.length; i++) {
+            await runFetchTest(FETCH_TESTS[i], fetchRows[i]);
           }
         });
     </script>

@@ -93,6 +93,10 @@ chrome.runtime.onInstalled.addListener(async ({ reason }) => {
   if (reason === 'install') {
     await chrome.storage.local.set({
       workerPatchEnabled: false,
+      // The fetch() integration is opt-in for the same reason the Worker
+      // patch is: it replaces a global that bot-detection systems inspect.
+      // Off by default, enabled in options.html.
+      fetchPatchEnabled: false,
       // Public Hash List gating is opt-in: off by default so existing
       // COS availability behavior doesn't change unless a user
       // explicitly enables it in options.html.
@@ -572,6 +576,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'getWorkerPatchSetting': {
           const result = await chrome.storage.local.get('workerPatchEnabled');
           responseData = { workerPatchEnabled: !!result.workerPatchEnabled };
+          break;
+        }
+        case 'getFetchPatchSetting': {
+          const result = await chrome.storage.local.get('fetchPatchEnabled');
+          responseData = { fetchPatchEnabled: !!result.fetchPatchEnabled };
           break;
         }
         case 'getPublicHashListSetting': {

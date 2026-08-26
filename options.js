@@ -4,6 +4,7 @@
 import './input-switch-polyfill.js';
 
 const workerPatchCheckbox = document.getElementById('worker-patch');
+const fetchPatchCheckbox = document.getElementById('fetch-patch');
 const publicHashListCheckbox = document.getElementById('public-hash-list');
 const toast = document.getElementById('toast');
 
@@ -16,9 +17,10 @@ function showToast() {
 
 // Load settings.
 chrome.storage.local.get(
-  ['workerPatchEnabled', 'publicHashListEnabled'],
-  ({ workerPatchEnabled, publicHashListEnabled }) => {
+  ['workerPatchEnabled', 'fetchPatchEnabled', 'publicHashListEnabled'],
+  ({ workerPatchEnabled, fetchPatchEnabled, publicHashListEnabled }) => {
     workerPatchCheckbox.checked = !!workerPatchEnabled;
+    fetchPatchCheckbox.checked = !!fetchPatchEnabled;
     publicHashListCheckbox.checked = !!publicHashListEnabled;
   }
 );
@@ -27,6 +29,15 @@ chrome.storage.local.get(
 workerPatchCheckbox.addEventListener('change', () => {
   chrome.storage.local.set(
     { workerPatchEnabled: workerPatchCheckbox.checked },
+    () => {
+      showToast();
+    }
+  );
+});
+
+fetchPatchCheckbox.addEventListener('change', () => {
+  chrome.storage.local.set(
+    { fetchPatchEnabled: fetchPatchCheckbox.checked },
     () => {
       showToast();
     }

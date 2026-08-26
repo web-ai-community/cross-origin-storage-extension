@@ -47,6 +47,39 @@
       <div class="option-item">
         <!-- switch attribute is required by the input-switch-polyfill -->
         <!-- prettier-ignore -->
+        <input type="checkbox" switch id="fetch-patch">
+        <label for="fetch-patch"
+          >Enable the <code>crossOriginStorage</code> option on
+          <code>fetch()</code></label
+        >
+      </div>
+      <p class="option-warning">
+        ⚠️ Enabling this replaces the global <code>fetch</code>
+        function. As with the <code>Worker</code> option above, bot-detection
+        systems that inspect built-in globals can treat a patched
+        <code>fetch</code> as a false positive.
+      </p>
+      <p>
+        If enabled, <code>fetch(url, { integrity, crossOriginStorage })</code>
+        checks COS for the resource before going to the network, and stores it
+        on a miss — the imperative counterpart to the
+        <code>crossoriginstorage</code> attribute and the CSS
+        <code>cross-origin-storage()</code> modifier. Off by default; requests
+        that don't carry the <code>crossOriginStorage</code> option are never
+        affected either way. See the
+        <a
+          href="https://github.com/WICG/cross-origin-storage#fetch-integration"
+          target="_blank"
+          rel="noopener noreferrer"
+          >fetch integration</a
+        >
+        section of the explainer.
+      </p>
+    </div>
+    <div class="panel">
+      <div class="option-item">
+        <!-- switch attribute is required by the input-switch-polyfill -->
+        <!-- prettier-ignore -->
         <input type="checkbox" switch id="public-hash-list">
         <label for="public-hash-list"
           >Only reveal resources on the

@@ -1,8 +1,8 @@
 // End-to-end test for the Cross-Origin Storage extension.
 //
 // Launches Chrome with the unpacked extension, starts a local HTTP server,
-// seeds a mock Public Hash List, Public Suffix List, and enables both
-// publicHashListEnabled and workerPatchEnabled, then drives test.html at
+// seeds a mock Public Hash List, Public Suffix List, and enables
+// publicHashListEnabled, workerPatchEnabled, and fetchPatchEnabled, then drives test.html at
 // http://a.test:PORT via a single "#run-all" click.  All test groups run:
 //
 //   • Main + singular tests
@@ -11,6 +11,7 @@
 //   • Origins visibility tests (PHL-gated; enabled via publicHashListEnabled)
 //   • Multi-origin PHL gate tests (iframes at sub.a.test and b.test)
 //   • CSS tests
+//   • Declarative HTML, JavaScript import attribute, and fetch integration tests
 //
 // It then drives test-legacy.html the same way, which covers the deprecated
 // plural requestFileHandles() API (main thread + Worker).
@@ -60,11 +61,17 @@ const DECL_XORIGIN_GLOBAL_CSS =
 // IMPORT_ATTR_XORIGIN_GLOBAL_CONTENT in docs/test.html.
 const IMPORT_ATTR_XORIGIN_GLOBAL_CONTENT = 'export default "js-xorigin-global-value";';
 
+// Same idea again, for the fetch integration tests' cross-origin
+// global-visibility check -- must match FETCH_XORIGIN_GLOBAL_CONTENT in
+// docs/test.html.
+const FETCH_XORIGIN_GLOBAL_CONTENT = 'fetch-xorigin-global-value';
+
 // Only the globalAllowed/declarative-global hashes go into the mock PHL.
 const MOCK_PHL_HASHES = [
   sha256Hex(MOPHL_CONTENT.globalAllowed),
   sha256Hex(DECL_XORIGIN_GLOBAL_CSS),
   sha256Hex(IMPORT_ATTR_XORIGIN_GLOBAL_CONTENT),
+  sha256Hex(FETCH_XORIGIN_GLOBAL_CONTENT),
 ];
 
 // Mock PSL: 'test' as the sole extra TLD so a.test and b.test are separate
@@ -79,6 +86,8 @@ const MIME = {
   '.css':  'text/css',
   '.bin':  'application/octet-stream',
   '.woff2':'font/woff2',
+  '.txt':  'text/plain',
+  '.wasm': 'application/wasm',
 };
 
 function startServer() {
@@ -110,6 +119,7 @@ async function seedStorage(sw) {
         phlVersion:            'test-v1',
         publicHashListEnabled: true,
         workerPatchEnabled:    true,
+        fetchPatchEnabled:     true,
         pslExact,
         pslWildcard:           [],
         pslException:          [],
@@ -255,7 +265,8 @@ async function main() {
   });
 
   // Single click runs every test group in sequence: main + singular, worker,
-  // worker variants, stress (3 GiB), origins, MOPHL, CSS, declarative HTML.
+  // worker variants, stress (3 GiB), origins, MOPHL, CSS, declarative HTML,
+  // import attribute, fetch.
   console.log('\nRunning all tests (this may take ~10–15 min for the 3 GiB stress test)…');
   const results = await runAllAndCollect(page, [
     'results',
@@ -267,6 +278,7 @@ async function main() {
     'css-results',
     'declarative-results',
     'import-attribute-results',
+    'fetch-results',
   ]);
   await page.close();
 

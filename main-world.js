@@ -461,7 +461,7 @@
   // Single polyfill for both DedicatedWorker and SharedWorker contexts.
   // Injected verbatim into wrapper blobs via .toString() — must be completely
   // self-contained (no outer-closure references, no imports).
-  function universalWorkerPolyfill() {
+  function universalWorkerPolyfill(fetchIntegrationEnabled) {
     if (typeof navigator === 'undefined' || navigator.crossOriginStorage)
       return;
 
@@ -741,8 +741,53 @@
     // temporal dead zone when this polyfill executes before the loader's const
     // is initialized, and the undeclared-variable case when running outside a
     // COS blob wrapper.
+    //
+    // The same patch also carries the fetch integration (a
+    // `crossOriginStorage` member on RequestInit) into worker scopes, which is
+    // where the integration's motivating case -- streaming a Wasm module --
+    // most often runs. It mirrors the document-side implementation at the
+    // bottom of this file; the helpers are duplicated rather than shared
+    // because this function is serialized via .toString() and must stay
+    // self-contained, the same reason _validateOrigins appears twice.
     if (typeof fetch !== 'undefined') {
       const _nativeFetch = fetch;
+
+      function _cosWorkerBase() {
+        let base;
+        try {
+          base = __cosWorkerBaseURL;
+        } catch (_) {}
+        return base || self.location.href;
+      }
+
+      function _firstSupportedIntegrityToken(integrity) {
+        for (const token of String(integrity).trim().split(/\s+/)) {
+          if (/^sha(256|384|512)-/.test(token)) return token;
+        }
+        return null;
+      }
+
+      function _parseFetchCOS(value) {
+        if (typeof value === 'string') {
+          if (value === '') return undefined;
+          if (value === '*') return '*';
+          return [value];
+        }
+        if (Array.isArray(value)) {
+          for (const o of value) {
+            if (typeof o !== 'string') {
+              throw new TypeError(
+                `Failed to execute 'fetch': 'crossOriginStorage' array must contain only strings.`
+              );
+            }
+          }
+          return value;
+        }
+        throw new TypeError(
+          `Failed to execute 'fetch': 'crossOriginStorage' must be a string or an array of origin strings.`
+        );
+      }
+
       self.fetch = function (input, init) {
         if (typeof input === 'string') {
           let base;
@@ -755,7 +800,96 @@
             } catch (_) {}
           }
         }
-        return _nativeFetch.call(self, input, init);
+
+        if (
+          !fetchIntegrationEnabled ||
+          !init ||
+          !Object.prototype.hasOwnProperty.call(init, 'crossOriginStorage')
+        ) {
+          return _nativeFetch.call(self, input, init);
+        }
+
+        const isRequest =
+          typeof Request !== 'undefined' && input instanceof Request;
+        const integrity = init.integrity ?? (isRequest ? input.integrity : '');
+        const sriToken = integrity
+          ? _firstSupportedIntegrityToken(integrity)
+          : null;
+        if (!sriToken) return _nativeFetch.call(self, input, init);
+
+        const method = (
+          init.method ?? (isRequest ? input.method : 'GET')
+        ).toUpperCase();
+        const credentials =
+          init.credentials ?? (isRequest ? input.credentials : undefined);
+        const hasBody =
+          init.body != null ||
+          (isRequest && input.bodyUsed === false && input.body != null);
+        if (method !== 'GET' || hasBody || credentials === 'include') {
+          return _nativeFetch.call(self, input, init);
+        }
+
+        let origins;
+        try {
+          origins = _parseFetchCOS(init.crossOriginStorage);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+
+        let url;
+        try {
+          url = isRequest ? input.url : new URL(input, _cosWorkerBase()).href;
+        } catch (_) {
+          return _nativeFetch.call(self, input, init);
+        }
+
+        const signal = init.signal ?? (isRequest ? input.signal : undefined);
+        if (signal?.aborted) {
+          return Promise.reject(
+            signal.reason ??
+              new DOMException('The operation was aborted.', 'AbortError')
+          );
+        }
+
+        // No `origin` is sent: inside a COS wrapper blob self.location.origin
+        // is the blob: URL's, which would resolve visibility against the wrong
+        // origin. The main-thread relay fills in the document's origin.
+        const resolved = cosRelay('resolveDeclarativeResource', {
+          url,
+          integrity: sriToken,
+          origins,
+        }).then(
+          ({ dataChunks, mimeType }) => {
+            if (!dataChunks) return _nativeFetch.call(self, input, init);
+            const type = mimeType || 'application/octet-stream';
+            const blob = new Blob(dataChunks, { type });
+            return new Response(blob, {
+              status: 200,
+              statusText: '',
+              headers: {
+                'Content-Type': type,
+                'Content-Length': String(blob.size),
+              },
+            });
+          },
+          () => _nativeFetch.call(self, input, init)
+        );
+
+        if (!signal) return resolved;
+        return Promise.race([
+          resolved,
+          new Promise((_, reject) => {
+            signal.addEventListener(
+              'abort',
+              () =>
+                reject(
+                  signal.reason ??
+                    new DOMException('The operation was aborted.', 'AbortError')
+                ),
+              { once: true }
+            );
+          }),
+        ]);
       };
     }
     if (typeof XMLHttpRequest !== 'undefined') {
@@ -807,7 +941,12 @@
       const OriginalSubWorker = Worker;
       // Self-referential: serialise this very function so each sub-worker blob
       // contains a fresh copy of the polyfill.
-      const INNER_POLYFILL = '(' + universalWorkerPolyfill.toString() + ')();';
+      const INNER_POLYFILL =
+        '(' +
+        universalWorkerPolyfill.toString() +
+        ')(' +
+        JSON.stringify(!!fetchIntegrationEnabled) +
+        ');';
 
       self.Worker = class SubWorker extends OriginalSubWorker {
         constructor(scriptURL, opts) {
@@ -903,18 +1042,30 @@
     }
   }
 
+  // The fetch() integration is gated behind its own user opt-in setting, for
+  // the same reason the Worker patch below is: it replaces a global that
+  // bot-detection systems inspect. Resolved once and shared, since the worker
+  // polyfill needs the same answer baked into its injected source.
+  const fetchIntegrationSetting = talkToBridge('getFetchPatchSetting')
+    .then((result) => !!result?.fetchPatchEnabled)
+    .catch(() => false);
+
   // Worker/SharedWorker patching is gated behind a user opt-in setting because
   // replacing these globals can confuse bot-detection systems (e.g. Cloudflare
   // Turnstile).  We fetch the setting asynchronously; by the time real page
   // scripts create workers the setting will already be known.
-  talkToBridge('getWorkerPatchSetting')
-    .then((result) => {
+  Promise.all([talkToBridge('getWorkerPatchSetting'), fetchIntegrationSetting])
+    .then(([result, fetchIntegrationEnabled]) => {
       if (!result?.workerPatchEnabled) return;
 
       if (typeof SharedWorker !== 'undefined') {
         const OriginalSharedWorker = SharedWorker;
         const SHARED_WORKER_POLYFILL =
-          '(' + universalWorkerPolyfill.toString() + ')();';
+          '(' +
+          universalWorkerPolyfill.toString() +
+          ')(' +
+          JSON.stringify(fetchIntegrationEnabled) +
+          ');';
 
         const makeCOSSharedWorker = (scriptURL, options) => {
           const absURL = new URL(scriptURL, location.href).href;
@@ -1048,6 +1199,22 @@ ${xhr.responseText}`;
                     dataChunks
                   );
                   result = {};
+                } else if (action === 'resolveDeclarativeResource') {
+                  // Fetch integration, called from the worker's patched
+                  // self.fetch. `origin` is filled in here rather than taken
+                  // from the worker: inside a COS wrapper blob the worker's
+                  // own location.origin is the blob: URL's.
+                  const resolvedData = await talkToBridge(
+                    'resolveDeclarativeResource',
+                    { ...data, origin: location.origin }
+                  );
+                  mainPort.postMessage(
+                    { id, data: resolvedData },
+                    (resolvedData?.dataChunks || []).filter(
+                      (c) => c instanceof ArrayBuffer
+                    )
+                  );
+                  return;
                 }
                 mainPort.postMessage({ id, data: result });
               } catch (err) {
@@ -1072,7 +1239,11 @@ ${xhr.responseText}`;
       if (typeof Worker !== 'undefined') {
         const OriginalWorker = Worker;
         const WORKER_POLYFILL =
-          '(' + universalWorkerPolyfill.toString() + ')();';
+          '(' +
+          universalWorkerPolyfill.toString() +
+          ')(' +
+          JSON.stringify(fetchIntegrationEnabled) +
+          ');';
 
         const makeCOSWorker = (scriptURL, options) => {
           const absURL = new URL(scriptURL, location.href).href;
@@ -1246,6 +1417,22 @@ self.addEventListener('message', function __cosBufferFn(e) {
                       dataChunks
                     );
                     result = {};
+                  } else if (action === 'resolveDeclarativeResource') {
+                    // Fetch integration, called from the worker's patched
+                    // self.fetch. `origin` is filled in here rather than taken
+                    // from the worker: inside a COS wrapper blob the worker's
+                    // own location.origin is the blob: URL's.
+                    const resolvedData = await talkToBridge(
+                      'resolveDeclarativeResource',
+                      { ...data, origin: location.origin }
+                    );
+                    mainPort.postMessage(
+                      { id, data: resolvedData },
+                      (resolvedData?.dataChunks || []).filter(
+                        (c) => c instanceof ArrayBuffer
+                      )
+                    );
+                    return;
                   }
                   mainPort.postMessage({ id, data: result });
                 } catch (e) {
@@ -1272,7 +1459,7 @@ self.addEventListener('message', function __cosBufferFn(e) {
         };
         window.Worker.prototype = OriginalWorker.prototype;
       }
-    }) // end talkToBridge('getWorkerPatchSetting').then()
+    }) // end getWorkerPatchSetting/getFetchPatchSetting .then()
     .catch(() => {});
 
   // CSS cross-origin-storage() polyfill.
@@ -1812,6 +1999,188 @@ self.addEventListener('message', function __cosBufferFn(e) {
   cosModuleObserver.observe(document.documentElement, {
     childList: true,
     subtree: true,
+  });
+
+  // Fetch integration: a `crossOriginStorage` member on RequestInit, used
+  // alongside the existing `integrity` member.
+  // See https://github.com/WICG/cross-origin-storage#fetch-integration
+  //
+  // This is the one integration that patches cleanly: `fetch` is an ordinary
+  // property of the global, so unlike `import` (not a callable reference at
+  // all) or `<script src>` (whose "already started" flag fires before any
+  // MutationObserver callback can run), the polyfill gets to decide the
+  // outcome of every call rather than racing the browser's own loader.
+  //
+  // Presence of the member -- not its truthiness -- is the opt-in, and its
+  // value is the scope. Omitting it entirely preserves today's behavior:
+  // the response is fetched and SRI-verified, and COS is never consulted or
+  // written.
+  //
+  // Gated behind a user opt-in setting (off by default), like the
+  // Worker/SharedWorker patch above: `fetch` is a global that bot-detection
+  // systems inspect, so when the option is off this leaves it completely
+  // untouched rather than installing a pass-through wrapper. The cost of
+  // resolving the setting first is the same race the Worker patch already
+  // accepts -- a page that calls fetch() with a `crossOriginStorage` option
+  // before the setting arrives gets a plain, SRI-verified network fetch,
+  // which is exactly the no-COS fallback the integration is designed around.
+  fetchIntegrationSetting.then((fetchIntegrationEnabled) => {
+    if (!fetchIntegrationEnabled) return;
+
+    const _nativeFetch = window.fetch;
+
+    // The fetch value space is deliberately NOT the HTML attribute's: the
+    // explainer specifies `(DOMString or sequence<DOMString>)`, matching the
+    // imperative `origins` option down to the IDL type, because a RequestInit
+    // member is an ordinary JavaScript value and an array is the idiomatic
+    // spelling for a list there. So this must not reuse
+    // parseCrossOriginStorageAttr(), whose whitespace split is the right
+    // grammar only for the attribute/import-attribute forms.
+    function parseFetchCrossOriginStorage(value) {
+      if (typeof value === 'string') {
+        // '' is same-site-only, spelled as an empty string rather than an
+        // omitted member because fetch() has no `create: true` to carry the
+        // opt-in separately -- the member's presence is the opt-in.
+        if (value === '') return undefined;
+        if (value === '*') return '*';
+        // A bare non-empty string is legal under the DOMString half of the
+        // union; treat it as a single-origin list.
+        return [value];
+      }
+      if (Array.isArray(value)) {
+        for (const o of value) {
+          if (typeof o !== 'string') {
+            throw new TypeError(
+              `Failed to execute 'fetch': 'crossOriginStorage' array must contain only strings.`
+            );
+          }
+        }
+        return value;
+      }
+      throw new TypeError(
+        `Failed to execute 'fetch': 'crossOriginStorage' must be a string or an array of origin strings.`
+      );
+    }
+
+    // A COS entry stores bytes only, so a Response synthesized from a hit has
+    // no status, headers, or MIME type of its own -- an open question in the
+    // explainer, which lists three candidate answers. This takes the third:
+    // the extension already records a user-agent-computed MIME type per hash
+    // (resourceManager.recordMimeType in background.js) and
+    // resolveDeclarativeResource returns it, so serving that as Content-Type
+    // costs nothing and makes WebAssembly.instantiateStreaming() -- which
+    // rejects anything that isn't application/wasm, and is the motivating
+    // example for this integration -- work on a COS hit.
+    //
+    // Two fidelity gaps remain that the Response constructor simply doesn't
+    // expose: `url` is always '' (there's no way to set it), and `type` is
+    // 'default' rather than the 'basic'/'cors' a real network fetch would
+    // report. Both are inherent to synthesizing a Response from script.
+    function responseFromCOS(dataChunks, mimeType) {
+      const type = mimeType || 'application/octet-stream';
+      const blob = new Blob(dataChunks, { type });
+      return new Response(blob, {
+        status: 200,
+        statusText: '',
+        headers: {
+          'Content-Type': type,
+          'Content-Length': String(blob.size),
+        },
+      });
+    }
+
+    window.fetch = function fetch(input, init) {
+      // Checked with hasOwnProperty, not truthiness: '' is a legal,
+      // meaningful value (same-site-only) and `!''` is true, so a truthiness
+      // check would wrongly treat the same-site form as "no COS opt-in".
+      if (
+        !init ||
+        !Object.prototype.hasOwnProperty.call(init, 'crossOriginStorage')
+      ) {
+        return _nativeFetch.call(this, input, init);
+      }
+
+      const isRequest = typeof Request !== 'undefined' && input instanceof Request;
+      const integrity = init.integrity ?? (isRequest ? input.integrity : '');
+      const sriToken = integrity ? firstSupportedIntegrityToken(integrity) : null;
+
+      // The COS lookup is keyed by the integrity hash, so without a
+      // COS-supported one there is nothing to look up. Fall through and let
+      // the browser fetch and verify as it normally would.
+      if (!sriToken) return _nativeFetch.call(this, input, init);
+
+      // The store-on-miss step runs bridge-side (background.js does the
+      // network fetch), which means it can't carry this call's request
+      // options -- method, headers, credentials, mode, body. Restrict the COS
+      // path to plain retrievals and leave everything else entirely native,
+      // rather than silently dropping options the caller set.
+      const method = (init.method ?? (isRequest ? input.method : 'GET')).toUpperCase();
+      const credentials = init.credentials ?? (isRequest ? input.credentials : undefined);
+      const hasBody =
+        init.body != null || (isRequest && input.bodyUsed === false && input.body != null);
+      if (method !== 'GET' || hasBody || credentials === 'include') {
+        return _nativeFetch.call(this, input, init);
+      }
+
+      // Throws synchronously in the spec (an IDL conversion failure), but
+      // fetch() returns a promise, so surface it as a rejection instead.
+      let origins;
+      try {
+        origins = parseFetchCrossOriginStorage(init.crossOriginStorage);
+      } catch (err) {
+        return Promise.reject(err);
+      }
+
+      let url;
+      try {
+        url = isRequest ? input.url : new URL(input, location.href).href;
+      } catch (_) {
+        return _nativeFetch.call(this, input, init);
+      }
+
+      const signal = init.signal ?? (isRequest ? input.signal : undefined);
+      if (signal?.aborted) {
+        return Promise.reject(
+          signal.reason ?? new DOMException('The operation was aborted.', 'AbortError')
+        );
+      }
+
+      const resolved = talkToBridge('resolveDeclarativeResource', {
+        url,
+        integrity: sriToken,
+        origins,
+        origin: location.origin,
+      }).then(
+        ({ dataChunks, mimeType }) =>
+          dataChunks
+            ? responseFromCOS(dataChunks, mimeType)
+            : // A miss the bridge couldn't repair (network failure, or a hash
+              // mismatch it refused to store) falls back to a real fetch, so
+              // the browser's own integrity check produces the failure --
+              // same as the HTML integration's restoreNative().
+              _nativeFetch.call(this, input, init),
+        () => _nativeFetch.call(this, input, init)
+      );
+
+      if (!signal) return resolved;
+      // The bridge round-trip isn't itself abortable, so racing is the best
+      // available approximation: an abort rejects this call promptly, even
+      // though the background script's own fetch runs to completion.
+      return Promise.race([
+        resolved,
+        new Promise((_, reject) => {
+          signal.addEventListener(
+            'abort',
+            () =>
+              reject(
+                signal.reason ??
+                  new DOMException('The operation was aborted.', 'AbortError')
+              ),
+            { once: true }
+          );
+        }),
+      ]);
+    };
   });
 
   // Not part of the COS explainer's public surface — a non-standard,

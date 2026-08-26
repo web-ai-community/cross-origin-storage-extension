@@ -42,7 +42,7 @@
 
 ## Supported integrations
 
-Cross-Origin Storage has one imperative API and three additional integrations
+Cross-Origin Storage has one imperative API and four additional integrations
 (see the [explainer](https://github.com/WICG/cross-origin-storage)). A content
 script can't intercept everything a real browser implementation could, so a
 couple of them need a small, documented deviation from the
@@ -55,6 +55,7 @@ and the reasoning are in code comments in `main-world.js`.
 | [CSS `cross-origin-storage()`](#css-integration) | ✅ Yes | An external `<link rel="stylesheet">` needs an extra `data-cos` marker attribute — recommended for performance, not required by the syntax itself. [See details](#css-integration). |
 | [Declarative HTML](#declarative-html-integration) (`crossoriginstorage` attribute) | ✅ Yes | For `<script>` (not `<link>`) elements, the browser's native fetch always wins execution. [See details](#declarative-html-integration). |
 | [JavaScript import attribute](#javascript-import-attribute-integration) (import attributes) | ⚠️ No | Works via shims — a `<script type="module-cos">` opt-in, or the `navigator.crossOriginStorage.__non_standard__import()` helper — instead of literal `with { crossOriginStorage }` syntax. [See details](#javascript-import-attribute-integration). |
+| [Fetch](#fetch-integration) (`crossOriginStorage` request option) | ✅ Yes | Off by default — enable it in the extension's options. Only plain `GET`s take the COS path, and a response served from COS has an empty `url` and `type: "default"`. [See details](#fetch-integration). |
 
 ### Imperative JS API
 
@@ -342,14 +343,108 @@ const mod = await navigator.crossOriginStorage.__non_standard__import(
 //   import("blob:https://example.com/9c8d7e6f-...", { with: { type: "json" } })
 ```
 
+### Fetch integration
+
+> **Matches the spec syntax exactly?** ✅ Yes
+
+> [!IMPORTANT]
+> This integration is **off by default**. Turn it on with "Enable the
+> `crossOriginStorage` option on `fetch()`" in the extension's options page.
+> It replaces the global `fetch` function, and bot-detection systems that
+> inspect built-in globals can treat that as a false positive — the same
+> reason the `Worker`/`SharedWorker` option is opt-in. While the option is
+> off, `fetch` is left completely untouched.
+
+This is the one integration that patches cleanly. `fetch` is an ordinary
+property of the global object, so unlike `import` (not a callable reference
+at all) or `<script src>` (whose "already started" flag is set before any
+`MutationObserver` callback can run), the polyfill decides the outcome of
+every call rather than racing the browser's own loader.
+
+Works exactly as specified:
+
+```js
+const { instance } = await WebAssembly.instantiateStreaming(
+  fetch('module.wasm', {
+    integrity: 'sha256-abc123...',
+    crossOriginStorage: '*',
+  }),
+  imports
+);
+```
+
+The **presence** of the `crossOriginStorage` member — not its truthiness — is
+the opt-in, and its value is the scope: `''` is same-site-only, `'*'` is
+global, and an array restricts retrieval to those origins. Omitting the
+member while keeping `integrity` preserves today's behavior exactly: the
+response is fetched and SRI-verified, and COS is never consulted or written.
+
+Note that the list form is an **array**, not the space-separated string the
+HTML and import attribute forms use. That's per the explainer, not an
+inconsistency: a `RequestInit` member is an ordinary JavaScript value, so it
+matches the imperative `origins` option exactly, down to the IDL type.
+
+```js
+// Same-site only, mirroring an omitted `origins` in the imperative API.
+await fetch('same-site-resource.ext', {
+  integrity: 'sha256-abc123...',
+  crossOriginStorage: '',
+});
+
+// Restricted to specific origins.
+await fetch('acme-inc-corporate.ext', {
+  integrity: 'sha256-def456...',
+  crossOriginStorage: ['https://acme-inc.example.com', 'https://acme-cdn.example.com'],
+});
+```
+
+#### `Content-Type` on a cache hit
+
+The explainer flags this as an open question: a COS entry stores bytes only,
+so a `Response` synthesized from a hit has no MIME type of its own, and
+`WebAssembly.instantiateStreaming()` refuses anything that isn't
+`application/wasm`. Of the three candidate answers it lists, this extension
+takes the third — it already records a user-agent-computed MIME type per hash
+when the bytes are first stored, and serves that as the `Content-Type`. So
+the `instantiateStreaming()` example above works on a COS hit, with no header
+plumbing on the caller's side.
+
+#### Limitations
+
+- **Only plain `GET`s take the COS path.** The store-on-miss step runs in the
+  extension's background script, which can't carry the call's request options
+  (headers, credentials, mode, body). Rather than silently dropping options
+  the caller set, anything that isn't a plain `GET` — a non-`GET` method, a
+  request body, or `credentials: 'include'` — is passed straight through to
+  the native `fetch` and bypasses COS entirely.
+- **A response served from COS has an empty `url` and `type: 'default'`.**
+  The `Response` constructor exposes neither, so a synthesized response can't
+  report the `'basic'`/`'cors'` type or the resolved URL a real network fetch
+  would. The body, `status`, `Content-Type`, and `Content-Length` are all
+  correct.
+- **`AbortSignal` is approximate.** The bridge round-trip isn't itself
+  abortable, so aborting rejects the call promptly but the background
+  script's own fetch still runs to completion.
+- **Very early calls may miss the patch.** The opt-in setting is read
+  asynchronously, so a `fetch()` issued before it arrives gets a plain,
+  SRI-verified network fetch. That's the same no-COS fallback the integration
+  is designed around, and the same trade-off the `Worker` option already
+  makes.
+
+Workers are covered too: when *both* this option and the
+`Worker`/`SharedWorker` option are enabled, `fetch()` inside a dedicated,
+shared, or nested worker takes the same COS path, which is where the
+motivating Wasm case usually runs.
+
 ## Using COS today as a progressive enhancement
 
-All three integrations can be written today, in any browser, so
+All four integrations can be written today, in any browser, so
 that a page works identically whether or not the visitor has this extension
 (or, eventually, a native COS implementation) — verified empirically for
 each form below, not just asserted. A working
-[demo of all three](progressive-enhancement-demo.html) is included; try
-loading it with the extension enabled, then disabled, and compare.
+[demo](progressive-enhancement-demo.html) covering the first three is
+included; try loading it with the extension enabled, then disabled, and
+compare.
 
 ### HTML integration — already progressive, no extra code
 
@@ -476,6 +571,16 @@ const mod = supportsCOS
     })
   : await import('resource.json');
 ```
+
+### Fetch integration — already progressive, no extra code
+
+Like the HTML integration, this one needs nothing special. `RequestInit` is
+an ordinary dictionary, and both the Fetch Standard and every engine ignore
+members they don't recognize, so a browser without COS treats
+`crossOriginStorage` as absent and performs a plain, `integrity`-verified
+network fetch. Write it exactly as shown [above](#fetch-integration) and it
+degrades on its own. The same is true of the extension with the option
+switched off, which is its default state.
 
 ## Privacy: Public Hash List gating
 
