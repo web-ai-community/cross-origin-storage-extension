@@ -44,7 +44,7 @@
       `module-shim` convention.
     -->
     <script type="module-cos" id="decl-module-static">
-      import staticValue from "test-import-attribute-module.js" with { integrity: "sha256-sZI4b8NEw374NAnJDa6fK6mkE+Dev3yB4ndsCXKq+wA=", crossOriginStorage: "" };
+      import staticValue from "test-import-attribute-module.js" with { integrity: "sha256-Dqysj5FyaVlzLvCbNA4o2n0gedYa17+n3ebtSy+5ab4=", crossOriginStorage: "" };
       window.__cosModuleStaticValue = staticValue;
     </script>
     <title>Cross-Origin Storage — test page</title>
@@ -2402,8 +2402,6 @@
       // set up by the multi-origin PHL tests above) cross-origin visibility.
 
       const DECL_SCRIPT_SRC = 'test-declarative-script.js';
-      const DECL_SCRIPT_INTEGRITY =
-        'sha256-6beX92fZ01C6VA5MBmfKLqKozsxKDKA2kZLb6DKS/PY=';
       const DECL_WRONG_INTEGRITY =
         'sha256-lJyrUbO5pkHSUm6cpZGHOlSJ7J5BUKZ3lpJK2FK9swM=';
       // Deliberately 404s -- the cross-origin checks below use it so a pass
@@ -2412,6 +2410,39 @@
       // 'declarative-link' handler above for why these checks use <link>
       // rather than <script>.
       const DECL_MISSING_HREF = 'test-declarative-resource-does-not-exist';
+
+      // Computes a fixture's SRI hash from its actual bytes, so a test constant
+      // can never drift out of sync with the file it names. A hardcoded hash
+      // and a fixture are two copies of the same fact, and editing the fixture
+      // -- even just reflowing a comment -- silently invalidates the constant;
+      // when that happens the COS lookup returns nothing, the polyfill quietly
+      // falls back to the network, and the failure looks like a broken
+      // integration rather than stale test data. That is exactly how the two
+      // <script type="module-cos"> tests broke.
+      //
+      // This can't cover the hashes written directly into markup below
+      // (<link integrity>, <script integrity>, and the module-cos import in
+      // <head>), which are parsed before any script could compute them. Those
+      // stay literal and are checked by check-fixture-hashes.mjs instead, which
+      // `npm test` runs first.
+      const _sriURLCache = new Map();
+      async function sriForURL(url) {
+        if (!_sriURLCache.has(url)) {
+          _sriURLCache.set(
+            url,
+            (async () => {
+              const res = await fetch(url, { cache: 'no-store' });
+              if (!res.ok) throw new Error(`sriForURL(${url}): HTTP ${res.status}`);
+              const buf = await res.arrayBuffer();
+              const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', buf));
+              let binary = '';
+              for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+              return `sha256-${btoa(binary)}`;
+            })()
+          );
+        }
+        return _sriURLCache.get(url);
+      }
 
       async function sriFor(text) {
         const buf = await crypto.subtle.digest(
@@ -2567,7 +2598,7 @@
             const before = window.__cosDeclarativeRunCount || 0;
             const script = document.createElement('script');
             script.src = DECL_SCRIPT_SRC;
-            script.integrity = DECL_SCRIPT_INTEGRITY;
+            script.integrity = await sriForURL(DECL_SCRIPT_SRC);
             script.setAttribute('crossoriginstorage', '*');
             document.head.appendChild(script);
             const deadline = Date.now() + 8000;
@@ -2744,11 +2775,7 @@
       // cross-origin visibility.
 
       const IMPORT_ATTR_MODULE_SRC = 'test-import-attribute-module.js';
-      const IMPORT_ATTR_MODULE_INTEGRITY =
-        'sha256-sZI4b8NEw374NAnJDa6fK6mkE+Dev3yB4ndsCXKq+wA=';
       const IMPORT_ATTR_MODULE2_SRC = 'test-import-attribute-module-2.js';
-      const IMPORT_ATTR_MODULE2_INTEGRITY =
-        'sha256-9qCP700H7mesY81c0pG4yRjQqwPGIQAXzJxmhu3aXJw=';
       const IMPORT_ATTR_WRONG_INTEGRITY =
         'sha256-eGh+30Z4WIxoIqA948RuV83ijFx26LX3nmRq2jVw6r8=';
       // Deliberately 404s -- the cross-origin checks below use it so a pass
@@ -2843,7 +2870,7 @@
             script.type = 'module-cos';
             script.textContent =
               `const mod = await import(${JSON.stringify(IMPORT_ATTR_MODULE2_SRC)}, ` +
-              `{ with: { integrity: ${JSON.stringify(IMPORT_ATTR_MODULE2_INTEGRITY)}, crossOriginStorage: '*' } });\n` +
+              `{ with: { integrity: ${JSON.stringify(await sriForURL(IMPORT_ATTR_MODULE2_SRC))}, crossOriginStorage: '*' } });\n` +
               `window.__cosModuleDynamicValue = mod.default;`;
             document.head.appendChild(script);
             const deadline = Date.now() + 8000;
@@ -2883,17 +2910,60 @@
         },
         {
           id: 'import-attr-helper-import',
-          label: 'navigator.crossOriginStorage.__non_standard__import() explicit helper (same-site)',
+          label:
+            'navigator.crossOriginStorage.__non_standard__import() explicit helper (same-site) — stores on a miss, then resolves from COS alone',
           async run() {
+            // Two steps, because either one alone is satisfiable without COS.
+            //
+            // __non_standard__import() falls back to a plain dynamic import()
+            // whenever COS returns nothing, so importing a URL that resolves
+            // proves nothing: it passes identically with COS completely
+            // broken. (This test did exactly that, and stayed green through
+            // the period when both <script type="module-cos"> tests were
+            // failing.) Step 2 repeats the import against a specifier that
+            // 404s, which only the COS entry step 1 stored can satisfy --
+            // making it a direct assertion that step 1 populated COS, and
+            // leaving no path to a pass that doesn't go through COS.
+            const integrity = await sriForURL(IMPORT_ATTR_MODULE_SRC);
+            let viaURL, viaCOS;
             try {
-              const mod = await navigator.crossOriginStorage.__non_standard__import(IMPORT_ATTR_MODULE_SRC, {
-                with: { integrity: IMPORT_ATTR_MODULE_INTEGRITY, crossOriginStorage: "" },
-              });
-              const pass = mod.default === 'module-cos-static-value';
-              return { pass, detail: `Imported default export: ${JSON.stringify(mod.default)}` };
+              viaURL = (
+                await navigator.crossOriginStorage.__non_standard__import(
+                  IMPORT_ATTR_MODULE_SRC,
+                  { with: { integrity, crossOriginStorage: '' } }
+                )
+              ).default;
             } catch (err) {
-              return { pass: false, detail: `${err.name}: ${err.message}` };
+              return { pass: false, detail: `Step 1 (real URL) threw ${err.name}: ${err.message}` };
             }
+            try {
+              viaCOS = (
+                await navigator.crossOriginStorage.__non_standard__import(
+                  IMPORT_ATTR_MISSING_SPECIFIER,
+                  { with: { integrity, crossOriginStorage: '' } }
+                )
+              ).default;
+            } catch (err) {
+              return {
+                pass: false,
+                detail: [
+                  `Step 1 (real URL) imported: ${JSON.stringify(viaURL)}`,
+                  `Step 2 (404 specifier, COS-only) threw ${err.name}: ${err.message}`,
+                  'A throw here means the helper never stored the module in COS —' ,
+                  'step 1 was served straight from the network.',
+                ].join('\n'),
+              };
+            }
+            const pass =
+              viaURL === 'module-cos-static-value' &&
+              viaCOS === 'module-cos-static-value';
+            return {
+              pass,
+              detail: [
+                `Step 1 (real URL, seeds COS) imported: ${JSON.stringify(viaURL)}`,
+                `Step 2 (404 specifier, only COS can serve it) imported: ${JSON.stringify(viaCOS)}`,
+              ].join('\n'),
+            };
           },
         },
         {

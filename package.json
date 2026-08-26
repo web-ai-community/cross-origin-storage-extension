@@ -8,6 +8,8 @@
   },
   "scripts": {
     "start": "npx http-server docs/",
+    "pretest": "node check-fixture-hashes.mjs",
+    "check:hashes": "node check-fixture-hashes.mjs",
     "test": "node e2e-test.chrome.mjs",
     "use-chrome": "cp manifest.chrome.json manifest.json",
     "use-firefox": "cp manifest.firefox.json manifest.json",
