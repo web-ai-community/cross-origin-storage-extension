@@ -1,6 +1,6 @@
 {
   "name": "cross-origin-storage-extension",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "description": "<img src=\"https://raw.githubusercontent.com/web-ai-community/cross-origin-storage-extension/refs/heads/main/logo-cos.svg\" alt=\"Cross-Origin Storage API logo\" width=\"60\" height=\"60\">",
   "main": "background.js",
   "directories": {
@@ -32,6 +32,6 @@
   },
   "homepage": "https://github.com/web-ai-community/cross-origin-storage-extension#readme",
   "devDependencies": {
-    "playwright": "^1.62.1"
+    "playwright": "^1.63.0"
   }
 }

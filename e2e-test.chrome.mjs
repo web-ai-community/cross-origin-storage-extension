@@ -14,7 +14,8 @@
 //   • Declarative HTML, JavaScript import attribute, and fetch integration tests
 //
 // It then drives test-legacy.html the same way, which covers the deprecated
-// plural requestFileHandles() API (main thread + Worker).
+// plural requestFileHandles() API (main thread + Worker). Finally, it opens
+// popup.html and checks the Public Hash List badges on two stored resources.
 //
 // The .test hostnames are mapped to 127.0.0.1 via --host-resolver-rules so
 // the single local server answers for all three fake-TLD origins.
@@ -354,11 +355,39 @@ async function main() {
   ).map(r => ({ ...r, label: `[Legacy] ${r.label}` }));
   await legacyPage.close();
 
+  // ── popup.html: Public Hash List badges ───────────────────────────────────
+
+  // The MOPHL tests above stored both of these; only globalAllowed is on the
+  // mock PHL. Search for each in the popup and read its badge.
+  console.log('\nChecking Public Hash List badges in the popup…');
+  const extensionId = new URL(sw.url()).host;
+  const popupPage = await context.newPage();
+  await popupPage.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'load' });
+  const popupResults = [];
+  for (const [key, expected] of [['globalAllowed', 'On PHL'], ['globalBlocked', 'Not on PHL']]) {
+    const hash = sha256Hex(MOPHL_CONTENT[key]);
+    const label = `[Popup] ${key} resource shows "${expected}" badge`;
+    try {
+      await popupPage.fill('#hash-search', hash);
+      const badge = popupPage.locator(`#hash-search-result li[title="Hash: ${hash}"] .resource-phl-badge`);
+      await badge.waitFor({ timeout: 10_000 });
+      const actual = (await badge.textContent()).trim();
+      popupResults.push({
+        label,
+        status: actual === expected ? 'pass' : 'fail',
+        detail: `badge text: ${actual}`,
+      });
+    } catch (err) {
+      popupResults.push({ label, status: 'fail', detail: err.message });
+    }
+  }
+  await popupPage.close();
+
   // ── Collect + report all results ──────────────────────────────────────────
 
   console.log('\n── Test Results ──────────────────────────────────────');
   let passed = 0, failed = 0;
-  for (const r of [...results, ...legacyResults]) {
+  for (const r of [...results, ...legacyResults, ...popupResults]) {
     if (r.status === 'n/a') continue;
     const icon = r.status === 'pass' ? '✅' : '❌';
     console.log(`${icon} [${r.status}] ${r.label}`);

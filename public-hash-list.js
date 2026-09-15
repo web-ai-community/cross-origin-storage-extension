@@ -87,7 +87,39 @@ class PublicHashList {
     this._hashes = null; // Set<string> | null until first load
     this._fetchedAt = 0;
     this._version = null;
-    this._refreshPromise = null; // de-dupes concurrent background refreshes
+    this._refreshPromise = null; // de-dupes concurrent refreshes
+  }
+
+  get version() {
+    return this._version;
+  }
+
+  get fetchedAt() {
+    return this._fetchedAt;
+  }
+
+  /**
+   * Populates the in-memory hash set from storage, without touching the
+   * network. Resolves to true if a cached copy is now in memory, false if
+   * the PHL has never been downloaded.
+   */
+  async loadCached() {
+    if (this._hashes) return true;
+
+    const stored = await chrome.storage.local.get([
+      STORAGE_KEY_HASHES,
+      STORAGE_KEY_FETCHED_AT,
+      STORAGE_KEY_VERSION,
+    ]);
+    // A refresh may have completed while storage was being read; its data
+    // is at least as new as what was just read, so keep it.
+    if (this._hashes) return true;
+    if (!stored[STORAGE_KEY_HASHES]?.length) return false;
+
+    this._hashes = new Set(stored[STORAGE_KEY_HASHES]);
+    this._fetchedAt = stored[STORAGE_KEY_FETCHED_AT] || 0;
+    this._version = stored[STORAGE_KEY_VERSION] || null;
+    return true;
   }
 
   /**
@@ -97,18 +129,7 @@ class PublicHashList {
    * do a blocking initial fetch, since there is nothing to serve yet.
    */
   async init() {
-    if (this._hashes) return;
-
-    const stored = await chrome.storage.local.get([
-      STORAGE_KEY_HASHES,
-      STORAGE_KEY_FETCHED_AT,
-      STORAGE_KEY_VERSION,
-    ]);
-
-    if (stored[STORAGE_KEY_HASHES]?.length) {
-      this._hashes = new Set(stored[STORAGE_KEY_HASHES]);
-      this._fetchedAt = stored[STORAGE_KEY_FETCHED_AT] || 0;
-      this._version = stored[STORAGE_KEY_VERSION] || null;
+    if (await this.loadCached()) {
       this._maybeRefreshInBackground();
     } else {
       // Nothing cached yet — block once so the very first gated lookup
@@ -121,18 +142,23 @@ class PublicHashList {
     const age = Date.now() - this._fetchedAt;
     if (age < REFRESH_INTERVAL_MS) return;
     if (this._refreshPromise) return;
-    this._refreshPromise = this._refresh()
-      .catch((error) => {
-        // Stale data stays in place; just log and try again next time
-        // init()/has() is called after the interval has elapsed.
-        console.warn('[COS] Public Hash List background refresh failed:', error);
-      })
-      .finally(() => {
-        this._refreshPromise = null;
-      });
+    this._refresh().catch((error) => {
+      // Stale data stays in place; just log and try again next time
+      // init()/has() is called after the interval has elapsed.
+      console.warn('[COS] Public Hash List background refresh failed:', error);
+    });
   }
 
-  async _refresh() {
+  // The list is tens of megabytes, so callers that race (a gated lookup
+  // and the popup, say) share one download instead of starting their own.
+  _refresh() {
+    this._refreshPromise ??= this._fetchAndStore().finally(() => {
+      this._refreshPromise = null;
+    });
+    return this._refreshPromise;
+  }
+
+  async _fetchAndStore() {
     const [datResponse, sha256Response] = await Promise.all([
       fetch(PHL_URL, { cache: 'no-cache' }),
       fetch(PHL_SHA256_URL, { cache: 'no-cache' }),

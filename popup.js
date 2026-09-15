@@ -31,6 +31,9 @@ async function initializePopup() {
   const chartsGrid = document.getElementById('charts-grid');
   const chartsSection = document.getElementById('charts-section');
   const mimeFilterBar = document.getElementById('mime-filter');
+  const phlNotice = document.getElementById('phl-notice');
+  const phlNoticeText = document.getElementById('phl-notice-text');
+  const phlDownloadBtn = document.getElementById('phl-download-btn');
 
   // Current-page hit/miss state — populated before the first render so
   // updateHashesDisplay can annotate and re-order resources immediately.
@@ -44,6 +47,104 @@ async function initializePopup() {
   // Active MIME type filters. Empty = no filter (show all). Reset whenever
   // the selected origin changes or the UI does a full refresh.
   let activeMimeFilters = new Set();
+
+  // Public Hash List membership of the stored resources, as a promise:
+  // checking the list can take a while (the first download is tens of
+  // megabytes), so resource items render right away and add their PHL
+  // badge once it settles. Resolves to { available: false } when no copy
+  // of the list has been downloaded yet.
+  let phlStatusPromise = Promise.resolve({ available: false });
+
+  function requestPhlStatus(download = false) {
+    const hashes = resourceManager.getAllHashes();
+    const promise = chrome.runtime
+      .sendMessage({
+        action: 'getPublicHashListStatus',
+        data: { hashes, download },
+      })
+      .then((response) => {
+        if (!response?.data) {
+          throw new Error(response?.error || 'No response from background');
+        }
+        const { available, listed = [], version } = response.data;
+        return {
+          available,
+          checked: new Set(hashes),
+          listed: new Set(listed),
+          version,
+        };
+      });
+    phlStatusPromise = promise;
+    promise.then(
+      (status) => {
+        // A newer request supersedes this one.
+        if (phlStatusPromise === promise) renderPhlNotice(status);
+      },
+      (error) => {
+        if (phlStatusPromise !== promise) return;
+        console.error('Checking the Public Hash List failed:', error);
+        renderPhlNotice({ error, download });
+      }
+    );
+    return promise;
+  }
+
+  function renderPhlNotice({ available, error, download }) {
+    phlDownloadBtn.disabled = false;
+    if (error) {
+      phlNoticeText.textContent = `Couldn't check resources against the Public Hash List: ${error.message}`;
+      phlDownloadBtn.textContent = 'Retry';
+      phlDownloadBtn.dataset.download = String(download);
+      phlNotice.hidden = false;
+    } else if (!available) {
+      phlNoticeText.textContent =
+        "Resources aren't checked against the Public Hash List (PHL) because it hasn't been downloaded. The list is tens of megabytes and, once downloaded, refreshes at most once every 24 hours.";
+      phlDownloadBtn.textContent = 'Download Public Hash List';
+      phlDownloadBtn.dataset.download = 'true';
+      phlNotice.hidden = false;
+    } else {
+      phlNotice.hidden = true;
+    }
+  }
+
+  phlDownloadBtn.addEventListener('click', async () => {
+    const download = phlDownloadBtn.dataset.download === 'true';
+    phlDownloadBtn.disabled = true;
+    phlNoticeText.textContent = download
+      ? 'Downloading the Public Hash List…'
+      : 'Checking the Public Hash List…';
+    try {
+      await requestPhlStatus(download);
+    } catch {
+      // renderPhlNotice() has already shown the error.
+      return;
+    }
+    // Re-render the resource items so they pick up the new status.
+    await updateHashesDisplay();
+    await updateOriginsDisplay();
+    await updateHashSearch();
+  });
+
+  function appendPhlBadge(container, hash) {
+    phlStatusPromise.then(
+      ({ available, checked, listed, version }) => {
+        if (!available || !checked.has(hash)) return;
+        const isListed = listed.has(hash);
+        const badge = document.createElement('span');
+        badge.className = `resource-page-badge resource-phl-badge resource-phl-badge--${
+          isListed ? 'listed' : 'unlisted'
+        }`;
+        badge.textContent = isListed ? 'On PHL' : 'Not on PHL';
+        const versionSuffix = version ? ` (version ${version})` : '';
+        badge.title = isListed
+          ? `Listed on the Public Hash List${versionSuffix}`
+          : `Not listed on the Public Hash List${versionSuffix}`;
+        container.append(' ', badge);
+      },
+      // Failures are reported once, in the notice, not on every item.
+      () => {}
+    );
+  }
 
   let selectHighlightTimer;
   let toastTimer;
@@ -388,15 +489,14 @@ async function initializePopup() {
 
     const hashDiv = document.createElement('div');
     hashDiv.className = 'hash-value';
+    hashDiv.append(label);
     if (pageBadge) {
-      hashDiv.append(label, ' ');
       const badge = document.createElement('span');
       badge.className = `resource-page-badge resource-page-badge--${pageBadge}`;
       badge.textContent = pageBadge === 'hit' ? 'Cache hit' : 'Cache miss';
-      hashDiv.append(badge);
-    } else {
-      hashDiv.textContent = label;
+      hashDiv.append(' ', badge);
     }
+    appendPhlBadge(hashDiv, hash);
     textContent.append(hashDiv);
 
     const storer = resourceManager.getStorer(hash);
@@ -988,6 +1088,7 @@ async function initializePopup() {
 
     // Reload the latest data from storage.
     await resourceManager.loadManagerFromStorage();
+    requestPhlStatus().catch(() => {});
 
     // Clear current selections and lists.
     originSelect.innerHTML = '';

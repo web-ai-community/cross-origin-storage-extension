@@ -596,6 +596,12 @@ individual user. See the
 [PHL design explainer](https://github.com/WICG/cross-origin-storage/blob/main/public-hash-list/phl-explainer.md)
 for the full rationale, data format, and proposed governance model.
 
+The popup marks every stored resource as "On PHL" or "Not on PHL", whether or
+not the setting is enabled, so you can see which globally-shared resources the
+gate would hide from origins other than the one that stored them. The list is
+tens of megabytes, so the popup only uses a copy that is already downloaded
+(which the setting does for you) and otherwise offers a button to download it.
+
 ## License
 
 Apache 2.0.

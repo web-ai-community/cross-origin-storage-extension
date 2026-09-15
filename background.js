@@ -592,6 +592,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           };
           break;
         }
+        case 'getPublicHashListStatus': {
+          // Reports which of the popup's `hashes` are on the PHL. The list
+          // is tens of megabytes, so it's only downloaded when the gate is
+          // enabled (which downloads it anyway) or the popup explicitly
+          // asks with `download: true`; otherwise only a cached copy is used.
+          const { hashes = [], download = false } = data || {};
+          const { publicHashListEnabled } = await chrome.storage.local.get(
+            'publicHashListEnabled'
+          );
+          if (download || publicHashListEnabled) {
+            await publicHashList.init();
+          } else if (!(await publicHashList.loadCached())) {
+            responseData = { available: false };
+            break;
+          }
+          const listed = [];
+          for (const hash of hashes) {
+            if (await publicHashList.has(hash)) listed.push(hash);
+          }
+          responseData = {
+            available: true,
+            listed,
+            version: publicHashList.version,
+            fetchedAt: publicHashList.fetchedAt,
+          };
+          break;
+        }
         case 'rewriteStylesheet': {
           const tabId = sender.tab?.id;
           maybeResetForNewPage(tabId, sender.documentId);

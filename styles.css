@@ -426,6 +426,45 @@ button {
   background: light-dark(#fff3e0, #3e1c00);
 }
 
+.resource-phl-badge {
+  cursor: help;
+}
+
+.resource-phl-badge--listed {
+  color: light-dark(#1557b0, #aac4f5);
+  background: light-dark(#e8f0fe, #1a2a44);
+}
+
+.resource-phl-badge--unlisted {
+  color: light-dark(#555, #bbb);
+  background: light-dark(#f1f1f1, #2c2c2c);
+}
+
+.phl-notice {
+  display: flex;
+  align-items: center;
+  gap: 1em;
+  margin-block-end: 1.5em;
+  padding: 0.8em 1em;
+  border-radius: 8px;
+  border: 1px solid light-dark(#c6dafc, #2d4a7a);
+  background: light-dark(#f4f8fe, #16202e);
+  font-size: 0.9em;
+}
+
+.phl-notice[hidden] {
+  display: none;
+}
+
+.phl-notice p {
+  flex: 1;
+  margin: 0;
+}
+
+.phl-notice button {
+  flex-shrink: 0;
+}
+
 .text-btn {
   background: none;
   border: none;
