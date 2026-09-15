@@ -16,28 +16,31 @@
 # which will discard any manual Xcode customizations (icons, entitlements)
 # made since the project was last generated.
 #
-# Note that the project file is rewritten on every run regardless, since the
-# marketing version and build number are stamped into it, so expect it dirty
-# after each upload and commit it along with release-state.json.
+# This script only builds and uploads. `npm run release:safari`
+# (publish-extension.mjs safari) wraps it: it picks the marketing version and
+# build number from what App Store Connect already has, runs this script, then
+# waits for processing and submits the builds for review. Both numbers are
+# passed to xcodebuild as build settings rather than written into the project
+# file, so a release leaves the working tree untouched.
 #
 # Requires a Mac with Xcode installed, signed into an Apple ID that's a
 # member of the relevant App Store Connect team, and an App Store Connect
 # API key (.p8 file) for that team.
 #
 # Usage:
-#   ./upload-safari-build.sh [--marketing-version X.Y[.Z]] [options]
+#   ./upload-safari-build.sh --marketing-version X.Y[.Z] --build-number N [options]
 #
 # Options:
-#   --marketing-version X.Y[.Z]  The native app's App Store version
+#   --marketing-version X.Y[.Z]  Required. The native app's App Store version
 #                                (CFBundleShortVersionString). Independent
 #                                of manifest.json's "version" -- Apple
 #                                requires it to strictly increase over the
 #                                app's *entire* App Store history on each
-#                                platform. Omit to reuse the last version
-#                                recorded in safari-app/release-state.json
-#                                and just bump the build number.
-#   --build-number N             Override the auto-incremented build
-#                                number (CFBundleVersion).
+#                                platform.
+#   --build-number N             Required. The build number
+#                                (CFBundleVersion). macOS rejects any build
+#                                number that isn't higher than the last one
+#                                uploaded, even for a new marketing version.
 #   --platform macos|ios|both    Which platform(s) to build and upload.
 #                                Default: both.
 #   --regenerate                 Regenerate the Xcode project from
@@ -89,7 +92,7 @@ ASC_API_KEY_PATH="${ASC_API_KEY_PATH:-}"
 KEYCHAIN_SERVICE="AppStoreConnect API Key ($ASC_KEY_ID)"
 
 MARKETING_VERSION=""
-BUILD_NUMBER_OVERRIDE=""
+BUILD_NUMBER=""
 PLATFORM="both"
 REGENERATE="false"
 STORE_KEY_PATH=""
@@ -106,7 +109,7 @@ print_help() {
 while [ $# -gt 0 ]; do
   case "$1" in
     --marketing-version) MARKETING_VERSION="$2"; shift 2 ;;
-    --build-number) BUILD_NUMBER_OVERRIDE="$2"; shift 2 ;;
+    --build-number) BUILD_NUMBER="$2"; shift 2 ;;
     --platform) PLATFORM="$2"; shift 2 ;;
     --regenerate) REGENERATE="true"; shift ;;
     --key-path) ASC_API_KEY_PATH="$2"; shift 2 ;;
@@ -133,10 +136,15 @@ case "$PLATFORM" in
   *) echo "error: --platform must be macos, ios, or both." >&2; exit 1 ;;
 esac
 
+if ! [[ "$MARKETING_VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] || ! [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+  echo "error: pass --marketing-version X.Y[.Z] and --build-number N." >&2
+  echo "To have both picked from App Store Connect, run: npm run release:safari" >&2
+  exit 1
+fi
+
 BUILD_DIR="$REPO_ROOT/safari-app"
 XCODE_PROJECT_DIR="$BUILD_DIR/xcode-project"
 PBXPROJ="$XCODE_PROJECT_DIR/$APP_NAME/$APP_NAME.xcodeproj/project.pbxproj"
-STATE_FILE="$BUILD_DIR/release-state.json"
 LOG_DIR="$BUILD_DIR/logs"
 
 # --- Resolve the API key -----------------------------------------------
@@ -187,42 +195,7 @@ if [ -z "$ASC_API_KEY_PATH" ] || [ ! -f "$ASC_API_KEY_PATH" ]; then
   exit 1
 fi
 
-# --- Resolve marketing version / build number (auto-increment) --------
-
-mkdir -p "$BUILD_DIR"
-[ -f "$STATE_FILE" ] || echo '{}' > "$STATE_FILE"
-
-STATE_VERSION="$(jq -r '.marketingVersion // empty' "$STATE_FILE")"
-
-if [ -z "$MARKETING_VERSION" ]; then
-  if [ -z "$STATE_VERSION" ]; then
-    echo "error: no prior release recorded in $STATE_FILE -- pass --marketing-version" >&2
-    echo "for the first release. Check App Store Connect for the current" >&2
-    echo "approved/in-review version on each platform before picking one." >&2
-    exit 1
-  fi
-  MARKETING_VERSION="$STATE_VERSION"
-  VERSION_CHANGED="false"
-else
-  [ "$MARKETING_VERSION" = "$STATE_VERSION" ] && VERSION_CHANGED="false" || VERSION_CHANGED="true"
-fi
-
-next_build_number() {
-  local platform_key="$1"
-  if [ -n "$BUILD_NUMBER_OVERRIDE" ]; then
-    echo "$BUILD_NUMBER_OVERRIDE"
-    return
-  fi
-  if [ "$VERSION_CHANGED" = "true" ]; then
-    echo 1
-    return
-  fi
-  local last
-  last="$(jq -r --arg p "$platform_key" '.[$p].buildNumber // 0' "$STATE_FILE")"
-  echo $((last + 1))
-}
-
-echo "==> Version $MARKETING_VERSION for platform(s): $PLATFORM"
+echo "==> Version $MARKETING_VERSION ($BUILD_NUMBER) for platform(s): $PLATFORM"
 
 # --- Build the extension and stage its source --------------------------
 
@@ -303,28 +276,19 @@ cat > "$BUILD_DIR/UploadOptions.plist" <<'EOF'
 EOF
 
 archive_and_upload() {
-  local platform_key="$1" platform_label="$2" scheme="$3" destination_flag="$4"
-  local build_number
-  build_number="$(next_build_number "$platform_key")"
-
-  echo "==> [$platform_label] Setting version $MARKETING_VERSION ($build_number)"
-  # Rewrites the committed project.pbxproj in place, so it comes back dirty
-  # after every run. With --platform both this runs twice and the second pass
-  # overwrites the first's CURRENT_PROJECT_VERSION for every target -- harmless,
-  # since the authoritative per-platform build numbers live in release-state.json
-  # and are read from there, not from the project file.
-  sed -i '' \
-    -e "s/MARKETING_VERSION = [^;]*;/MARKETING_VERSION = $MARKETING_VERSION;/g" \
-    -e "s/CURRENT_PROJECT_VERSION = [^;]*;/CURRENT_PROJECT_VERSION = $build_number;/g" \
-    "$PBXPROJ"
+  local platform_label="$1" scheme="$2" destination_flag="$3"
+  local build_number="$BUILD_NUMBER"
 
   local archive_path="$XCODE_PROJECT_DIR/build/${platform_label}.xcarchive"
   local export_path="$BUILD_DIR/upload/${platform_label}"
   local archive_log="$LOG_DIR/archive-${platform_label}.log"
   local upload_log="$LOG_DIR/upload-${platform_label}.log"
 
-  echo "==> [$platform_label] Archiving"
+  echo "==> [$platform_label] Archiving $MARKETING_VERSION ($build_number)"
   rm -rf "$archive_path"
+  # The version settings on the command line override the ones in the project
+  # file for every target (app and extension alike), so they never need to be
+  # written back into it.
   # shellcheck disable=SC2086
   if ! xcodebuild archive \
     -project "$XCODE_PROJECT_DIR/$APP_NAME/$APP_NAME.xcodeproj" \
@@ -333,6 +297,8 @@ archive_and_upload() {
     $destination_flag \
     -allowProvisioningUpdates \
     DEVELOPMENT_TEAM="$ASC_TEAM_ID" \
+    MARKETING_VERSION="$MARKETING_VERSION" \
+    CURRENT_PROJECT_VERSION="$build_number" \
     -authenticationKeyPath "$ASC_API_KEY_PATH" \
     -authenticationKeyID "$ASC_KEY_ID" \
     -authenticationKeyIssuerID "$ASC_ISSUER_ID" > "$archive_log" 2>&1
@@ -353,7 +319,14 @@ archive_and_upload() {
     -authenticationKeyID "$ASC_KEY_ID" \
     -authenticationKeyIssuerID "$ASC_ISSUER_ID" > "$upload_log" 2>&1
   then
-    if grep -q "Invalid Version\|must contain a higher version" "$upload_log"; then
+    # Check the build number first: Apple words that rejection "must contain a
+    # higher version" too, which the marketing-version branch below would
+    # otherwise claim and misreport.
+    if grep -q "CFBundleVersion" "$upload_log"; then
+      echo "error: [$platform_label] rejected -- build number $build_number is not" >&2
+      echo "higher than the last build uploaded for this platform." >&2
+      echo "Retry with a higher --build-number." >&2
+    elif grep -q "Invalid Version\|must contain a higher version" "$upload_log"; then
       echo "error: [$platform_label] rejected -- version $MARKETING_VERSION ($build_number) is" >&2
       echo "not higher than the current approved/in-review version on this platform." >&2
       echo "Check App Store Connect and retry with a higher --marketing-version." >&2
@@ -364,24 +337,15 @@ archive_and_upload() {
     return 1
   fi
 
-  jq --arg v "$MARKETING_VERSION" --arg p "$platform_key" --argjson b "$build_number" \
-    '.marketingVersion = $v | .[$p].buildNumber = $b' \
-    "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
-
   echo "==> [$platform_label] Uploaded: $MARKETING_VERSION ($build_number)"
 }
 
 STATUS=0
 if [ "$PLATFORM" = "macos" ] || [ "$PLATFORM" = "both" ]; then
-  archive_and_upload "macos" "macOS" "$APP_NAME (macOS)" "" || STATUS=1
+  archive_and_upload "macOS" "$APP_NAME (macOS)" "" || STATUS=1
 fi
 if [ "$PLATFORM" = "ios" ] || [ "$PLATFORM" = "both" ]; then
-  archive_and_upload "ios" "iOS" "$APP_NAME (iOS)" '-destination generic/platform=iOS' || STATUS=1
+  archive_and_upload "iOS" "$APP_NAME (iOS)" '-destination generic/platform=iOS' || STATUS=1
 fi
 
-if [ $STATUS -eq 0 ]; then
-  echo "==> Done. Commit both $STATE_FILE and the Xcode project:"
-  echo "    project.pbxproj carries the version and build number this run set, so"
-  echo "    it changes on every upload, not only when --regenerate rebuilds it."
-fi
 exit $STATUS

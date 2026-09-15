@@ -613,11 +613,23 @@ npm run release:chrome -- --status    # check credentials and what the store has
 npm run release:chrome -- --dry-run   # build and check the version, upload nothing
 npm run release:chrome
 npm run release:firefox -- --release-notes "Show Public Hash List status in the popup."
+npm run release:safari -- --release-notes "Show Public Hash List status in the popup."
 ```
 
 It refuses to publish from a working tree with uncommitted changes (the archive
 is built from it) or a version that isn't newer than the store's. Pass
-`--help` for all options. Safari has its own script, `upload-safari-build.sh`.
+`--help` for all options.
+
+A Safari release builds and uploads the macOS and iOS apps with
+`upload-safari-build.sh`, waits for App Store Connect to process them, attaches
+each build to its App Store version with the release notes as What's New, and
+submits both for review. It picks the versions from what App Store Connect
+already has: the build number is one higher than any build uploaded so far, and
+the marketing version reuses a draft or rejected version, or else bumps the
+minor version of the released one (2.0 to 2.1). `--marketing-version` and
+`--build-number` override either, and `--skip-build` submits builds that are
+already uploaded. It uses the same App Store Connect API key as
+`upload-safari-build.sh`.
 
 ### One-time setup: Chrome Web Store
 

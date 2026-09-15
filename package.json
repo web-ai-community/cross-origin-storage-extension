@@ -19,7 +19,7 @@
     "build:safari": "bash zip-extension.sh safari",
     "release:chrome": "node publish-extension.mjs chrome",
     "release:firefox": "node publish-extension.mjs firefox",
-    "release:safari": "bash upload-safari-build.sh"
+    "release:safari": "node publish-extension.mjs safari"
   },
   "repository": {
     "type": "git",
