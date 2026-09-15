@@ -17,6 +17,8 @@
     "build:chrome": "bash zip-extension.sh chrome",
     "build:firefox": "bash zip-extension.sh firefox",
     "build:safari": "bash zip-extension.sh safari",
+    "release:chrome": "node publish-extension.mjs chrome",
+    "release:firefox": "node publish-extension.mjs firefox",
     "release:safari": "bash upload-safari-build.sh"
   },
   "repository": {

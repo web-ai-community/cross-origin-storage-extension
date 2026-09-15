@@ -602,6 +602,57 @@ gate would hide from origins other than the one that stored them. The list is
 tens of megabytes, so the popup only uses a copy that is already downloaded
 (which the setting does for you) and otherwise offers a button to download it.
 
+## Publishing
+
+`publish-extension.mjs` builds the archive with `zip-extension.sh` and submits
+it for review through the store's API. Credentials go in the gitignored
+`.env`; `.env.example` lists them.
+
+```sh
+npm run release:chrome -- --status    # check credentials and what the store has
+npm run release:chrome -- --dry-run   # build and check the version, upload nothing
+npm run release:chrome
+npm run release:firefox -- --release-notes "Show Public Hash List status in the popup."
+```
+
+It refuses to publish from a working tree with uncommitted changes (the archive
+is built from it) or a version that isn't newer than the store's. Pass
+`--help` for all options. Safari has its own script, `upload-safari-build.sh`.
+
+### One-time setup: Chrome Web Store
+
+The script uses the
+[Chrome Web Store API v2](https://developer.chrome.com/docs/webstore/using-api)
+with a [service account](https://developer.chrome.com/docs/webstore/service-accounts).
+
+1. In the [Google Cloud console](https://console.cloud.google.com/), pick or
+   create a project and enable the **Chrome Web Store API**.
+2. Create a service account in that project. It needs no IAM roles.
+3. In the
+   [Developer Dashboard](https://chrome.google.com/webstore/devconsole), open
+   **Account** and add the service account's email. A publisher can only have
+   one service account. (The script already knows this project's publisher
+   and item IDs.)
+4. Choose how to authenticate as it:
+   - **Impersonation (recommended, no key file):** grant your own Google
+     account the **Service Account Token Creator** role on the service
+     account, run `gcloud auth login`, and set `CWS_SERVICE_ACCOUNT` to the
+     service account's email.
+   - **JSON key:** create a key for the service account, store it outside the
+     repository, and set `CWS_SERVICE_ACCOUNT_KEY_PATH` to it.
+5. Run `npm run release:chrome -- --status` to confirm it works.
+
+### One-time setup: Firefox Add-ons
+
+The script uses the
+[addons.mozilla.org API v5](https://mozilla.github.io/addons-server/topics/api/addons.html).
+
+1. Sign in to addons.mozilla.org with the account that owns the add-on and
+   generate credentials on the
+   [API key page](https://addons.mozilla.org/developers/addon/api/key/).
+2. Set `AMO_API_KEY` to the JWT issuer and `AMO_API_SECRET` to the JWT secret.
+3. Run `npm run release:firefox -- --status` to confirm it works.
+
 ## License
 
 Apache 2.0.
