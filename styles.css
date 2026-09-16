@@ -671,6 +671,10 @@ progress::-webkit-progress-value {
   font-family: ui-monospace, monospace;
 }
 
+.phl-table .copy-btn {
+  margin-inline-start: 0.75em;
+}
+
 .phl-url {
   word-break: break-all;
 }
