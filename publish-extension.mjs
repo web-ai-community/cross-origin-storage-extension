@@ -38,6 +38,12 @@
 //                           highest build ever uploaded on either platform,
 //                           since macOS rejects any build number that isn't
 //                           higher than the last.
+//   --cancel-review         Take the version now in review out of review
+//                           first, so this release replaces it. It loses its
+//                           place in the queue.
+//   --regenerate            Rebuild the Xcode wrapper project before
+//                           building, needed when the extension's file list
+//                           changes. Discards manual Xcode customizations.
 //   --skip-build            Don't build and upload; submit the newest build
 //                           already uploaded for the marketing version (or
 //                           the one --build-number names).
@@ -102,6 +108,8 @@ function parseArgs(argv) {
     marketingVersion: null,
     buildNumber: null,
     skipBuild: false,
+    cancelReview: false,
+    regenerate: false,
   };
   const takeValue = (flag, i) => {
     const value = argv[i + 1];
@@ -129,6 +137,12 @@ function parseArgs(argv) {
         break;
       case '--skip-build':
         options.skipBuild = true;
+        break;
+      case '--cancel-review':
+        options.cancelReview = true;
+        break;
+      case '--regenerate':
+        options.regenerate = true;
         break;
       case '--status':
         options.status = true;
@@ -176,6 +190,8 @@ function parseArgs(argv) {
     ['--marketing-version', options.marketingVersion],
     ['--build-number', options.buildNumber],
     ['--skip-build', options.skipBuild],
+    ['--cancel-review', options.cancelReview],
+    ['--regenerate', options.regenerate],
   ].filter(([, value]) => value);
   if (options.browser !== 'safari' && safariOnly.length) {
     throw new UsageError(`${safariOnly.map(([flag]) => flag).join(', ')}: Safari only.`);
@@ -991,11 +1007,64 @@ async function submitSafariPlatform(app, plan, platform, releaseNotes) {
   console.log(`✅ App Store (${label}): ${plan.marketingVersion} (${platform.buildNumber}) submitted, state ${state}.`);
 }
 
+// States a submission can be taken out of. Cancelling returns its version to
+// an editable state, so this release can replace it.
+const CANCELLABLE_SUBMISSION_STATES = ['WAITING_FOR_REVIEW', 'IN_REVIEW', 'UNRESOLVED_ISSUES'];
+
+async function cancelSafariReviews(app, keys) {
+  let cancelled = 0;
+  for (const key of keys) {
+    const { asc, label } = SAFARI_PLATFORMS[key];
+    const submissions = await ascRequest(
+      'GET',
+      `/v1/reviewSubmissions?filter[app]=${app.id}&filter[platform]=${asc}` +
+        `&filter[state]=${CANCELLABLE_SUBMISSION_STATES.join(',')}`,
+      `Looking for a ${label} submission in review`
+    );
+    for (const submission of submissions.data || []) {
+      await ascRequest('PATCH', `/v1/reviewSubmissions/${submission.id}`, `Taking ${label} out of review`, {
+        data: { type: 'reviewSubmissions', id: submission.id, attributes: { canceled: true } },
+      });
+      console.log(`    ${label}: took submission out of review (was ${submission.attributes?.state}).`);
+      cancelled++;
+    }
+  }
+  if (cancelled === 0) {
+    console.log('    Nothing was in review.');
+    return;
+  }
+  // App Store Connect takes a moment to hand the versions back.
+  const deadline = Date.now() + 5 * 60_000;
+  for (;;) {
+    let catalog = await fetchSafariCatalog();
+    const stuck = catalog.versions.filter(
+      (v) =>
+        keys.some((key) => SAFARI_PLATFORMS[key].asc === v.platform) &&
+        !EDITABLE_VERSION_STATES.has(v.state) &&
+        !RELEASED_VERSION_STATES.has(v.state)
+    );
+    if (stuck.length === 0) return catalog;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `Still waiting for ${stuck.map((v) => `${v.platform} ${v.versionString} (${v.state})`).join(', ')}. ` +
+          'Check App Store Connect.'
+      );
+    }
+    await sleep(15_000);
+  }
+}
+
 async function publishSafari(options) {
   console.log('==> Authenticating with App Store Connect');
-  const catalog = await fetchSafariCatalog();
+  let catalog = await fetchSafariCatalog();
   console.log(`App Store app ${catalog.app.attributes.name} (${catalog.app.id}):\n${describeSafariStatus(catalog)}`);
   if (options.status) return;
+
+  if (options.cancelReview) {
+    console.log('==> Taking the version(s) in review out of review');
+    const keys = options.platform === 'both' ? ['macos', 'ios'] : [options.platform];
+    catalog = (await cancelSafariReviews(catalog.app, keys)) ?? catalog;
+  }
 
   const plan = planSafariRelease(catalog, options);
   console.log(describeSafariPlan(plan));
@@ -1023,6 +1092,7 @@ async function publishSafari(options) {
           buildNumber,
           '--platform',
           options.platform,
+          ...(options.regenerate ? ['--regenerate'] : []),
         ],
         { cwd: REPO_ROOT, stdio: 'inherit' }
       );
