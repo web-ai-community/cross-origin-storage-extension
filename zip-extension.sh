@@ -41,6 +41,8 @@ COMMON_FILES=(
   "relay-extension.html"
   "relay-extension.js"
   "public-hash-list.js"
+  "phl-details.html"
+  "phl-details.js"
   "public-suffix-list.js"
   "same-site.js"
 )

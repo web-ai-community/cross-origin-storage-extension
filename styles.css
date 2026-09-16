@@ -17,6 +17,8 @@ html {
 
 body {
   font-family: system-ui, sans-serif;
+  /* Digits of equal width, so sizes and counts don't shift as they change. */
+  font-variant-numeric: tabular-nums;
   margin: 1rem;
   background: light-dark(#ffffff, #121212);
   color: light-dark(#000000, #f0f0f0);
@@ -364,6 +366,11 @@ button {
 }
 
 .mime-chip {
+  /* inline-flex so the <label> chips of the radio group sit exactly like the
+     <button> chips, with the hidden radio positioned inside them. */
+  display: inline-flex;
+  align-items: center;
+  position: relative;
   font-family: ui-monospace, monospace;
   font-size: 0.75em;
   padding: 0.25em 0.65em;
@@ -426,8 +433,279 @@ button {
   background: light-dark(#fff3e0, #3e1c00);
 }
 
+/* The second filter group needs room to read as its own group. */
+.filter-group-label {
+  margin-top: 1.25em;
+}
+
+.filter-summary {
+  margin-top: 0.75em;
+  font-size: 0.85em;
+  color: light-dark(#666, #aaa);
+}
+
+.chip-count {
+  margin-inline-start: 0.5em;
+  padding: 0 0.35em;
+  border-radius: 999px;
+  background: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.12));
+  font-size: 0.9em;
+  font-weight: 600;
+}
+
+.mime-chip--active .chip-count {
+  background: light-dark(rgba(255, 255, 255, 0.3), rgba(0, 0, 0, 0.2));
+}
+
+/* The radio itself is invisible; the chip shows the state. Keeping it
+   focusable means the group still works from the keyboard. */
+.mime-chip input[type='radio'] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.mime-chip:has(input[type='radio']:focus-visible) {
+  outline: 2px solid light-dark(#1a73e8, #89b4fa);
+  outline-offset: 2px;
+}
+
+.resource-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4em;
+  margin-bottom: 0.5em;
+}
+
+/* No badges (the list isn't downloaded, and this page didn't touch the
+   resource), so don't reserve the row's space. */
+.resource-badges:empty {
+  display: none;
+}
+
 .resource-phl-badge {
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+}
+
+.phl-section-badge {
   cursor: help;
+  color: light-dark(#8a5a00, #e8c07d);
+  background: light-dark(#fff4e0, #3a2f1c);
+}
+
+/* A tooltip the element carries itself: the popup never shows the browser's
+   own title tooltips. */
+.tip-host {
+  position: relative;
+}
+
+.tip-host::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  inset-block-start: calc(100% + 0.35em);
+  inset-inline-start: 0;
+  z-index: 2;
+  padding: 0.5em 0.7em;
+  border-radius: 4px;
+  background: light-dark(#333, #f0f0f0);
+  color: light-dark(#fff, #1e1e1e);
+  box-shadow: 0 2px 6px light-dark(rgba(0, 0, 0, 0.25), rgba(0, 0, 0, 0.6));
+  font-size: 1.2em;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: normal;
+  inline-size: max-content;
+  max-inline-size: 22em;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.1s;
+}
+
+.tip-host:hover::after,
+.tip-host:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Label and value side by side, rather than pushed to opposite edges the way
+   the statistics list does it. */
+.meta-dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.3em 1.5em;
+  margin: 1em 0 0;
+  font-size: 0.9em;
+}
+
+.meta-dl dt {
+  color: light-dark(#555, #aaa);
+}
+
+.meta-dl dd {
+  margin: 0;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.scan-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.9em;
+  flex-wrap: wrap;
+}
+
+.scan-controls:empty,
+.scan-controls button[hidden],
+.scan-meter[hidden] {
+  display: none;
+}
+
+.scan-meter {
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+  margin-block-start: 1em;
+}
+
+.scan-progress-text {
+  font-size: 0.85em;
+  color: light-dark(#555, #bbb);
+  /* Figure spaces pad the reading, so keep them. */
+  white-space: pre;
+}
+
+.scan-status {
+  margin-block-start: 0.75em;
+  font-size: 0.9em;
+  color: light-dark(#555, #bbb);
+}
+
+progress {
+  appearance: none;
+  inline-size: 14em;
+  block-size: 0.55em;
+  border: none;
+  border-radius: 999px;
+  background: light-dark(#e4e4e4, #3a3a3a);
+  overflow: hidden;
+}
+
+progress::-webkit-progress-bar {
+  background: light-dark(#e4e4e4, #3a3a3a);
+  border-radius: 999px;
+}
+
+progress::-webkit-progress-value {
+  background: light-dark(#1a73e8, #89b4fa);
+  border-radius: 999px;
+}
+
+.phl-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+/* Every column hugs its content, and the last one (the URL) takes whatever is
+   left, so a wide window doesn't stretch gaps between the columns. */
+.phl-table th,
+.phl-table td {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.phl-table th:last-child,
+.phl-table td:last-child {
+  width: auto;
+  white-space: normal;
+}
+
+/* The hash is shown in full, on one line. A narrow window scrolls the table
+   sideways rather than folding the hash into a column of characters. */
+.phl-table-scroll {
+  overflow-x: auto;
+}
+
+.phl-table th[data-sort] {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.phl-table th[data-sort]:hover {
+  color: light-dark(#1a73e8, #89b4fa);
+}
+
+/* An arrow for the sorted column, pointing the way the rows run. */
+.phl-table th[aria-sort='ascending']::after {
+  content: ' ▲';
+  font-size: 0.8em;
+}
+
+.phl-table th[aria-sort='descending']::after {
+  content: ' ▼';
+  font-size: 0.8em;
+}
+
+/* Sizes line up on their last digit, header included. Needs to out-specify
+   the `text-align: start` on every cell above. */
+.phl-table th[data-sort='size'],
+.phl-table td.phl-size {
+  text-align: end;
+  white-space: nowrap;
+}
+
+.phl-table th,
+.phl-table td {
+  text-align: start;
+  vertical-align: top;
+  padding: 0.5em 0.6em;
+  border-bottom: 1px solid light-dark(#eee, #333);
+}
+
+.phl-table code {
+  font-family: ui-monospace, monospace;
+}
+
+.phl-url {
+  word-break: break-all;
+}
+
+.phl-row--highlight {
+  background: light-dark(#fff8e1, #3a3320);
+}
+
+/* The popup doesn't show the browser's own title tooltips, so the badge
+   brings its own. */
+.resource-phl-badge::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  inset-block-start: calc(100% + 0.35em);
+  inset-inline-start: 0;
+  z-index: 2;
+  padding: 0.5em 0.7em;
+  border-radius: 4px;
+  background: light-dark(#333, #f0f0f0);
+  color: light-dark(#fff, #1e1e1e);
+  box-shadow: 0 2px 6px light-dark(rgba(0, 0, 0, 0.25), rgba(0, 0, 0, 0.6));
+  font-size: 1.2em;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.1s;
+}
+
+.resource-phl-badge:hover::after,
+.resource-phl-badge:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
 }
 
 .resource-phl-badge--listed {
@@ -463,6 +741,15 @@ button {
 
 .phl-notice button {
   flex-shrink: 0;
+}
+
+.phl-notice progress {
+  flex-shrink: 0;
+  inline-size: 10em;
+}
+
+.phl-notice progress[hidden] {
+  display: none;
 }
 
 .text-btn {

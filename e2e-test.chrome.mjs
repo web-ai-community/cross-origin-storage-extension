@@ -381,6 +381,35 @@ async function main() {
       popupResults.push({ label, status: 'fail', detail: err.message });
     }
   }
+  // The "On PHL" / "Not on PHL" filter chips, which need resources listed
+  // under an origin (the search panel above doesn't use them).
+  await popupPage.fill('#hash-search', '');
+  // Each chip is a <label> around a visually hidden radio, so click the label:
+  // the radio itself isn't clickable. The label text carries the count too,
+  // hence matching on its leading text.
+  for (const [chip, expected] of [[/^On PHL/, 'On PHL'], [/^Not on PHL/, 'Not on PHL']]) {
+    const label = `[Popup] "${expected}" filter shows only ${expected} resources`;
+    try {
+      const option = popupPage.locator('#mime-filter label', { hasText: chip });
+      await option.waitFor({ timeout: 10_000 });
+      await option.click();
+      await popupPage.waitForFunction(
+        (want) => {
+          const items = [...document.querySelectorAll('#hashes-list .resource-item')];
+          return items.length > 0 && items.every(
+            (li) => li.querySelector('.resource-phl-badge')?.textContent === want
+          );
+        },
+        expected,
+        { timeout: 10_000 }
+      );
+      const shown = await popupPage.locator('#hashes-list .resource-item').count();
+      popupResults.push({ label, status: 'pass', detail: `${shown} resource(s) shown` });
+      await popupPage.locator('#mime-filter label', { hasText: /^All/ }).click(); // No filter.
+    } catch (err) {
+      popupResults.push({ label, status: 'fail', detail: err.message.split('\n')[0] });
+    }
+  }
   await popupPage.close();
 
   // ── Collect + report all results ──────────────────────────────────────────

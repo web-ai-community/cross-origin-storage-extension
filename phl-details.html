@@ -1,0 +1,63 @@
+<!--
+  Copyright 2026 Google LLC.
+  SPDX-License-Identifier: Apache-2.0
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Public Hash List</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <img class="logo" src="logo-cos.svg" alt="" width="512" height="512" />
+    <h1>Public Hash List</h1>
+
+    <div class="panel">
+      <p class="panel-desc">
+        Every hash on the
+        <a
+          href="https://github.com/WICG/cross-origin-storage/tree/main/public-hash-list/implementation"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Public Hash List</a
+        >
+        is preceded by a comment naming where it was seen, with an example URL.
+      </p>
+      <dl id="list-meta" class="meta-dl" hidden></dl>
+      <div class="scan-controls">
+        <div id="scan-meter" class="scan-meter" hidden>
+          <progress id="scan-progress"></progress>
+          <span id="scan-progress-text" class="scan-progress-text"></span>
+        </div>
+        <button id="scan-retry" class="primary-btn" hidden>Try again</button>
+      </div>
+      <p id="scan-status" class="scan-status"></p>
+    </div>
+
+    <div class="panel">
+      <h2>Resources on the list</h2>
+      <p class="panel-desc" id="resources-desc"></p>
+      <div class="phl-table-scroll">
+        <table id="entries" class="phl-table" hidden>
+          <thead>
+            <tr>
+              <th scope="col" data-sort="hash">Resource</th>
+              <th scope="col" data-sort="size">Size</th>
+              <th scope="col" data-sort="source">Source</th>
+              <th scope="col" data-sort="url">Seen at</th>
+            </tr>
+          </thead>
+          <tbody id="entries-body"></tbody>
+        </table>
+      </div>
+      <p id="entries-empty" class="empty-state" hidden></p>
+      <p id="entries-note" class="empty-state" hidden></p>
+    </div>
+
+    <div id="toast"></div>
+    <script type="module" src="phl-details.js"></script>
+  </body>
+</html>

@@ -601,6 +601,19 @@ not the setting is enabled, so you can see which globally-shared resources the
 gate would hide from origins other than the one that stored them. The list is
 tens of megabytes, so the popup only uses a copy that is already downloaded
 (which the setting does for you) and otherwise offers a button to download it.
+A filter narrows the list to resources that are or aren't on the PHL.
+
+Each hash on the PHL is preceded by a comment naming where it was seen, with
+an example URL. Click a badge to open `phl-details.html`, which shows those in
+a sortable table for the resources that are on the list.
+
+The comments are read twice over: once while the list is parsed, which stores
+them for whatever is in COS at the time, and otherwise from the downloaded
+file itself, which is kept in the `phl-raw` cache. Keeping it costs the size
+of the list on disk (GitHub allows the browser only five minutes of caching,
+so its own cache is no help), and means a resource stored later needs no
+second download. A list downloaded before that cache existed has no copy kept,
+so the page offers a one-off read that stores it.
 
 ## Publishing
 

@@ -106,6 +106,13 @@ chrome.runtime.onInstalled.addListener(async ({ reason }) => {
 });
 
 const publicHashList = new PublicHashList();
+// While the list is being parsed, keep the provenance comments for whatever
+// is in COS, so phl-details.html can show where those resources were seen
+// without downloading the list a second time.
+publicHashList.provenanceHashes = async () => {
+  await resourceManager.loadManagerFromStorage();
+  return new Set(resourceManager.getAllHashes());
+};
 
 /**
  * Resolves whether `requestingOrigin` may learn about a stored hash at
@@ -590,6 +597,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           responseData = {
             publicHashListEnabled: !!result.publicHashListEnabled,
           };
+          break;
+        }
+        case 'getPublicHashListProgress': {
+          // How far along a download started by getPublicHashListStatus is,
+          // polled by the popup while its progress bar is showing.
+          responseData = publicHashList.progress;
           break;
         }
         case 'getPublicHashListStatus': {

@@ -34,6 +34,7 @@ async function initializePopup() {
   const phlNotice = document.getElementById('phl-notice');
   const phlNoticeText = document.getElementById('phl-notice-text');
   const phlDownloadBtn = document.getElementById('phl-download-btn');
+  const phlProgress = document.getElementById('phl-progress');
 
   // Current-page hit/miss state — populated before the first render so
   // updateHashesDisplay can annotate and re-order resources immediately.
@@ -48,12 +49,21 @@ async function initializePopup() {
   // the selected origin changes or the UI does a full refresh.
   let activeMimeFilters = new Set();
 
+  // Public Hash List filter: 'all', 'listed', or 'unlisted'. One choice
+  // rather than two toggles, since "both on" and "both off" would mean the
+  // same as "all". Only offered once the list has been downloaded.
+  let phlFilter = 'all';
+
   // Public Hash List membership of the stored resources, as a promise:
   // checking the list can take a while (the first download is tens of
   // megabytes), so resource items render right away and add their PHL
   // badge once it settles. Resolves to { available: false } when no copy
   // of the list has been downloaded yet.
   let phlStatusPromise = Promise.resolve({ available: false });
+  // The same value once it has resolved, so rendering the list never waits on
+  // it: the badges fill themselves in, and the filter chips appear when the
+  // views are re-rendered below.
+  let phlStatusSnapshot = null;
 
   function requestPhlStatus(download = false) {
     const hashes = resourceManager.getAllHashes();
@@ -78,7 +88,15 @@ async function initializePopup() {
     promise.then(
       (status) => {
         // A newer request supersedes this one.
-        if (phlStatusPromise === promise) renderPhlNotice(status);
+        if (phlStatusPromise !== promise) return;
+        renderPhlNotice(status);
+        const hadStatus = phlStatusSnapshot?.available;
+        phlStatusSnapshot = status;
+        // The filter chips depend on the status, so draw them now that it's
+        // here, unless the caller is about to re-render anyway.
+        if (status.available && !hadStatus && !phlDownloadBtn.dataset.awaitingOwnDownload) {
+          refreshPhlViews();
+        }
       },
       (error) => {
         if (phlStatusPromise !== promise) return;
@@ -89,8 +107,124 @@ async function initializePopup() {
     return promise;
   }
 
+  // The count that rides along on a filter chip, showing how many resources
+  // that chip leaves on screen given the other filter.
+  function countBadge(count) {
+    const span = document.createElement('span');
+    span.className = 'chip-count';
+    span.textContent = count;
+    return span;
+  }
+
+  // Formats `bytes` in the unit that suits `reference`, always with the same
+  // number of decimals, so a counter built from these doesn't change width as
+  // it climbs. formatBytes() drops trailing zeros, which makes it jump.
+  function formatBytesFixed(bytes, reference) {
+    const units = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB'];
+    const index =
+      reference > 0
+        ? Math.min(Math.floor(Math.log(reference) / Math.log(1024)), units.length - 1)
+        : 0;
+    const value = bytes / 1024 ** index;
+    return `${index === 0 ? Math.round(value) : value.toFixed(1)} ${units[index]}`;
+  }
+
+  // Progress of a download running in the background. It outlives the popup,
+  // so reopening the popup mid-download picks it up again rather than
+  // offering to start a second one.
+  let phlProgressTimer;
+
+  function stopPhlProgressPolling() {
+    clearInterval(phlProgressTimer);
+    phlProgressTimer = undefined;
+    phlProgress.hidden = true;
+  }
+
+  function renderPhlProgress({ phase, receivedBytes = 0, totalBytes }) {
+    phlProgress.hidden = false;
+    if (phase === 'downloading') {
+      if (totalBytes) {
+        phlProgress.max = totalBytes;
+        phlProgress.value = receivedBytes;
+        // Figure spaces keep every reading the same width, so the line doesn't
+        // shift as 9% becomes 100% and 3.7 MB becomes 12.4 MB.
+        const percent = String(Math.round((receivedBytes / totalBytes) * 100)).padStart(3, ' ');
+        const total = formatBytesFixed(totalBytes, totalBytes);
+        const received = formatBytesFixed(receivedBytes, totalBytes).padStart(total.length, ' ');
+        phlNoticeText.textContent = `${percent}% (${received} of ${total})`;
+        return;
+      }
+      // Either nothing has arrived yet, or the response has no Content-Length
+      // to measure against, so show an indeterminate bar.
+      phlProgress.removeAttribute('value');
+      phlNoticeText.textContent = receivedBytes ? formatBytes(receivedBytes) : 'Downloading…';
+      return;
+    }
+    phlProgress.removeAttribute('value');
+    phlNoticeText.textContent = {
+      verifying: 'Verifying…',
+      parsing: 'Reading…',
+      saving: 'Saving…',
+    }[phase] ?? 'Downloading…';
+  }
+
+  async function pollPhlProgress() {
+    let progress;
+    try {
+      const response = await chrome.runtime.sendMessage({
+        action: 'getPublicHashListProgress',
+      });
+      progress = response?.data;
+    } catch {
+      // The background can't be reached; the status request reports it.
+      return;
+    }
+    if (!progress || progress.phase === 'idle' || progress.phase === 'failed') {
+      // Whoever started the download reports the outcome, except when this
+      // popup only joined a download that was already running.
+      const joined = !phlDownloadBtn.dataset.awaitingOwnDownload;
+      stopPhlProgressPolling();
+      if (joined) {
+        try {
+          await requestPhlStatus();
+          await refreshPhlViews();
+        } catch {
+          // renderPhlNotice() has already shown the error.
+        }
+      }
+      return;
+    }
+    renderPhlProgress(progress);
+  }
+
+  function startPhlProgressPolling() {
+    clearInterval(phlProgressTimer);
+    phlProgressTimer = setInterval(pollPhlProgress, 500);
+  }
+
+  // Re-renders everything that carries a PHL badge.
+  async function refreshPhlViews() {
+    await updateHashesDisplay();
+    await updateOriginsDisplay();
+    await updateHashSearch();
+  }
+
+  async function joinPhlDownloadInProgress() {
+    const response = await chrome.runtime
+      .sendMessage({ action: 'getPublicHashListProgress' })
+      .catch(() => null);
+    const progress = response?.data;
+    if (!progress || progress.phase === 'idle' || progress.phase === 'failed') {
+      return;
+    }
+    phlDownloadBtn.disabled = true;
+    renderPhlProgress(progress);
+    startPhlProgressPolling();
+  }
+
   function renderPhlNotice({ available, error, download }) {
     phlDownloadBtn.disabled = false;
+    phlProgress.hidden = true;
     if (error) {
       phlNoticeText.textContent = `Couldn't check resources against the Public Hash List: ${error.message}`;
       phlDownloadBtn.textContent = 'Retry';
@@ -102,7 +236,10 @@ async function initializePopup() {
       phlDownloadBtn.textContent = 'Download Public Hash List';
       phlDownloadBtn.dataset.download = 'true';
       phlNotice.hidden = false;
+      // A download from an earlier popup may still be running.
+      joinPhlDownloadInProgress();
     } else {
+      stopPhlProgressPolling();
       phlNotice.hidden = true;
     }
   }
@@ -110,19 +247,26 @@ async function initializePopup() {
   phlDownloadBtn.addEventListener('click', async () => {
     const download = phlDownloadBtn.dataset.download === 'true';
     phlDownloadBtn.disabled = true;
-    phlNoticeText.textContent = download
-      ? 'Downloading the Public Hash List…'
-      : 'Checking the Public Hash List…';
+    phlNoticeText.textContent = download ? 'Downloading…' : 'Checking the Public Hash List…';
+    if (download) {
+      // This click owns the download, so it reports the outcome and the
+      // polling only draws the progress bar.
+      phlDownloadBtn.dataset.awaitingOwnDownload = 'true';
+      phlProgress.hidden = false;
+      phlProgress.removeAttribute('value');
+      startPhlProgressPolling();
+    }
     try {
       await requestPhlStatus(download);
     } catch {
       // renderPhlNotice() has already shown the error.
       return;
+    } finally {
+      stopPhlProgressPolling();
+      delete phlDownloadBtn.dataset.awaitingOwnDownload;
     }
     // Re-render the resource items so they pick up the new status.
-    await updateHashesDisplay();
-    await updateOriginsDisplay();
-    await updateHashSearch();
+    await refreshPhlViews();
   });
 
   function appendPhlBadge(container, hash) {
@@ -130,16 +274,25 @@ async function initializePopup() {
       ({ available, checked, listed, version }) => {
         if (!available || !checked.has(hash)) return;
         const isListed = listed.has(hash);
-        const badge = document.createElement('span');
-        badge.className = `resource-page-badge resource-phl-badge resource-phl-badge--${
+        // A button, since it opens the details page for this resource.
+        const badge = document.createElement('button');
+        badge.type = 'button';
+        badge.className = `resource-page-badge resource-phl-badge tip-host resource-phl-badge--${
           isListed ? 'listed' : 'unlisted'
         }`;
+        badge.addEventListener('click', () => {
+          chrome.tabs.create({
+            url: chrome.runtime.getURL(`phl-details.html?hash=${hash}`),
+          });
+        });
         badge.textContent = isListed ? 'On PHL' : 'Not on PHL';
         const versionSuffix = version ? ` (version ${version})` : '';
-        badge.title = isListed
-          ? `Listed on the Public Hash List${versionSuffix}`
-          : `Not listed on the Public Hash List${versionSuffix}`;
-        container.append(' ', badge);
+        // Shown by CSS on hover. A title attribute would rely on the
+        // browser's own tooltip, which doesn't appear in the popup.
+        badge.dataset.tooltip = isListed
+          ? `Listed on the Public Hash List${versionSuffix}. Click to see where it was seen.`
+          : `Not listed on the Public Hash List${versionSuffix}. Click for details.`;
+        container.append(badge);
       },
       // Failures are reported once, in the notice, not on every item.
       () => {}
@@ -489,15 +642,21 @@ async function initializePopup() {
 
     const hashDiv = document.createElement('div');
     hashDiv.className = 'hash-value';
-    hashDiv.append(label);
+    hashDiv.textContent = label;
+    textContent.append(hashDiv);
+
+    // Badges sit on their own row, so they don't land inline after a short
+    // label and below a long one.
+    const badges = document.createElement('div');
+    badges.className = 'resource-badges';
     if (pageBadge) {
       const badge = document.createElement('span');
       badge.className = `resource-page-badge resource-page-badge--${pageBadge}`;
       badge.textContent = pageBadge === 'hit' ? 'Cache hit' : 'Cache miss';
-      hashDiv.append(' ', badge);
+      badges.append(badge);
     }
-    appendPhlBadge(hashDiv, hash);
-    textContent.append(hashDiv);
+    appendPhlBadge(badges, hash);
+    textContent.append(badges);
 
     const storer = resourceManager.getStorer(hash);
     if (storer) {
@@ -756,7 +915,23 @@ async function initializePopup() {
       ),
     ].sort();
 
+    const phlStatus = phlStatusSnapshot;
+    const mimeOf = (resource) =>
+      (resource.mimeType || 'application/octet-stream').split(';')[0].trim();
+    // 'listed', 'unlisted', or null when membership isn't known.
+    const phlGroupOf = (resource) => {
+      if (!phlStatus?.available || !phlStatus.checked.has(resource.hash)) return null;
+      return phlStatus.listed.has(resource.hash) ? 'listed' : 'unlisted';
+    };
+    const matchesMime = (resource) =>
+      activeMimeFilters.size === 0 || activeMimeFilters.has(mimeOf(resource));
+    const matchesPhlValue = (resource, value) =>
+      value === 'all' || phlGroupOf(resource) === value;
+    const matchesPhl = (resource) => matchesPhlValue(resource, phlFilter);
+
     mimeFilterBar.innerHTML = '';
+    const filterSummary = document.createElement('div');
+    filterSummary.className = 'filter-summary';
     if (allMimeTypes.length > 0) {
       mimeFilterBar.hidden = false;
       const legend = document.createElement('legend');
@@ -772,11 +947,16 @@ async function initializePopup() {
       const chipsDiv = document.createElement('div');
       chipsDiv.className = 'mime-chips';
       for (const mime of allMimeTypes) {
+        // Counted with the other filter applied, so it says how many the chip
+        // would add to what's on screen.
+        const count = resourcesWithSize.filter(
+          (r) => mimeOf(r) === mime && matchesPhl(r)
+        ).length;
         const chip = document.createElement('button');
         chip.type = 'button';
         chip.title = mime;
         const subtype = mime.split('/')[1] || mime;
-        chip.textContent = subtype;
+        chip.append(subtype, countBadge(count));
         chip.className =
           activeMimeFilters.size > 0 && activeMimeFilters.has(mime)
             ? 'mime-chip mime-chip--active'
@@ -792,19 +972,56 @@ async function initializePopup() {
         chipsDiv.append(chip);
       }
       mimeFilterBar.append(chipsDiv);
+
+      // Public Hash List filter, once there is a list to check against.
+      if (phlStatus?.available) {
+        const phlLabel = document.createElement('div');
+        phlLabel.ariaHidden = 'true';
+        phlLabel.classList.add('mime-filter-label', 'filter-group-label');
+        phlLabel.append('Public Hash List');
+        mimeFilterBar.append(phlLabel);
+        const phlChips = document.createElement('div');
+        phlChips.className = 'mime-chips';
+        phlChips.role = 'radiogroup';
+        phlChips.ariaLabel = 'Public Hash List filter';
+        for (const [value, text, title] of [
+          ['all', 'All', 'Resources whether or not they are on the Public Hash List'],
+          ['listed', 'On PHL', 'Only resources on the Public Hash List'],
+          ['unlisted', 'Not on PHL', 'Only resources that are not on the Public Hash List'],
+        ]) {
+          const count = resourcesWithSize.filter(
+            (r) => matchesMime(r) && matchesPhlValue(r, value)
+          ).length;
+          const chip = document.createElement('label');
+          chip.className =
+            phlFilter === value ? 'mime-chip mime-chip--active' : 'mime-chip';
+          chip.title = title;
+          const radio = document.createElement('input');
+          radio.type = 'radio';
+          radio.name = 'phl-filter';
+          radio.value = value;
+          radio.checked = phlFilter === value;
+          radio.addEventListener('change', () => {
+            phlFilter = value;
+            updateHashesDisplay();
+          });
+          chip.append(radio, text, countBadge(count));
+          phlChips.append(chip);
+        }
+        mimeFilterBar.append(phlChips);
+      }
+      mimeFilterBar.append(filterSummary);
     } else {
       mimeFilterBar.hidden = true;
     }
 
-    // Apply MIME filter (empty set = no filter = show all).
-    const visibleResources =
-      activeMimeFilters.size === 0
-        ? resourcesWithSize
-        : resourcesWithSize.filter((r) =>
-            activeMimeFilters.has(
-              (r.mimeType || 'application/octet-stream').split(';')[0].trim()
-            )
-          );
+    const visibleResources = resourcesWithSize.filter(
+      (r) => matchesMime(r) && matchesPhl(r)
+    );
+    filterSummary.textContent =
+      visibleResources.length === resourcesWithSize.length
+        ? `${resourcesWithSize.length} resource${resourcesWithSize.length === 1 ? '' : 's'}`
+        : `${visibleResources.length} of ${resourcesWithSize.length} resources shown`;
 
     const getAccessData = (hash) => {
       if (isAllOrigins || isMultiOrigin) {
@@ -937,8 +1154,8 @@ async function initializePopup() {
       const p = document.createElement('p');
       p.className = 'empty-state';
       p.textContent =
-        activeMimeFilters.size > 0
-          ? 'No resources match the selected MIME type filter.'
+        activeMimeFilters.size > 0 || phlFilter !== 'all'
+          ? 'No resources match the selected filters.'
           : isMultiOrigin
             ? 'No resources from the selected origins are stored in COS.'
             : 'No resources from this origin are stored in COS.';
@@ -1085,6 +1302,7 @@ async function initializePopup() {
    */
   async function refreshUI() {
     activeMimeFilters = new Set();
+    phlFilter = 'all';
 
     // Reload the latest data from storage.
     await resourceManager.loadManagerFromStorage();
@@ -1584,6 +1802,7 @@ async function initializePopup() {
 
   originSelect.addEventListener('change', () => {
     activeMimeFilters = new Set();
+    phlFilter = 'all';
     updateHashesDisplay();
   });
   sortSelect.addEventListener('change', () => {
