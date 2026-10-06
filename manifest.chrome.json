@@ -4,7 +4,7 @@
   "version": "0.1.26",
   "description": "Implements the proposed Cross-Origin Storage API for sharing files across sites with consent.",
   "options_page": "options.html",
-  "permissions": ["storage", "unlimitedStorage", "offscreen", "tabs"],
+  "permissions": ["storage", "unlimitedStorage", "alarms", "offscreen", "tabs"],
   "host_permissions": ["https://raw.githubusercontent.com/*"],
   "background": {
     "service_worker": "background.js",

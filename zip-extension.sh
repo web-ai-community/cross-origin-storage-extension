@@ -45,6 +45,10 @@ COMMON_FILES=(
   "phl-details.js"
   "public-suffix-list.js"
   "same-site.js"
+  "telemetry.js"
+  "telemetry-switch.js"
+  "telemetry-notice.html"
+  "telemetry-notice.js"
 )
 
 if [ "$BROWSER" = "chrome" ]; then

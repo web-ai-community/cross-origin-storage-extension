@@ -1,13 +1,14 @@
 ### Privacy Policy for Cross-Origin Storage
 
-**Effective Date:** October 7, 2025
+**Effective Date:** October 6, 2026
 
 #### 1. Introduction
 
 This Privacy Policy governs the manner in which the "Cross-Origin Storage"
-Chrome Extension (hereinafter referred to as "the Extension") handles user data.
-The privacy of our users is of paramount importance to us. This Extension is
-designed to be a purely client-side tool.
+browser extension (hereinafter referred to as "the Extension") handles user
+data. The privacy of our users is of paramount importance to us. The Extension's
+functionality runs entirely on your device. The only data it sends anywhere is
+the anonymous usage statistics described in section 3, which you can turn off.
 
 We are committed to transparency and protecting your privacy. This policy aims
 to clearly inform you about our data practices.
@@ -15,14 +16,54 @@ to clearly inform you about our data practices.
 #### 2. Data Collection and Usage
 
 **The Extension does not collect, store, transmit, or share any personally
-identifiable information (PII) or any other form of user data.**
+identifiable information (PII), browsing history, or content of the pages you
+visit.**
 
-All functionality of the Extension is performed locally on your computer. No
-data is ever sent to any remote server or third-party service. We do not have
-access to your browsing history, personal information, or any content you
-interact with.
+All functionality of the Extension is performed locally on your computer. We do
+not have access to your browsing history, personal information, or any content
+you interact with. Apart from the anonymous usage statistics in section 3, the
+Extension contacts the network only to download public reference lists from
+GitHub (the Public Suffix List, and the Public Hash List when needed).
 
-#### 3. Explanation of Required Permissions
+#### 3. Anonymous Usage Statistics
+
+To guide the development of the Cross-Origin Storage API, the Extension sends
+anonymous usage statistics. This is on by default. When the Extension is
+installed, or first updated to a version with this feature, it opens a page
+explaining the statistics with a switch to turn them off. The same switch is in
+the Extension's options. In Firefox, the setting is Firefox's "technical and
+interaction data" permission. Nothing is sent until a day after that page
+opened.
+
+A report contains:
+
+- **Once a month, per file on the Public Hash List:** for each file in your
+  Cross-Origin Storage cache that is on the
+  [Public Hash List](https://github.com/WICG/cross-origin-storage/tree/main/public-hash-list/implementation),
+  a public list of widely deployed files: its SHA-256 hash, size, MIME type,
+  sharing setting (everyone, listed origins, or same-site), and the number of
+  origins and sites that have used it. Other files are only counted, grouped by
+  their top-level MIME type (such as `font/*`), with their total size rounded to
+  two significant digits.
+- **Once a month, cache totals:** the number of files, their total size, the
+  number of origins and sites that have used the cache, and the storage saved by
+  sharing, with sizes rounded to two significant digits.
+- **Once a day:** for files on the Public Hash List, how often each was found,
+  not found, or stored, the bytes involved, through which part of the API, and,
+  for files found, whether the requesting site is the one that stored the file.
+  Other files are again only counted.
+- The Extension version, the browser (Chrome, Firefox, or Safari), and a random
+  identifier that is replaced every calendar month.
+
+Reports never contain URLs, origins, site names, or the hash of any file outside
+the Public Hash List. Origins and sites are only counted. Activity on
+`localhost` and `.test` domains is not counted. Reports are sent without cookies
+to a Google Apps Script web app, which stores them in a Google Sheet accessible
+to the Extension's maintainers. The script does not receive or store IP
+addresses. The statistics are used only in aggregate, to understand which
+resources are shared through Cross-Origin Storage and how often they are reused.
+
+#### 4. Explanation of Required Permissions
 
 The Chrome Web Store requires us to declare the permissions the Extension needs
 to function. Below is an explanation of why each permission is necessary for the
@@ -49,6 +90,12 @@ privacy.
     ephemerally to execute its core function. It does **not** log, store, or
     transmit your browsing history or tab information.
 
+- **`alarms`**:
+  - **Purpose:** This permission schedules the daily usage statistics report
+    described in section 3.
+  - **Privacy Assurance:** Alarms only wake the Extension at a set time. They
+    give the Extension no access to any data.
+
 - **`offscreen`**:
   - **Purpose:** This permission allows the Extension to create an offscreen
     document to perform tasks that are not possible in a background service
@@ -68,20 +115,20 @@ privacy.
     personal data, form inputs, or other sensitive information from the web
     pages you visit.
 
-#### 4. Third-Party Services
+#### 5. Third-Party Services
 
-The Extension does not integrate with any third-party services, APIs, or
-analytics frameworks. All code is self-contained and operates without external
-communication.
+The Extension does not integrate with any third-party analytics frameworks. The
+usage statistics in section 3 go to a Google Apps Script web app operated by the
+Extension's maintainers.
 
-#### 5. Changes to This Privacy Policy
+#### 6. Changes to This Privacy Policy
 
 We may update this Privacy Policy from time to time. Any changes will be
 reflected in an updated version of the Extension and this policy document. We
 encourage you to periodically review this policy for the latest information on
 our privacy practices.
 
-#### 6. Contact Us
+#### 7. Contact Us
 
 If you have any questions or concerns about this Privacy Policy, please contact
 us at: **tomac@google.com**

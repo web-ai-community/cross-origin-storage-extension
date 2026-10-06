@@ -108,6 +108,24 @@
         for the full rationale and governance model.
       </p>
     </div>
+    <div class="panel">
+      <div class="option-item">
+        <!-- switch attribute is required by the input-switch-polyfill -->
+        <!-- prettier-ignore -->
+        <input type="checkbox" switch id="telemetry">
+        <label for="telemetry">Share anonymous usage statistics</label>
+      </div>
+      <p>
+        Once a day, the extension reports how often files on the Public Hash
+        List were found, missed, or stored, and once a month, which of them are
+        in your COS cache and how widely they're shared, along with the totals
+        the popup shows. Other files are only counted. Reports never contain
+        URLs, origins, or site names. On by default. See
+        <a href="telemetry-notice.html" target="_blank"
+          >the contents of a report</a
+        >.
+      </p>
+    </div>
     <div id="toast">Settings saved</div>
     <script type="module" src="options.js"></script>
   </body>

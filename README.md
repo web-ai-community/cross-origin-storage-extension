@@ -619,6 +619,36 @@ so its own cache is no help), and means a resource stored later needs no
 second download. A list downloaded before that cache existed has no copy kept,
 so the page offers a one-off read that stores it.
 
+## Anonymous usage statistics
+
+To see which resources populate COS caches and how often they are reused, the
+extension sends anonymous usage statistics (`telemetry.js`). They are on by
+default. On install, and on the first update that includes them,
+`telemetry-notice.html` opens to explain them, with a switch to turn them off;
+the same switch is in `options.html`. In Firefox, the switch is Firefox's
+`technicalAndInteraction` data consent.
+
+- Once a day, counts of hits, misses, and stores per hash, with MIME type,
+  bytes, the API path, and, for hits, whether the requester is same-site with
+  the storer.
+- Once a month, a snapshot of the hashes in the cache, each with its size, MIME
+  type, visibility tier, and the number of origins and sites that used it,
+  plus the cache totals the popup shows (resources, bytes, origins, sites, and
+  deduplication savings).
+- Only hashes on the Public Hash List are reported by value; every other hash
+  is folded into `other` counts with only its top-level MIME type (`font/*`)
+  and rounded sizes. This needs the list, so an install with something to
+  report downloads it (about 88 MB) at most once a month.
+- No URLs, origins, or sites, only their counts; a random install ID that
+  changes every month; nothing from `localhost` or `.test` origins; nothing
+  sent until a day after the notice opened.
+
+Development (unpacked) installs log their reports to the background console
+and never send them. Reports go to a Google Apps Script web app that writes
+them to a Google Sheet; [`telemetry-backend/`](telemetry-backend/) has the
+script, setup instructions, and the report format. See
+[PRIVACY.md](PRIVACY.md) for the user-facing description.
+
 ## Publishing
 
 `publish-extension.mjs` builds the archive with `zip-extension.sh` and submits

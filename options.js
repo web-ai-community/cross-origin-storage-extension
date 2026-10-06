@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import './input-switch-polyfill.js';
+import { bindTelemetrySwitch } from './telemetry-switch.js';
 
 const workerPatchCheckbox = document.getElementById('worker-patch');
 const fetchPatchCheckbox = document.getElementById('fetch-patch');
@@ -52,3 +53,5 @@ publicHashListCheckbox.addEventListener('change', () => {
     }
   );
 });
+
+bindTelemetrySwitch(document.getElementById('telemetry'), showToast);

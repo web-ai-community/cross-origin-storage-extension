@@ -884,6 +884,7 @@
           url,
           integrity: sriToken,
           origins,
+          via: 'fetch',
         }).then(
           ({ dataChunks, mimeType }) => {
             if (!dataChunks) return _nativeFetch.call(self, input, init);
@@ -2176,6 +2177,7 @@ self.addEventListener('message', function __cosBufferFn(e) {
         integrity: sriToken,
         origins,
         origin: location.origin,
+        via: 'fetch',
       }).then(
         ({ dataChunks, mimeType }) =>
           dataChunks

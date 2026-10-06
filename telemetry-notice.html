@@ -1,0 +1,144 @@
+<!--
+  Copyright 2026 Google LLC.
+  SPDX-License-Identifier: Apache-2.0
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Cross-Origin Storage Usage Statistics</title>
+    <link rel="stylesheet" href="styles.css" />
+    <style>
+      body {
+        max-width: 640px;
+        margin: 2rem auto;
+      }
+
+      .panel {
+        min-width: 0;
+        margin-block-end: 1.5rem;
+      }
+
+      li {
+        color: light-dark(#666, #bbb);
+        margin-block-end: 0.4em;
+      }
+
+      pre {
+        overflow-x: auto;
+        font-size: 0.85em;
+        padding: 1em;
+        border-radius: 4px;
+        background: light-dark(#f5f5f5, #2c2c2c);
+      }
+
+      summary {
+        cursor: pointer;
+      }
+    </style>
+  </head>
+
+  <body>
+    <img class="logo" src="logo-cos.svg" alt="" width="512" height="512" />
+    <h1>Cross-Origin Storage</h1>
+    <div class="panel">
+      <h2>Anonymous usage statistics</h2>
+      <p>
+        To help shape the Cross-Origin Storage API, the extension shares
+        anonymous statistics about which widely used files sit in COS caches and
+        how often sites reuse them. You can turn this off now or any time later
+        in the extension's options.
+      </p>
+      <div class="option-item">
+        <!-- switch attribute is required by the input-switch-polyfill -->
+        <!-- prettier-ignore -->
+        <input type="checkbox" switch id="telemetry">
+        <label for="telemetry">Share anonymous usage statistics</label>
+      </div>
+      <p id="firefox-note" hidden>
+        In Firefox, this setting is the "technical and interaction data"
+        permission, which you can also change in the add-on's permissions in
+        <code>about:addons</code>.
+      </p>
+    </div>
+    <div class="panel">
+      <h2>Contents of a report</h2>
+      <ul>
+        <li>
+          Once a month, for each file in your COS cache that is on the
+          <a
+            href="https://github.com/WICG/cross-origin-storage/tree/main/public-hash-list/implementation"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Public Hash List</a
+          >, a public list of widely deployed files: its hash, size, MIME type,
+          who it is shared with (everyone, listed origins, or the same site),
+          and how many origins and sites have used it. Other files are only
+          counted, grouped by the general kind of file (such as
+          <code>font/*</code>), with their total size rounded.
+        </li>
+        <li>
+          Once a month, totals for your COS cache, as shown in the extension's
+          popup: the number of files, their total size, how many origins and
+          sites have used it, and the space saved by sharing. Sizes are rounded.
+        </li>
+        <li>
+          Once a day, how often files on the Public Hash List were found (hits),
+          not found (misses), or stored, with the bytes involved, through which
+          part of the API, and for hits, whether the requesting site is the one
+          that stored the file. Files not on the list are again only counted.
+        </li>
+        <li>
+          The extension version, the browser (Chrome, Firefox, or Safari), and a
+          random ID that is replaced every month.
+        </li>
+      </ul>
+      <p>
+        Reports never contain URLs, origins, site names, or the hash of any file
+        outside the Public Hash List. Origins and sites are only counted. Pages
+        served from
+        <code>localhost</code> and <code>.test</code> domains aren't counted.
+        Nothing is sent until a day after this page first opened. Reports go to
+        a Google Apps Script that writes them to a spreadsheet; the script
+        doesn't receive or store IP addresses. See the
+        <a
+          href="https://github.com/web-ai-community/cross-origin-storage-extension/blob/main/PRIVACY.md"
+          target="_blank"
+          rel="noopener noreferrer"
+          >privacy policy</a
+        >
+        for details.
+      </p>
+      <details>
+        <summary>Example report</summary>
+        <pre><code>{
+  "schema": 1,
+  "id": "3f1c9a2e-7b4d-4e8a-9c01-5d6e7f8a9b0c",
+  "version": "0.1.27",
+  "browser": "chrome",
+  "phlVersion": "2026.10.01",
+  "usage": [
+    { "hash": "e3b0c442…b855", "mimeType": "application/wasm", "event": "hit",
+      "relation": "cross", "api": "getFileHandle", "count": 3, "bytes": 3145728 },
+    { "hash": "other", "mimeType": "font/*", "event": "store",
+      "relation": "", "api": "css", "count": 1, "bytes": 48000 }
+  ],
+  "snapshot": {
+    "month": "2026-10",
+    "install": { "resources": 3, "listedResources": 1, "bytes": 1100000,
+                 "origins": 4, "sites": 3, "dedupBytes": 2100000 },
+    "resources": [
+      { "hash": "e3b0c442…b855", "mimeType": "application/wasm", "size": 1048576,
+        "visibility": "global", "origins": 3, "sites": 3, "count": 1 },
+      { "hash": "other", "mimeType": "font/*", "size": 96000,
+        "visibility": "", "origins": null, "sites": null, "count": 2 }
+    ]
+  }
+}</code></pre>
+      </details>
+    </div>
+    <script type="module" src="telemetry-notice.js"></script>
+  </body>
+</html>

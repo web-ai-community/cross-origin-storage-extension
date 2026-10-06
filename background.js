@@ -3,7 +3,8 @@
 
 import ResourceManager from './resource-manager.js';
 import { PublicHashList } from './public-hash-list.js';
-import { isSameSite } from './same-site.js';
+import { getSite, isSameSite } from './same-site.js';
+import { initTelemetry, recordTelemetryEvent } from './telemetry.js';
 
 let creating; // A global promise to avoid concurrency issues
 
@@ -223,6 +224,38 @@ async function setupOffscreenDocument(path) {
 
 const resourceManager = new ResourceManager();
 
+initTelemetry({ publicHashList, resourceManager, getSite });
+
+// How a hit's requesting origin relates to the origins that stored the
+// resource: 'same' when any of them is same-site with it.
+async function siteRelation(hashValue, origin) {
+  const storers = resourceManager.getStoringOrigins(hashValue);
+  if (!storers.length) return 'unknown';
+  const checks = await Promise.all(
+    storers.map((storer) => isSameSite(storer, origin))
+  );
+  return checks.some(Boolean) ? 'same' : 'cross';
+}
+
+function countForTelemetry(event, hashValue, origin, api) {
+  recordTelemetryEvent({
+    hash: hashValue,
+    event,
+    api,
+    origin,
+    relation:
+      event === 'hit' ? () => siteRelation(hashValue, origin) : undefined,
+  });
+}
+
+function senderOrigin(sender) {
+  try {
+    return sender.origin ?? new URL(sender.url).origin;
+  } catch {
+    return '';
+  }
+}
+
 // Create the offscreen document for Blob operations.
 // Exposed as a module-level promise so getFileData can await it before sending
 // getBlobURL — the offscreen doc must exist before it can receive messages.
@@ -361,6 +394,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               (await isBlockedByPublicHashList(hash.value, origin))
             ) {
               resourceManager.recordMiss();
+              countForTelemetry('miss', hash.value, origin, 'getFileHandle');
               if (tabId) {
                 if (!tabMissHashes[tabId]) tabMissHashes[tabId] = new Set();
                 tabMissHashes[tabId].add(hash.value);
@@ -384,6 +418,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               const { reachable } = await resolveVisibility(hash.value, origin);
               if (!reachable) {
                 resourceManager.recordMiss();
+                countForTelemetry('miss', hash.value, origin, 'getFileHandle');
                 if (tabId) {
                   if (!tabMissHashes[tabId])
                     tabMissHashes[tabId] = new Set();
@@ -403,6 +438,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             if (!handle) {
               if (!create) {
                 resourceManager.recordMiss();
+                countForTelemetry('miss', hash.value, origin, 'getFileHandle');
                 if (tabId) {
                   if (!tabMissHashes[tabId]) tabMissHashes[tabId] = new Set();
                   tabMissHashes[tabId].add(hash.value);
@@ -428,6 +464,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             resourceManager.recordAccess(origin, hash.value);
             if (!create) {
               resourceManager.recordHit(hash.value);
+              countForTelemetry('hit', hash.value, origin, 'getFileHandle');
               if (tabId) {
                 if (!tabHitHashes[tabId]) tabHitHashes[tabId] = new Set();
                 tabHitHashes[tabId].add(hash.value);
@@ -496,6 +533,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                   type: mimeType?.['content-type'] || 'application/octet-stream',
                 });
           await storeFileData(hash, blob, mimeType);
+          countForTelemetry('store', hash.value, senderOrigin(sender), 'getFileHandle');
           resourceManager.recordSize(hash.value, blob.size);
           resourceManager.recordMimeType(
             hash.value,
@@ -543,6 +581,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             pendingSafariWrites.delete(transferId);
             await entry.writer.close();
             await entry.putPromise;
+            countForTelemetry(
+              'store',
+              entry.hash.value,
+              senderOrigin(sender),
+              'getFileHandle'
+            );
             resourceManager.recordSize(entry.hash.value, entry.bytesWritten);
             resourceManager.recordMimeType(
               entry.hash.value,
@@ -682,6 +726,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const alreadyCached = !phlBlocked && !!fileResult;
             if (!fileResult) {
               resourceManager.recordMiss();
+              countForTelemetry('miss', hash.value, origin, 'css');
               if (tabId) {
                 if (!tabMissHashes[tabId]) tabMissHashes[tabId] = new Set();
                 tabMissHashes[tabId].add(hash.value);
@@ -698,6 +743,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 await storeFileData(hash, fontBlob, {
                   'content-type': mimeType,
                 });
+                countForTelemetry('store', hash.value, origin, 'css');
                 resourceManager.recordSize(hash.value, fontBlob.size);
                 resourceManager.recordMimeType(hash.value, mimeType);
                 // Persist this hash's visibility from the CSS
@@ -719,6 +765,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             if (fileResult) {
               if (alreadyCached) {
                 resourceManager.recordHit(hash.value);
+                countForTelemetry('hit', hash.value, origin, 'css');
                 if (tabId) {
                   if (!tabHitHashes[tabId]) tabHitHashes[tabId] = new Set();
                   tabHitHashes[tabId].add(hash.value);
@@ -765,8 +812,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'resolveDeclarativeResource': {
           const tabId = sender.tab?.id;
           maybeResetForNewPage(tabId, sender.documentId);
-          const { url, integrity, origins, origin } = data;
+          const { url, integrity, origins, origin, via } = data;
           const hash = sriToHashObj(integrity);
+          // The fetch() integration shares this action, and says so.
+          const api = via === 'fetch' ? 'fetch' : 'declarative';
           await resourceManager.loadManagerFromStorage();
 
           const isStorer = resourceManager.isStoringOrigin(hash.value, origin);
@@ -783,6 +832,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
           if (!fileResult) {
             resourceManager.recordMiss();
+            countForTelemetry('miss', hash.value, origin, api);
             if (tabId) {
               if (!tabMissHashes[tabId]) tabMissHashes[tabId] = new Set();
               tabMissHashes[tabId].add(hash.value);
@@ -805,6 +855,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               const mimeType =
                 resp.headers.get('content-type') || 'application/octet-stream';
               await storeFileData(hash, blob, { 'content-type': mimeType });
+              countForTelemetry('store', hash.value, origin, api);
               resourceManager.recordSize(hash.value, blob.size);
               resourceManager.recordMimeType(hash.value, mimeType);
               // Persist this hash's visibility from the crossoriginstorage
@@ -822,6 +873,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           if (fileResult) {
             if (alreadyCached) {
               resourceManager.recordHit(hash.value);
+              countForTelemetry('hit', hash.value, origin, api);
               if (tabId) {
                 if (!tabHitHashes[tabId]) tabHitHashes[tabId] = new Set();
                 tabHitHashes[tabId].add(hash.value);

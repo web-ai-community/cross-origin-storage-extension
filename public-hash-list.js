@@ -353,6 +353,32 @@ class PublicHashList {
   }
 
   /**
+   * Populates the in-memory hash set, accepting a cached copy up to
+   * `maxAgeMs` old and downloading (and waiting for) a fresh one otherwise.
+   * For callers that need the list only occasionally, so it never starts
+   * the daily refresh that `init()` does. If a download fails while a
+   * cached copy exists, the cached copy is kept and used.
+   */
+  async ensureLoaded(maxAgeMs) {
+    const cached = await this.loadCached();
+    if (cached && Date.now() - this._fetchedAt <= maxAgeMs) return;
+    try {
+      await this._refresh();
+    } catch (error) {
+      if (!cached) throw error;
+      console.warn('[COS] Public Hash List refresh failed, using cached copy:', error);
+    }
+  }
+
+  /**
+   * Returns true if `hashValue` is in the hash set already in memory,
+   * without loading or refreshing anything. Call `ensureLoaded()` first.
+   */
+  includes(hashValue) {
+    return this._hashes?.has(hashValue) ?? false;
+  }
+
+  /**
    * Returns true if `hashValue` (lowercase hex SHA-256) is present in the
    * Public Hash List. Triggers a background refresh as a side effect if
    * the cached copy is older than REFRESH_INTERVAL_MS.
