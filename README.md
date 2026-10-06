@@ -64,11 +64,15 @@ and the reasoning are in code comments in `main-world.js`.
 Works exactly as specified:
 
 ```js
-const handle = await navigator.crossOriginStorage.requestFileHandle(
+const handle = await navigator.crossOriginStorage.getFileHandle(
   { algorithm: 'SHA-256', value: '8f434346...' },
   { create: true, origins: '*' }
 );
 ```
+
+A previous version of the explainer called this method `requestFileHandle()`.
+The extension keeps that name as an alias of `getFileHandle()` and logs a
+deprecation warning to the console every time it is called.
 
 ### CSS integration
 
@@ -533,7 +537,7 @@ imports — ends up running the same way either way:
 <script>
   // Only take over if nothing else (this extension, or a future native
   // implementation) already claimed COS support.
-  if (!navigator.crossOriginStorage?.requestFileHandle) {
+  if (!navigator.crossOriginStorage?.getFileHandle) {
     document.querySelectorAll('script[type="module-cos"]').forEach((script) => {
       // A static "with { … }" clause is only ever valid once COS has
       // rewritten it, so strip it and run the rest as a plain import
@@ -563,7 +567,7 @@ feature-detected dynamic `import()` instead, which degrades safely on its
 own with no special type or detector needed:
 
 ```js
-const supportsCOS = !!navigator.crossOriginStorage?.requestFileHandle;
+const supportsCOS = !!navigator.crossOriginStorage?.getFileHandle;
 
 const mod = supportsCOS
   ? await navigator.crossOriginStorage.__non_standard__import('resource.json', {
@@ -584,7 +588,7 @@ switched off, which is its default state.
 
 ## Privacy: Public Hash List gating
 
-`requestFileHandle()` lets any origin ask whether a given hash is already
+`getFileHandle()` lets any origin ask whether a given hash is already
 cached, which can turn cache presence into a cross-site probing oracle for
 rare files. This extension has an opt-in setting (off by default, in
 `options.html`) that closes that hole for globally-shared (`origins: '*'`)

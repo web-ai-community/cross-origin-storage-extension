@@ -5,7 +5,7 @@ const HISTORY_LIMIT = 10;
 const STORAGE_KEY = 'resourceManagerData';
 
 // Maximum number of origins allowed in an explicit `origins` list passed
-// to requestFileHandle({ create: true, origins: [...] }). Inspired by
+// to getFileHandle({ create: true, origins: [...] }). Inspired by
 // Related Website Sets' associated-domain cap (5 + 1 primary = 6) --
 // see https://github.com/GoogleChrome/related-website-sets -- which
 // settled on a small number specifically to discourage using a

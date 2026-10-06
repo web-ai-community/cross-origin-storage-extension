@@ -328,7 +328,7 @@
 
   /**
    * Validates an `options.origins` value per the COS explainer's
-   * CrossOriginStorageRequestFileHandleOptions dictionary: optional
+   * CrossOriginStorageGetFileHandleOptions dictionary: optional
    * (USVString or sequence<USVString>). '*' means global, an array
    * means a restricted list, and omitting it entirely means
    * same-site-only.
@@ -370,8 +370,15 @@
   const _requestFileHandlesDeprecationWarning =
     `[Cross-Origin Storage] navigator.crossOriginStorage.requestFileHandles() ` +
     `is deprecated and will be removed in a future version. ` +
-    `Use requestFileHandle() (singular) instead. ` +
+    `Use getFileHandle() (singular) instead. ` +
     `See https://github.com/WICG/cross-origin-storage/issues/61`;
+
+  // Deprecation warning for requestFileHandle(), the method's previous name,
+  // logged on every call. It is an alias that forwards to getFileHandle().
+  const _requestFileHandleDeprecationWarning =
+    `[Cross-Origin Storage] navigator.crossOriginStorage.requestFileHandle() ` +
+    `is deprecated and will be removed in a future version. ` +
+    `Use getFileHandle() instead.`;
 
   function _validateHash(hash, methodName) {
     if (!hash.value) {
@@ -396,22 +403,30 @@
     }
   }
 
-  const crossOriginStorage = {
-    requestFileHandle: async (hash, options = {}) => {
-      if (!hash) {
-        throw new TypeError(
-          `Failed to execute 'requestFileHandle': first argument 'hash' is required.`
-        );
-      }
-      _validateHash(hash, 'requestFileHandle');
-      const { create = false, origins } = options;
-      _validateOrigins(origins, 'requestFileHandle');
-      const [handle] = await requestFileHandlesWithOptionalPrompt(
-        [hash],
-        create,
-        origins
+  async function _getFileHandle(hash, options = {}, methodName) {
+    if (!hash) {
+      throw new TypeError(
+        `Failed to execute '${methodName}': first argument 'hash' is required.`
       );
-      return handle;
+    }
+    _validateHash(hash, methodName);
+    const { create = false, origins } = options;
+    _validateOrigins(origins, methodName);
+    const [handle] = await requestFileHandlesWithOptionalPrompt(
+      [hash],
+      create,
+      origins
+    );
+    return handle;
+  }
+
+  const crossOriginStorage = {
+    getFileHandle: (hash, options = {}) =>
+      _getFileHandle(hash, options, 'getFileHandle'),
+
+    requestFileHandle: (hash, options = {}) => {
+      console.warn(_requestFileHandleDeprecationWarning);
+      return _getFileHandle(hash, options, 'requestFileHandle');
     },
 
     requestFileHandles: async (hashes, options = {}) => {
@@ -548,8 +563,15 @@
     const _requestFileHandlesDeprecationWarning =
       `[Cross-Origin Storage] navigator.crossOriginStorage.requestFileHandles() ` +
       `is deprecated and will be removed in a future version. ` +
-      `Use requestFileHandle() (singular) instead. ` +
+      `Use getFileHandle() (singular) instead. ` +
       `See https://github.com/WICG/cross-origin-storage/issues/61`;
+
+    // Deprecation warning for requestFileHandle(), the method's previous name,
+    // logged on every call. It is an alias that forwards to getFileHandle().
+    const _requestFileHandleDeprecationWarning =
+      `[Cross-Origin Storage] navigator.crossOriginStorage.requestFileHandle() ` +
+      `is deprecated and will be removed in a future version. ` +
+      `Use getFileHandle() instead.`;
 
     function _validateHash(hash, methodName) {
       if (!hash.value) {
@@ -688,22 +710,26 @@
       }));
     }
 
-    const workerCrossOriginStorage = {
-      requestFileHandle: async (hash, options = {}) => {
-        if (!hash) {
-          throw new TypeError(
-            `Failed to execute 'requestFileHandle': first argument 'hash' is required.`
-          );
-        }
-        _validateHash(hash, 'requestFileHandle');
-        const { create = false, origins } = options;
-        _validateOrigins(origins, 'requestFileHandle');
-        const [handle] = await _cosRequestFileHandles(
-          [hash],
-          create,
-          origins
+    async function _getFileHandle(hash, options = {}, methodName) {
+      if (!hash) {
+        throw new TypeError(
+          `Failed to execute '${methodName}': first argument 'hash' is required.`
         );
-        return handle;
+      }
+      _validateHash(hash, methodName);
+      const { create = false, origins } = options;
+      _validateOrigins(origins, methodName);
+      const [handle] = await _cosRequestFileHandles([hash], create, origins);
+      return handle;
+    }
+
+    const workerCrossOriginStorage = {
+      getFileHandle: (hash, options = {}) =>
+        _getFileHandle(hash, options, 'getFileHandle'),
+
+      requestFileHandle: (hash, options = {}) => {
+        console.warn(_requestFileHandleDeprecationWarning);
+        return _getFileHandle(hash, options, 'requestFileHandle');
       },
 
       requestFileHandles: async (hashes, options = {}) => {
@@ -1580,7 +1606,7 @@ self.addEventListener('message', function __cosBufferFn(e) {
 
   // Mirrors the JS API's origins shape: '*' stays '*', a space-separated
   // list becomes an array, and a valueless/empty attribute (same-site-only)
-  // becomes undefined -- matching omitting `origins` in requestFileHandle().
+  // becomes undefined -- matching omitting `origins` in getFileHandle().
   function parseCrossOriginStorageAttr(value) {
     const trimmed = (value || '').trim();
     if (trimmed === '') return undefined;

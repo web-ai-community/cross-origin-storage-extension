@@ -23,7 +23,7 @@ window.addEventListener('message', async (event) => {
   }
 
   try {
-    const handle = await navigator.crossOriginStorage.requestFileHandle(hash);
+    const handle = await navigator.crossOriginStorage.getFileHandle(hash);
     const file = await handle.getFile();
     const text = await file.text();
     reply({ ok: true, text });

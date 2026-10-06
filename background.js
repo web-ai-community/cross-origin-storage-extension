@@ -703,7 +703,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 // Persist this hash's visibility from the CSS
                 // cross-origin-storage() modifier's own origins list,
                 // using the same upgrade-only resourceManager state as
-                // the JS requestFileHandle() path, so a hash stored via
+                // the JS getFileHandle() path, so a hash stored via
                 // CSS is governed by the same rules either way.
                 resourceManager.setVisibility(
                   hash.value,
@@ -754,7 +754,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // and <script integrity crossoriginstorage>. See
         // https://github.com/WICG/cross-origin-storage/blob/main/README.md#declarative-html-integration
         //
-        // Unlike requestFileHandle()'s persisted-visibility read check, reads
+        // Unlike getFileHandle()'s persisted-visibility read check, reads
         // here are gated by resolveVisibility() exactly the same way -- the
         // difference from the CSS integration above is deliberate: the CSS
         // form re-derives "allowed" from the declaration's own origins list
@@ -809,7 +809,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               resourceManager.recordMimeType(hash.value, mimeType);
               // Persist this hash's visibility from the crossoriginstorage
               // attribute's own origins value, using the same upgrade-only
-              // resourceManager state as the JS requestFileHandle() path.
+              // resourceManager state as the JS getFileHandle() path.
               resourceManager.setVisibility(hash.value, origins);
               resourceManager.addStoringOrigin(hash.value, origin);
               fileResult = await getFileData(hash);

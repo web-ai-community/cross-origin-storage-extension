@@ -222,7 +222,7 @@
       COS integration technique.
     -->
     <script type="module">
-      const supportsCOS = !!navigator.crossOriginStorage?.requestFileHandle;
+      const supportsCOS = !!navigator.crossOriginStorage?.getFileHandle;
       document.getElementById('cos-status').textContent = supportsCOS
         ? '✅ navigator.crossOriginStorage is available — resources below are shared via COS.'
         : 'ℹ️ navigator.crossOriginStorage is not available — resources below load over the network as normal.';
@@ -257,7 +257,7 @@
     <script>
       (function () {
         const status = document.getElementById('js-detector-status');
-        if (navigator.crossOriginStorage?.requestFileHandle) {
+        if (navigator.crossOriginStorage?.getFileHandle) {
           status.textContent =
             'ℹ️ Not needed — the polyfill already rewrote the module-cos script above and replaced it with a real type="module" script, so there was nothing left for the detector to do.';
           return;
@@ -292,7 +292,7 @@
     -->
     <!-- SAMPLE:js-dynamic:START -->
     <script type="module">
-      const supportsCOS = !!navigator.crossOriginStorage?.requestFileHandle;
+      const supportsCOS = !!navigator.crossOriginStorage?.getFileHandle;
       const mod = supportsCOS
         ? await navigator.crossOriginStorage.__non_standard__import(
             './pe-demo-module.js',

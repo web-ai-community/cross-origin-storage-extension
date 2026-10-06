@@ -207,7 +207,7 @@
   <body>
     <h1>Cross-Origin Storage — test page</h1>
     <p>
-      This page tests <code>navigator.crossOriginStorage.requestFileHandle()</code>
+      This page tests <code>navigator.crossOriginStorage.getFileHandle()</code>
       (singular, current API). It requires the Cross-Origin Storage extension
       to be installed and enabled. The deprecated plural
       <code>requestFileHandles()</code> (see
@@ -652,7 +652,7 @@
         const blob = new Blob([content], { type: 'text/plain' });
         const hexValue = await sha256Hex(content);
         const hash = hashObj(hexValue);
-        const handle = await navigator.crossOriginStorage.requestFileHandle(
+        const handle = await navigator.crossOriginStorage.getFileHandle(
           hash,
           { create: true }
         );
@@ -696,14 +696,14 @@
       const SINGULAR_TESTS = [
         {
           id: 'singular-exists',
-          label: 'requestFileHandle() — resource exists',
+          label: 'getFileHandle() — resource exists',
           async run() {
             log('Singular test 1: storing file S-A…');
             const content = 'cos-test-singular-A';
             const blob = new Blob([content], { type: 'text/plain' });
             const hexValue = await sha256Hex(content);
             const hash = hashObj(hexValue);
-            const wh = await navigator.crossOriginStorage.requestFileHandle(
+            const wh = await navigator.crossOriginStorage.getFileHandle(
               hash,
               { create: true }
             );
@@ -714,7 +714,7 @@
               `Singular test 1: stored with hash ${hash.value.slice(0, 16)}…`
             );
             const handle =
-              await navigator.crossOriginStorage.requestFileHandle(hash);
+              await navigator.crossOriginStorage.getFileHandle(hash);
             const file = await handle.getFile();
             const text = await file.text();
             if (text !== content) {
@@ -732,11 +732,11 @@
 
         {
           id: 'singular-missing',
-          label: 'requestFileHandle() — resource does not exist',
+          label: 'getFileHandle() — resource does not exist',
           async run() {
             log('Singular test 2: requesting non-existent hash…');
             try {
-              await navigator.crossOriginStorage.requestFileHandle(
+              await navigator.crossOriginStorage.getFileHandle(
                 MISSING_HASH_1
               );
               return {
@@ -761,13 +761,13 @@
 
         {
           id: 'singular-write-read',
-          label: 'requestFileHandle() — write then read roundtrip',
+          label: 'getFileHandle() — write then read roundtrip',
           async run() {
             log('Singular test 3: write+read roundtrip…');
             const content = 'cos-test-singular-B';
             const blob = new Blob([content], { type: 'text/plain' });
             const hash = hashObj(await sha256Hex(content));
-            const wh = await navigator.crossOriginStorage.requestFileHandle(
+            const wh = await navigator.crossOriginStorage.getFileHandle(
               hash,
               { create: true }
             );
@@ -775,7 +775,7 @@
             await writable.write(blob);
             await writable.close();
             const rh =
-              await navigator.crossOriginStorage.requestFileHandle(hash);
+              await navigator.crossOriginStorage.getFileHandle(hash);
             const text = await (await rh.getFile()).text();
             if (text !== content) {
               return {
@@ -792,12 +792,12 @@
 
         {
           id: 'singular-get-file-before-write',
-          label: 'requestFileHandle({create:true}) — getFile() before any write throws NotAllowedError',
+          label: 'getFileHandle({create:true}) — getFile() before any write throws NotAllowedError',
           async run() {
             log('Singular test 4: getFile() on unwritten handle…');
             const content = 'cos-test-singular-C';
             const hash = hashObj(await sha256Hex(content));
-            const handle = await navigator.crossOriginStorage.requestFileHandle(
+            const handle = await navigator.crossOriginStorage.getFileHandle(
               hash,
               { create: true }
             );
@@ -824,12 +824,12 @@
 
         {
           id: 'singular-hash-mismatch',
-          label: 'requestFileHandle({create:true}) — writing data that does not match the hash throws DataError',
+          label: 'getFileHandle({create:true}) — writing data that does not match the hash throws DataError',
           async run() {
             log('Singular test 5: writing mismatched data…');
             const content = 'cos-test-singular-D';
             const hash = hashObj(await sha256Hex(content));
-            const handle = await navigator.crossOriginStorage.requestFileHandle(
+            const handle = await navigator.crossOriginStorage.getFileHandle(
               hash,
               { create: true }
             );
@@ -1355,7 +1355,7 @@
 
             log('[Stress] Storing in COS…');
             const writeHandle =
-              await navigator.crossOriginStorage.requestFileHandle(hash, {
+              await navigator.crossOriginStorage.getFileHandle(hash, {
                 create: true,
               });
             const writable = await writeHandle.createWritable();
@@ -1383,7 +1383,7 @@
 
             log('[Stress] Reading back…');
             const readHandle =
-              await navigator.crossOriginStorage.requestFileHandle(hash);
+              await navigator.crossOriginStorage.getFileHandle(hash);
             const file = await readHandle.getFile();
             if (file.size !== sizeBytes) {
               return {
@@ -1398,7 +1398,7 @@
             log('[Stress] Delete complete. Verifying resource is gone…');
 
             try {
-              await navigator.crossOriginStorage.requestFileHandle(hash);
+              await navigator.crossOriginStorage.getFileHandle(hash);
               return {
                 pass: false,
                 detail:
@@ -1613,7 +1613,7 @@
             const content = `cos-origins-global-${Date.now()}`;
             const hex = await sha256Hex(content);
             const hash = { algorithm: 'SHA-256', value: hex };
-            const wh = await navigator.crossOriginStorage.requestFileHandle(
+            const wh = await navigator.crossOriginStorage.getFileHandle(
               hash, { create: true, origins: '*' }
             );
             const wr = await wh.createWritable();
@@ -1621,7 +1621,7 @@
             await wr.close();
             log(`Origins: stored global resource (${hex.slice(0, 12)}…)`);
             try {
-              const rh = await navigator.crossOriginStorage.requestFileHandle(hash);
+              const rh = await navigator.crossOriginStorage.getFileHandle(hash);
               const text = await (await rh.getFile()).text();
               if (text !== content) return { pass: false, detail: `Content mismatch: "${text}"` };
               return { pass: true, detail: `origins:'*' stored and read back OK (PHL gate is off, or hash is in the PHL)` };
@@ -1646,13 +1646,13 @@
             const content = `cos-origins-list-self-${Date.now()}`;
             const hex = await sha256Hex(content);
             const hash = { algorithm: 'SHA-256', value: hex };
-            const wh = await navigator.crossOriginStorage.requestFileHandle(
+            const wh = await navigator.crossOriginStorage.getFileHandle(
               hash, { create: true, origins: [location.origin] }
             );
             const wr = await wh.createWritable();
             await wr.write(new Blob([content], { type: 'text/plain' }));
             await wr.close();
-            const rh = await navigator.crossOriginStorage.requestFileHandle(hash);
+            const rh = await navigator.crossOriginStorage.getFileHandle(hash);
             const text = await (await rh.getFile()).text();
             if (text !== content) return { pass: false, detail: 'Content mismatch' };
             return {
@@ -1668,7 +1668,7 @@
             const content = `cos-origins-list-other-${Date.now()}`;
             const hex = await sha256Hex(content);
             const hash = { algorithm: 'SHA-256', value: hex };
-            const wh = await navigator.crossOriginStorage.requestFileHandle(
+            const wh = await navigator.crossOriginStorage.getFileHandle(
               hash, { create: true, origins: ['https://example.com'] }
             );
             const wr = await wh.createWritable();
@@ -1678,7 +1678,7 @@
             // of the origins list set at write time. Cross-origin blocking for
             // non-storers is covered by the relay tests below.
             try {
-              const rh = await navigator.crossOriginStorage.requestFileHandle(hash);
+              const rh = await navigator.crossOriginStorage.getFileHandle(hash);
               const text = await (await rh.getFile()).text();
               if (text !== content) {
                 return { pass: false, detail: `Content mismatch: got "${text}"` };
@@ -1699,11 +1699,11 @@
             const content = `cos-origins-samesite-${Date.now()}`;
             const hex = await sha256Hex(content);
             const hash = { algorithm: 'SHA-256', value: hex };
-            const wh = await navigator.crossOriginStorage.requestFileHandle(hash, { create: true });
+            const wh = await navigator.crossOriginStorage.getFileHandle(hash, { create: true });
             const wr = await wh.createWritable();
             await wr.write(new Blob([content], { type: 'text/plain' }));
             await wr.close();
-            const rh = await navigator.crossOriginStorage.requestFileHandle(hash);
+            const rh = await navigator.crossOriginStorage.getFileHandle(hash);
             const text = await (await rh.getFile()).text();
             if (text !== content) return { pass: false, detail: 'Content mismatch' };
             return {
@@ -1719,7 +1719,7 @@
             const content = `cos-origins-relay-list-${Date.now()}`;
             const hex = await sha256Hex(content);
             const hash = { algorithm: 'SHA-256', value: hex };
-            const wh = await navigator.crossOriginStorage.requestFileHandle(
+            const wh = await navigator.crossOriginStorage.getFileHandle(
               hash, { create: true, origins: [location.origin] }
             );
             const wr = await wh.createWritable();
@@ -1754,7 +1754,7 @@
             const content = `cos-origins-relay-samesite-${Date.now()}`;
             const hex = await sha256Hex(content);
             const hash = { algorithm: 'SHA-256', value: hex };
-            const wh = await navigator.crossOriginStorage.requestFileHandle(hash, { create: true });
+            const wh = await navigator.crossOriginStorage.getFileHandle(hash, { create: true });
             const wr = await wh.createWritable();
             await wr.write(new Blob([content], { type: 'text/plain' }));
             await wr.close();
@@ -2071,7 +2071,7 @@
             return;
           }
           try {
-            const handle = await navigator.crossOriginStorage.requestFileHandle(hash);
+            const handle = await navigator.crossOriginStorage.getFileHandle(hash);
             const text = await (await handle.getFile()).text();
             reply({ ok: true, text });
           } catch (err) {
@@ -2228,7 +2228,7 @@
               opts.origins = [`http://a.test:${port}`];
             }
             // samesite: no origins property (same-site tier)
-            const wh = await navigator.crossOriginStorage.requestFileHandle(hash, opts);
+            const wh = await navigator.crossOriginStorage.getFileHandle(hash, opts);
             const wr = await wh.createWritable();
             await wr.write(new Blob([content], { type: 'text/plain' }));
             await wr.close();
@@ -2242,7 +2242,7 @@
         const hex = await sha256Hex(MOPHL_CONTENT[contentKey]);
         const hash = { algorithm: 'SHA-256', value: hex };
         try {
-          const handle = await navigator.crossOriginStorage.requestFileHandle(hash);
+          const handle = await navigator.crossOriginStorage.getFileHandle(hash);
           const text = await (await handle.getFile()).text();
           const correct = text === MOPHL_CONTENT[contentKey];
           if (expectOk) {
@@ -2557,7 +2557,7 @@
         const hash = { algorithm: 'SHA-256', value: hex };
         const opts = { create: true };
         if (origins !== undefined) opts.origins = origins;
-        const wh = await navigator.crossOriginStorage.requestFileHandle(hash, opts);
+        const wh = await navigator.crossOriginStorage.getFileHandle(hash, opts);
         const wr = await wh.createWritable();
         await wr.write(new Blob([content], { type: mimeType }));
         await wr.close();
@@ -3275,7 +3275,7 @@
       async function isInCOS(content) {
         const hash = { algorithm: 'SHA-256', value: await sha256Hex(content) };
         try {
-          const handle = await navigator.crossOriginStorage.requestFileHandle(hash);
+          const handle = await navigator.crossOriginStorage.getFileHandle(hash);
           return (await (await handle.getFile()).text()) === content;
         } catch (_) {
           return false;
@@ -3369,7 +3369,7 @@
             // wrong -- so nothing must have been stored under it either.
             let storedUnderWrongHash = false;
             try {
-              await navigator.crossOriginStorage.requestFileHandle({
+              await navigator.crossOriginStorage.getFileHandle({
                 algorithm: 'SHA-256',
                 // Hex form of FETCH_WRONG_INTEGRITY.
                 value: Array.from(
@@ -3640,14 +3640,14 @@
           const content = `cos-variant-${data.label}`;
           const blob = new Blob([content], { type: 'text/plain' });
           const hash = hashObj(await sha256Hex(content));
-          const wh = await navigator.crossOriginStorage.requestFileHandle(
+          const wh = await navigator.crossOriginStorage.getFileHandle(
             hash,
             { create: true }
           );
           const writable = await wh.createWritable();
           await writable.write(blob);
           await writable.close();
-          const rh = await navigator.crossOriginStorage.requestFileHandle(hash);
+          const rh = await navigator.crossOriginStorage.getFileHandle(hash);
           const text = await (await rh.getFile()).text();
           const pass = text === content;
           self.postMessage({
@@ -3691,7 +3691,7 @@
         const blob = new Blob([content], { type: 'text/plain' });
         const hexValue = await sha256Hex(content);
         const hash = hashObj(hexValue);
-        const handle = await navigator.crossOriginStorage.requestFileHandle(
+        const handle = await navigator.crossOriginStorage.getFileHandle(
           hash,
           { create: true }
         );
@@ -3706,14 +3706,14 @@
       const SINGULAR_TESTS = [
         {
           id: 'singular-exists',
-          label: 'requestFileHandle() — resource exists',
+          label: 'getFileHandle() — resource exists',
           async run() {
             log('Worker Singular test 1: storing file S-A…');
             const content = 'cos-test-singular-A';
             const blob = new Blob([content], { type: 'text/plain' });
             const hexValue = await sha256Hex(content);
             const hash = hashObj(hexValue);
-            const wh = await navigator.crossOriginStorage.requestFileHandle(
+            const wh = await navigator.crossOriginStorage.getFileHandle(
               hash,
               { create: true }
             );
@@ -3724,7 +3724,7 @@
               `Worker Singular test 1: stored with hash ${hash.value.slice(0, 16)}…`
             );
             const handle =
-              await navigator.crossOriginStorage.requestFileHandle(hash);
+              await navigator.crossOriginStorage.getFileHandle(hash);
             const file = await handle.getFile();
             const text = await file.text();
             if (text !== content) {
@@ -3742,11 +3742,11 @@
 
         {
           id: 'singular-missing',
-          label: 'requestFileHandle() — resource does not exist',
+          label: 'getFileHandle() — resource does not exist',
           async run() {
             log('Worker Singular test 2: requesting non-existent hash…');
             try {
-              await navigator.crossOriginStorage.requestFileHandle(
+              await navigator.crossOriginStorage.getFileHandle(
                 MISSING_HASH_1
               );
               return {
@@ -3771,13 +3771,13 @@
 
         {
           id: 'singular-write-read',
-          label: 'requestFileHandle() — write then read roundtrip',
+          label: 'getFileHandle() — write then read roundtrip',
           async run() {
             log('Worker Singular test 3: write+read roundtrip…');
             const content = 'cos-test-singular-B';
             const blob = new Blob([content], { type: 'text/plain' });
             const hash = hashObj(await sha256Hex(content));
-            const wh = await navigator.crossOriginStorage.requestFileHandle(
+            const wh = await navigator.crossOriginStorage.getFileHandle(
               hash,
               { create: true }
             );
@@ -3785,7 +3785,7 @@
             await writable.write(blob);
             await writable.close();
             const rh =
-              await navigator.crossOriginStorage.requestFileHandle(hash);
+              await navigator.crossOriginStorage.getFileHandle(hash);
             const text = await (await rh.getFile()).text();
             if (text !== content) {
               return {
@@ -3802,12 +3802,12 @@
 
         {
           id: 'singular-get-file-before-write',
-          label: 'requestFileHandle({create:true}) — getFile() before any write throws NotAllowedError',
+          label: 'getFileHandle({create:true}) — getFile() before any write throws NotAllowedError',
           async run() {
             log('Worker Singular test 4: getFile() on unwritten handle…');
             const content = 'cos-test-singular-C';
             const hash = hashObj(await sha256Hex(content));
-            const handle = await navigator.crossOriginStorage.requestFileHandle(
+            const handle = await navigator.crossOriginStorage.getFileHandle(
               hash,
               { create: true }
             );
@@ -3834,12 +3834,12 @@
 
         {
           id: 'singular-hash-mismatch',
-          label: 'requestFileHandle({create:true}) — writing data that does not match the hash throws DataError',
+          label: 'getFileHandle({create:true}) — writing data that does not match the hash throws DataError',
           async run() {
             log('Worker Singular test 5: writing mismatched data…');
             const content = 'cos-test-singular-D';
             const hash = hashObj(await sha256Hex(content));
-            const handle = await navigator.crossOriginStorage.requestFileHandle(
+            const handle = await navigator.crossOriginStorage.getFileHandle(
               hash,
               { create: true }
             );

@@ -14,7 +14,8 @@
 //   • Declarative HTML, JavaScript import attribute, and fetch integration tests
 //
 // It then drives test-legacy.html the same way, which covers the deprecated
-// plural requestFileHandles() API (main thread + Worker). Finally, it opens
+// plural requestFileHandles() API and the deprecated requestFileHandle()
+// alias of getFileHandle() (main thread + Worker). Finally, it opens
 // popup.html and checks the Public Hash List badges on two stored resources.
 //
 // The .test hostnames are mapped to 127.0.0.1 via --host-resolver-rules so
@@ -336,7 +337,7 @@ async function main() {
   ]);
   await page.close();
 
-  // ── test-legacy.html: deprecated plural requestFileHandles() API ──────────
+  // ── test-legacy.html: deprecated requestFileHandles() and requestFileHandle() ─
 
   const legacyPage = await context.newPage();
   console.log(`\nNavigating to http://a.test:${PORT}/test-legacy.html …`);
@@ -349,7 +350,7 @@ async function main() {
       console.log(text);
     }
   });
-  console.log('Running legacy (plural API) tests…');
+  console.log('Running legacy API tests…');
   const legacyResults = (
     await runAllAndCollect(legacyPage, ['results', 'worker-results'])
   ).map(r => ({ ...r, label: `[Legacy] ${r.label}` }));

@@ -12,7 +12,7 @@
       rel="icon"
       href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧪</text></svg>"
     />
-    <title>Cross-Origin Storage — legacy (plural API) test page</title>
+    <title>Cross-Origin Storage — legacy API test page</title>
     <style>
       :root {
         color-scheme: dark light;
@@ -154,14 +154,16 @@
     </style>
   </head>
   <body>
-    <h1>Cross-Origin Storage — legacy (plural API) test page</h1>
+    <h1>Cross-Origin Storage — legacy API test page</h1>
     <p>
       This page tests the deprecated plural
       <code>navigator.crossOriginStorage.requestFileHandles()</code> (see
-      <a href="https://github.com/WICG/cross-origin-storage/issues/61">#61</a>).
-      It requires the Cross-Origin Storage extension to be installed and
-      enabled. Singular <code>requestFileHandle()</code> tests (current API)
-      live on <a href="test.html">test.html</a>.
+      <a href="https://github.com/WICG/cross-origin-storage/issues/61">#61</a>)
+      and the deprecated <code>requestFileHandle()</code> alias of
+      <code>getFileHandle()</code>. It requires the Cross-Origin Storage
+      extension to be installed and enabled. Singular
+      <code>getFileHandle()</code> tests (current API) live on
+      <a href="test.html">test.html</a>.
     </p>
     <p>
       Known issue under test: when requesting multiple resources and only
@@ -259,7 +261,7 @@
         const blob = new Blob([content], { type: 'text/plain' });
         const hexValue = await sha256Hex(content);
         const hash = hashObj(hexValue);
-        const handle = await navigator.crossOriginStorage.requestFileHandle(
+        const handle = await navigator.crossOriginStorage.getFileHandle(
           hash,
           { create: true }
         );
@@ -486,6 +488,139 @@
             };
           },
         },
+
+        {
+          id: 'alias-roundtrip',
+          label: 'requestFileHandle() alias — write, then read back via both names (deprecated)',
+          async run() {
+            const content = 'cos-test-alias-roundtrip';
+            const hash = hashObj(await sha256Hex(content));
+            log('Alias test: storing via requestFileHandle({create:true})…');
+            const writeHandle =
+              await navigator.crossOriginStorage.requestFileHandle(hash, {
+                create: true,
+              });
+            const writable = await writeHandle.createWritable();
+            await writable.write(new Blob([content], { type: 'text/plain' }));
+            await writable.close();
+            const viaNew = await navigator.crossOriginStorage
+              .getFileHandle(hash)
+              .then((h) => h.getFile())
+              .then((f) => f.text());
+            const viaOld = await navigator.crossOriginStorage
+              .requestFileHandle(hash)
+              .then((h) => h.getFile())
+              .then((f) => f.text());
+            if (viaNew !== content || viaOld !== content) {
+              return {
+                pass: false,
+                detail: `Expected "${content}" from both, got getFileHandle(): "${viaNew}", requestFileHandle(): "${viaOld}"`,
+              };
+            }
+            return {
+              pass: true,
+              detail: `Both names returned the stored content: "${content}"`,
+            };
+          },
+        },
+
+        {
+          id: 'alias-warns',
+          label: 'requestFileHandle() alias — logs a deprecation warning, getFileHandle() does not',
+          async run() {
+            const warnings = [];
+            const originalWarn = console.warn;
+            console.warn = (...args) => {
+              warnings.push(args.map(String).join(' '));
+              originalWarn.apply(console, args);
+            };
+            let oldError;
+            let newError;
+            let oldWarnings;
+            try {
+              log('Alias test: calling requestFileHandle() with a missing hash…');
+              await navigator.crossOriginStorage
+                .requestFileHandle(MISSING_HASH_1)
+                .catch((err) => (oldError = err));
+              oldWarnings = warnings.splice(0);
+              log('Alias test: calling getFileHandle() with a missing hash…');
+              await navigator.crossOriginStorage
+                .getFileHandle(MISSING_HASH_1)
+                .catch((err) => (newError = err));
+            } finally {
+              console.warn = originalWarn;
+            }
+            const deprecations = oldWarnings.filter((w) =>
+              w.includes('requestFileHandle() is deprecated')
+            );
+            if (deprecations.length !== 1) {
+              return {
+                pass: false,
+                detail: `Expected 1 deprecation warning from requestFileHandle(), got ${deprecations.length}: ${JSON.stringify(oldWarnings)}`,
+              };
+            }
+            if (!deprecations[0].includes('getFileHandle()')) {
+              return {
+                pass: false,
+                detail: `Warning does not point to getFileHandle(): ${deprecations[0]}`,
+              };
+            }
+            if (warnings.length) {
+              return {
+                pass: false,
+                detail: `getFileHandle() logged unexpected warning(s): ${JSON.stringify(warnings)}`,
+              };
+            }
+            if (oldError?.name !== 'NotFoundError' || newError?.name !== 'NotFoundError') {
+              return {
+                pass: false,
+                detail: `Expected NotFoundError from both, got requestFileHandle(): ${oldError?.name}, getFileHandle(): ${newError?.name}`,
+              };
+            }
+            return {
+              pass: true,
+              detail: `Warning: ${deprecations[0]}`,
+            };
+          },
+        },
+
+        {
+          id: 'alias-error-name',
+          label: 'requestFileHandle() alias — validation errors name the method that was called',
+          async run() {
+            const badHash = { algorithm: 'SHA-256', value: 'not-a-hash' };
+            const messages = {};
+            for (const method of ['requestFileHandle', 'getFileHandle']) {
+              try {
+                await navigator.crossOriginStorage[method](badHash);
+                return {
+                  pass: false,
+                  detail: `Expected TypeError from ${method}() but call resolved.`,
+                };
+              } catch (err) {
+                if (err.name !== 'TypeError') {
+                  return {
+                    pass: false,
+                    detail: `${method}() threw ${err.name} instead of TypeError: ${err.message}`,
+                  };
+                }
+                messages[method] = err.message;
+              }
+            }
+            for (const [method, message] of Object.entries(messages)) {
+              if (!message.includes(`'${method}'`)) {
+                return {
+                  pass: false,
+                  detail: `${method}() error does not name '${method}': ${message}`,
+                };
+              }
+            }
+            return {
+              pass: true,
+              detail: Object.values(messages).join('\n'),
+            };
+          },
+        },
       ];
 
       // ---------------------------------------------------------------------------
@@ -692,7 +827,7 @@
         const blob = new Blob([content], { type: 'text/plain' });
         const hexValue = await sha256Hex(content);
         const hash = hashObj(hexValue);
-        const handle = await navigator.crossOriginStorage.requestFileHandle(
+        const handle = await navigator.crossOriginStorage.getFileHandle(
           hash,
           { create: true }
         );
@@ -882,6 +1017,139 @@
                 `requestFileHandles() resolved with ${handles.length} handle(s) instead of throwing NotFoundError.`,
                 ...details,
               ].join('\n'),
+            };
+          },
+        },
+
+        {
+          id: 'alias-roundtrip',
+          label: 'requestFileHandle() alias — write, then read back via both names (deprecated)',
+          async run() {
+            const content = 'cos-test-alias-roundtrip';
+            const hash = hashObj(await sha256Hex(content));
+            log('Worker alias test: storing via requestFileHandle({create:true})…');
+            const writeHandle =
+              await navigator.crossOriginStorage.requestFileHandle(hash, {
+                create: true,
+              });
+            const writable = await writeHandle.createWritable();
+            await writable.write(new Blob([content], { type: 'text/plain' }));
+            await writable.close();
+            const viaNew = await navigator.crossOriginStorage
+              .getFileHandle(hash)
+              .then((h) => h.getFile())
+              .then((f) => f.text());
+            const viaOld = await navigator.crossOriginStorage
+              .requestFileHandle(hash)
+              .then((h) => h.getFile())
+              .then((f) => f.text());
+            if (viaNew !== content || viaOld !== content) {
+              return {
+                pass: false,
+                detail: `Expected "${content}" from both, got getFileHandle(): "${viaNew}", requestFileHandle(): "${viaOld}"`,
+              };
+            }
+            return {
+              pass: true,
+              detail: `Both names returned the stored content: "${content}"`,
+            };
+          },
+        },
+
+        {
+          id: 'alias-warns',
+          label: 'requestFileHandle() alias — logs a deprecation warning, getFileHandle() does not',
+          async run() {
+            const warnings = [];
+            const originalWarn = console.warn;
+            console.warn = (...args) => {
+              warnings.push(args.map(String).join(' '));
+              originalWarn.apply(console, args);
+            };
+            let oldError;
+            let newError;
+            let oldWarnings;
+            try {
+              log('Worker alias test: calling requestFileHandle() with a missing hash…');
+              await navigator.crossOriginStorage
+                .requestFileHandle(MISSING_HASH_1)
+                .catch((err) => (oldError = err));
+              oldWarnings = warnings.splice(0);
+              log('Worker alias test: calling getFileHandle() with a missing hash…');
+              await navigator.crossOriginStorage
+                .getFileHandle(MISSING_HASH_1)
+                .catch((err) => (newError = err));
+            } finally {
+              console.warn = originalWarn;
+            }
+            const deprecations = oldWarnings.filter((w) =>
+              w.includes('requestFileHandle() is deprecated')
+            );
+            if (deprecations.length !== 1) {
+              return {
+                pass: false,
+                detail: `Expected 1 deprecation warning from requestFileHandle(), got ${deprecations.length}: ${JSON.stringify(oldWarnings)}`,
+              };
+            }
+            if (!deprecations[0].includes('getFileHandle()')) {
+              return {
+                pass: false,
+                detail: `Warning does not point to getFileHandle(): ${deprecations[0]}`,
+              };
+            }
+            if (warnings.length) {
+              return {
+                pass: false,
+                detail: `getFileHandle() logged unexpected warning(s): ${JSON.stringify(warnings)}`,
+              };
+            }
+            if (oldError?.name !== 'NotFoundError' || newError?.name !== 'NotFoundError') {
+              return {
+                pass: false,
+                detail: `Expected NotFoundError from both, got requestFileHandle(): ${oldError?.name}, getFileHandle(): ${newError?.name}`,
+              };
+            }
+            return {
+              pass: true,
+              detail: `Warning: ${deprecations[0]}`,
+            };
+          },
+        },
+
+        {
+          id: 'alias-error-name',
+          label: 'requestFileHandle() alias — validation errors name the method that was called',
+          async run() {
+            const badHash = { algorithm: 'SHA-256', value: 'not-a-hash' };
+            const messages = {};
+            for (const method of ['requestFileHandle', 'getFileHandle']) {
+              try {
+                await navigator.crossOriginStorage[method](badHash);
+                return {
+                  pass: false,
+                  detail: `Expected TypeError from ${method}() but call resolved.`,
+                };
+              } catch (err) {
+                if (err.name !== 'TypeError') {
+                  return {
+                    pass: false,
+                    detail: `${method}() threw ${err.name} instead of TypeError: ${err.message}`,
+                  };
+                }
+                messages[method] = err.message;
+              }
+            }
+            for (const [method, message] of Object.entries(messages)) {
+              if (!message.includes(`'${method}'`)) {
+                return {
+                  pass: false,
+                  detail: `${method}() error does not name '${method}': ${message}`,
+                };
+              }
+            }
+            return {
+              pass: true,
+              detail: Object.values(messages).join('\n'),
             };
           },
         },
