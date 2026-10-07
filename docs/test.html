@@ -36,6 +36,26 @@
       id="decl-static-script"
     ></script>
     <!--
+      Two parser-inserted declarative scripts with an inline script between
+      them. The second depends on the first, so the order test can tell
+      whether all three ran in document order, as the browser alone runs them.
+    -->
+    <script
+      src="test-declarative-order-1.js"
+      integrity="sha256-icCfnh/iDRQle3KthaFaNfLX/QWJO8GPY+zFccQVOJc="
+      crossoriginstorage
+      id="decl-order-1"
+    ></script>
+    <script>
+      (window.__cosDeclOrder = window.__cosDeclOrder || []).push('inline');
+    </script>
+    <script
+      src="test-declarative-order-2.js"
+      integrity="sha256-/InwPUidvDCViFDBAsbDvm/A6h30Qlaz6igVv3N9Z9Y="
+      crossoriginstorage
+      id="decl-order-2"
+    ></script>
+    <!--
       JavaScript import attribute integration (see the README's "JavaScript
       Import Attribute Integration" section): import attributes. Real
       browsers can't parse/execute this natively (see main-world.js's
@@ -464,7 +484,9 @@
       <code>&lt;script&gt;</code> in this page's <code>&lt;head&gt;</code>
       point to <code>test-declarative-style.css</code> and
       <code>test-declarative-script.js</code> with a bare (same-site-only)
-      <code>crossoriginstorage</code> attribute. The last two tests are
+      <code>crossoriginstorage</code> attribute. Scripts run natively and
+      unchanged, in document order; the polyfill only seeds COS from them. The
+      last two tests are
       cross-origin: they run inside the <code>sub.a.test</code> /
       <code>b.test</code> iframes already used by the multi-origin PHL tests
       above, and deliberately point a <code>&lt;link&gt;</code> at a
@@ -2467,6 +2489,29 @@
       // set up by the multi-origin PHL tests above) cross-origin visibility.
 
       const DECL_SCRIPT_SRC = 'test-declarative-script.js';
+      const DECL_CURRENT_SCRIPT_SRC = 'test-declarative-current-script.js';
+
+      // Waits until the resource an `integrity` value names is in COS, as
+      // seen from this page. The polyfill leaves declarative <script>
+      // elements untouched and only resolves them in the background, so this
+      // is how the tests see that a script seeded COS.
+      async function waitUntilInCOS(integrity, timeout = 8000) {
+        const binary = atob(integrity.replace(/^sha256-/, ''));
+        let value = '';
+        for (let i = 0; i < binary.length; i++) {
+          value += binary.charCodeAt(i).toString(16).padStart(2, '0');
+        }
+        const deadline = Date.now() + timeout;
+        while (Date.now() < deadline) {
+          try {
+            await navigator.crossOriginStorage.getFileHandle({ algorithm: 'SHA-256', value });
+            return true;
+          } catch {
+            await new Promise((r) => setTimeout(r, 100));
+          }
+        }
+        return false;
+      }
       const DECL_WRONG_INTEGRITY =
         'sha256-lJyrUbO5pkHSUm6cpZGHOlSJ7J5BUKZ3lpJK2FK9swM=';
       // Deliberately 404s -- the cross-origin checks below use it so a pass
@@ -2591,35 +2636,53 @@
         {
           id: 'decl-static-script',
           label:
-            'Static &lt;script integrity crossoriginstorage&gt; (same-site) — polyfill intercepts at parse time',
+            'Static &lt;script integrity crossoriginstorage&gt; (same-site) — runs natively, unchanged, and seeds COS',
           async run() {
             const el = document.getElementById('decl-static-script');
             if (!el) {
               return { pass: false, detail: 'No <script id="decl-static-script"> found in DOM.' };
             }
-            const deadline = Date.now() + 8000;
-            while (
-              !(window.__cosDeclarativeRunCount > 0 && (el.getAttribute('src') || '').startsWith('blob:')) &&
-              Date.now() < deadline
-            ) {
-              await new Promise((r) => setTimeout(r, 100));
-            }
-            const ran = (window.__cosDeclarativeRunCount || 0) > 0;
-            const srcIsBlob = (el.getAttribute('src') || '').startsWith('blob:');
-            // Both signals are required: `ran` alone doesn't prove COS was
-            // involved here, since the browser's native fetch of this real,
-            // valid file would *also* make it run even if the COS pipeline
-            // did nothing (a classic <script>'s src, unlike a <link>'s
-            // href, can't be overridden by a later reassignment once the
-            // browser has started -- see the comment on
-            // processDeclarativeResource in main-world.js). srcIsBlob
-            // confirms the polyfill's own resolve+swap pipeline ran too.
+            const seeded = await waitUntilInCOS(el.integrity);
+            const runCount = window.__cosDeclarativeRunCount || 0;
+            const src = el.getAttribute('src');
+            // The polyfill must leave the element alone: the browser loads
+            // and runs it natively, and COS is seeded in the background.
+            const pass = runCount === 1 && src === DECL_SCRIPT_SRC && seeded;
             return {
-              pass: ran && srcIsBlob,
+              pass,
               detail: [
-                `Script ran: ${ran} (runCount=${window.__cosDeclarativeRunCount || 0})`,
-                `src replaced with blob: URL: ${srcIsBlob}`,
-                'Note: the browser’s own native fetch -- not this blob: URL -- is what always actually executes for a <script> element; see main-world.js.',
+                `Run count: ${runCount} (expected exactly 1)`,
+                `src: ${src} (expected unchanged: ${DECL_SCRIPT_SRC})`,
+                `Seeded into COS: ${seeded}`,
+              ].join('\n'),
+            };
+          },
+        },
+        {
+          id: 'decl-static-order',
+          label:
+            'Several static &lt;script integrity crossoriginstorage&gt; with an inline script between — run in document order',
+          async run() {
+            const order = window.__cosDeclOrder || [];
+            const expected = ['order-1', 'inline', 'order-2'];
+            const srcs = ['decl-order-1', 'decl-order-2'].map(
+              (id) => document.getElementById(id)?.getAttribute('src')
+            );
+            const seeded = await Promise.all(
+              ['decl-order-1', 'decl-order-2'].map((id) =>
+                waitUntilInCOS(document.getElementById(id).integrity)
+              )
+            );
+            const pass =
+              JSON.stringify(order) === JSON.stringify(expected) &&
+              srcs.every((src) => src && !src.startsWith('blob:')) &&
+              seeded.every(Boolean);
+            return {
+              pass,
+              detail: [
+                `Order: ${JSON.stringify(order)} (expected ${JSON.stringify(expected)})`,
+                `src attributes: ${JSON.stringify(srcs)} (expected unchanged)`,
+                `Seeded into COS: ${JSON.stringify(seeded)}`,
               ].join('\n'),
             };
           },
@@ -2658,36 +2721,70 @@
         {
           id: 'decl-dynamic-global',
           label:
-            'Dynamic &lt;script crossoriginstorage="*"&gt; insertion — polyfill intercepts MutationObserver event',
+            'Dynamic &lt;script crossoriginstorage="*"&gt; insertion — runs natively once, unchanged, and seeds COS',
           async run() {
             const before = window.__cosDeclarativeRunCount || 0;
             const script = document.createElement('script');
             script.src = DECL_SCRIPT_SRC;
             script.integrity = await sriForURL(DECL_SCRIPT_SRC);
             script.setAttribute('crossoriginstorage', '*');
+            const loaded = new Promise((resolve) => {
+              script.onload = () => resolve('load');
+              script.onerror = () => resolve('error');
+            });
             document.head.appendChild(script);
-            const deadline = Date.now() + 8000;
-            while (
-              !(
-                (window.__cosDeclarativeRunCount || 0) === before + 1 &&
-                (script.getAttribute('src') || '').startsWith('blob:')
-              ) &&
-              Date.now() < deadline
-            ) {
-              await new Promise((r) => setTimeout(r, 100));
-            }
+            const outcome = await Promise.race([
+              loaded,
+              new Promise((r) => setTimeout(() => r('timeout'), 8000)),
+            ]);
+            const seeded = await waitUntilInCOS(script.integrity);
             const after = window.__cosDeclarativeRunCount || 0;
-            const srcIsBlob = (script.getAttribute('src') || '').startsWith('blob:');
-            // See decl-static-script's comment: `after === before + 1` alone
-            // (no double-execution) doesn't prove COS served this element,
-            // only that nothing broke -- srcIsBlob confirms the polyfill's
-            // pipeline also ran.
-            const pass = after === before + 1 && srcIsBlob;
+            const src = script.getAttribute('src');
+            const pass =
+              outcome === 'load' && after === before + 1 && src === DECL_SCRIPT_SRC && seeded;
             return {
               pass,
               detail: [
+                `Load outcome: ${outcome}`,
                 `Run count before: ${before}, after: ${after} (expected exactly +1 -- no double-execution)`,
-                `src replaced with blob: URL: ${srcIsBlob}`,
+                `src: ${src} (expected unchanged: ${DECL_SCRIPT_SRC})`,
+                `Seeded into COS: ${seeded}`,
+              ].join('\n'),
+            };
+          },
+        },
+        {
+          id: 'decl-current-script-src',
+          label:
+            'Dynamic &lt;script crossoriginstorage&gt; reading <code>document.currentScript.src</code> — sees its own URL',
+          async run() {
+            // Loaders such as Prebid.js read a callback name from their own
+            // URL, so the script must see the URL the page gave it.
+            const url = `${DECL_CURRENT_SCRIPT_SRC}?callback=probe`;
+            delete window.__cosDeclCurrentScriptSrc;
+            const script = document.createElement('script');
+            script.src = url;
+            script.integrity = await sriForURL(DECL_CURRENT_SCRIPT_SRC);
+            script.setAttribute('crossoriginstorage', '*');
+            const loaded = new Promise((resolve) => {
+              script.onload = () => resolve('load');
+              script.onerror = () => resolve('error');
+            });
+            document.head.appendChild(script);
+            const outcome = await Promise.race([
+              loaded,
+              new Promise((r) => setTimeout(() => r('timeout'), 8000)),
+            ]);
+            const expected = new URL(url, location.href).href;
+            const seen = window.__cosDeclCurrentScriptSrc;
+            const seeded = await waitUntilInCOS(script.integrity);
+            const pass = outcome === 'load' && seen === expected && seeded;
+            return {
+              pass,
+              detail: [
+                `Load outcome: ${outcome}`,
+                `document.currentScript.src: ${seen} (expected ${expected})`,
+                `Seeded into COS: ${seeded}`,
               ].join('\n'),
             };
           },

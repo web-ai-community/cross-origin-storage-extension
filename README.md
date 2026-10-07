@@ -176,19 +176,19 @@ browser refuses to load the resource at all — independent of COS.
 **How the polyfill works:** the same `MutationObserver` approach as the CSS
 integration, but simpler, since the `integrity`/`crossoriginstorage`
 attributes are already sitting right there on the element — no fetch is
-needed just to check whether they're present. On a match, the polyfill
-removes the `href`/`src` attribute (best-effort — see the caveat below on
-why this doesn't always win the race) and hands the resolved URL, SRI hash,
-and parsed `origins` to the exact same background resolution logic the CSS
-integration uses (cache lookup, or fetch-verify-store on a miss). On
-success it swaps in a `blob:` URL, after checking for a CSP violation on
+needed just to check whether they're present. On a match, the polyfill hands
+the resolved URL, SRI hash, and parsed `origins` to the exact same background
+resolution logic the CSS integration uses (cache lookup, or
+fetch-verify-store on a miss).
+
+For a `<link>`, the polyfill removes the `href` attribute while it resolves,
+and on success swaps in a `blob:` URL, after checking for a CSP violation on
 that `blob:` scheme and falling back to the original URL if the page's CSP
-disallows it; on any other failure (an unreachable or hash-mismatched
-resource) it also restores the original attribute, so the browser's normal
+disallows it. On any other failure (an unreachable or hash-mismatched
+resource) it restores the original attribute, so the browser's normal
 fetch-and-verify path takes over exactly as if this attribute weren't
-present at all. Conceptually, the example above ends up looking like this
-(note that only `href`/`src` change — `integrity`/`crossoriginstorage`
-themselves are left in place on the element):
+present at all. Only `href` changes; `integrity` and `crossoriginstorage`
+stay in place:
 
 ```html
 <!-- After the polyfill resolves it: -->
@@ -199,24 +199,29 @@ themselves are left in place on the element):
   crossorigin="anonymous"
   crossoriginstorage="*"
 />
-<!-- The polyfill swaps src the same way here, but -- per the caveat below --
-     the browser still executes the ORIGINAL network response, not this blob. -->
-<script
-  src="blob:https://example.com/5e6f7a8b-..."
-  integrity="sha256-..."
-  crossorigin="anonymous"
-  crossoriginstorage="*"
-></script>
 ```
 
-**Caveat:** a classic `<script>` element's fetch can't be intercepted before
-the browser commits to it (the HTML spec sets its "already started" flag
-synchronously on insertion, and no later `src` reassignment can undo that —
-verified empirically, not just from reading the spec). So for `<script>`
-specifically, whatever the *network* returns is what actually executes;
-COS still gets seeded from it for other same-hash readers, but this
-particular element doesn't benefit from a cache hit. The `<link>` form has
-no such limitation and works as a genuine cache hit end to end.
+**A `<script>` is left untouched.** The polyfill resolves it in the
+background, which seeds COS on a miss and counts the hit or miss, and the
+browser loads and runs the element natively, from the network. A content
+script can't serve a script from COS without breaking pages:
+
+- A dynamically inserted script has already started loading by the time the
+  `MutationObserver` callback runs (the HTML spec sets its "already started"
+  flag on insertion), so rewriting `src` never changes what executes. It
+  only changes what the script sees as `document.currentScript.src`, which
+  breaks loaders that read their own URL. Prebid.js, for one, reads its
+  manifest callback from a `?callback=` parameter and never finishes
+  loading.
+- A parser-inserted script is reached before the parser runs it, so
+  removing `src` makes the parser skip it, and a `blob:` URL set later runs
+  it whenever COS answers. Document order is lost: scripts run before the
+  scripts they depend on, inline scripts run first, and `defer` scripts run
+  after the `load` event.
+
+Serving scripts from COS needs the parser to wait for the COS lookup, which
+only a native implementation can do. The `<link>` form works as a genuine
+cache hit end to end.
 
 **Don't combine this with `data-cos` on the same `<link>`.** Both this and
 the CSS integration above target `<link rel="stylesheet">`, which makes it

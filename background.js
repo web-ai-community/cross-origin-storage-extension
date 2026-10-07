@@ -812,10 +812,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'resolveDeclarativeResource': {
           const tabId = sender.tab?.id;
           maybeResetForNewPage(tabId, sender.documentId);
-          const { url, integrity, origins, origin, via } = data;
+          const { url, integrity, origins, origin, via, seedOnly } = data;
           const hash = sriToHashObj(integrity);
           // The fetch() integration shares this action, and says so.
           const api = via === 'fetch' ? 'fetch' : 'declarative';
+          // A <script> only seeds COS and counts the hit or miss, since the
+          // page loads it natively (see main-world.js), so it needs to know
+          // whether the resource is cached, never its bytes.
+          const lookup = seedOnly
+            ? async () => !!(await cache.match(generateCacheKey(hash)))
+            : () => getFileData(hash);
           await resourceManager.loadManagerFromStorage();
 
           const isStorer = resourceManager.isStoringOrigin(hash.value, origin);
@@ -826,8 +832,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             ({ reachable } = await resolveVisibility(hash.value, origin));
           }
 
-          let fileResult =
-            reachable && !phlBlocked ? await getFileData(hash) : false;
+          let fileResult = reachable && !phlBlocked ? await lookup() : false;
           const alreadyCached = !!fileResult;
 
           if (!fileResult) {
@@ -863,7 +868,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               // resourceManager state as the JS getFileHandle() path.
               resourceManager.setVisibility(hash.value, origins);
               resourceManager.addStoringOrigin(hash.value, origin);
-              fileResult = await getFileData(hash);
+              fileResult = await lookup();
             } catch (e) {
               responseData = { hash, data: null };
               break;
@@ -884,8 +889,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
             resourceManager.recordAccess(origin, hash.value);
             const mimeType = resourceManager.getMimeTypeByHash(hash.value);
-            responseData =
-              fileResult instanceof Blob
+            // No `hash` in a seed-only response, so Safari's content.js
+            // doesn't pull the bytes it has no use for.
+            responseData = seedOnly
+              ? { seeded: true }
+              : fileResult instanceof Blob
                 ? { hash, data: fileResult, mimeType }
                 : { hash, blobURL: fileResult, mimeType };
           } else {

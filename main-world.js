@@ -1572,27 +1572,33 @@ self.addEventListener('message', function __cosBufferFn(e) {
 
   // Declarative HTML integration: <link integrity crossoriginstorage> and
   // <script integrity crossoriginstorage>. Intercepts elements carrying both
-  // an `integrity` and a `crossoriginstorage` attribute, resolves them via
-  // the COS cache, and re-injects the resolved bytes as a blob: URL.
+  // an `integrity` and a `crossoriginstorage` attribute and resolves them via
+  // the COS cache.
   // See https://github.com/WICG/cross-origin-storage/blob/main/README.md#declarative-html-integration
   //
-  // As with the CSS integration above, this MutationObserver callback runs
-  // as a microtask after the element is inserted, so the browser's native
-  // loader has always already begun fetching the original href/src before
-  // this callback can remove it -- a benign double-fetch for <link>, but a
-  // hard limitation for <script>: per the HTML spec, a classic script's
-  // "already started" flag is set synchronously the moment it's inserted
-  // with a src, and once set, no later reassignment of .src can make the
-  // element fetch/execute again (verified empirically -- reassigning
-  // script.src, even synchronously in the same tick, never changes what
-  // executes; reassigning link.href, by contrast, reliably does). So for
-  // <script>, the blob: URL swap below still runs and still seeds COS for
-  // other readers, but the *original* network response -- not the COS
-  // replacement -- is always what actually executes on this element. Only
-  // a network-layer interception (e.g. declarativeNetRequest redirects)
-  // could change that, which this content-script-based polyfill does not
-  // attempt. This has no effect on <link rel="stylesheet">, which has no
-  // execute-once semantics.
+  // A <link rel="stylesheet"> is served from COS: its `href` is swapped for a
+  // blob: URL holding the cached bytes. The browser has usually started
+  // fetching the original `href` by the time this MutationObserver callback
+  // runs, so that fetch still happens, but reassigning `href` reliably
+  // changes which stylesheet applies.
+  //
+  // A <script> is never modified, only resolved in the background, which
+  // seeds COS on a miss and counts the hit or miss. Rewriting its `src`
+  // can't serve it from COS and breaks pages in two ways, both verified
+  // empirically in Chrome:
+  //   - A dynamically inserted script has already started loading by the
+  //     time this callback runs, so the network copy is what executes, and
+  //     it then sees the rewritten `src` as `document.currentScript.src`.
+  //     Loaders that read their own URL break: Prebid.js finds its manifest
+  //     callback in a `?callback=` query parameter and never loads.
+  //   - A parser-inserted script is reached before the parser prepares it,
+  //     so removing `src` makes the parser skip it as empty, and the blob:
+  //     URL assigned later runs it as a dynamic script whenever COS
+  //     answers. Document order is lost: dependent scripts run before
+  //     their dependencies, inline scripts run first, and `defer` scripts
+  //     run after the load event.
+  // Serving a script from COS would need the parser to wait for COS, which
+  // a content script can't make it do.
 
   // Picks the first `integrity` token using an algorithm COS/SRI both
   // support. `integrity` may list several space-separated hashes; the
@@ -1626,6 +1632,21 @@ self.addEventListener('message', function __cosBufferFn(e) {
       el.getAttribute('crossoriginstorage')
     );
     const url = el[urlAttr]; // Resolved absolute URL, read before removing the attribute.
+    if (!url) return;
+
+    if (el.tagName === 'SCRIPT') {
+      // See the comment above: scripts are resolved for COS bookkeeping
+      // only, and the browser loads and runs them unchanged.
+      talkToBridge('resolveDeclarativeResource', {
+        url,
+        integrity: sriToken,
+        origins,
+        origin: location.origin,
+        seedOnly: true,
+      }).catch(() => {});
+      return;
+    }
+
     el.removeAttribute(urlAttr);
 
     const restoreNative = () => {
