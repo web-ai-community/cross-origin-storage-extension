@@ -66,6 +66,14 @@ month, even with an empty cache.
 Running `setUpSummaries()` again deletes and rebuilds these tabs, so put your
 own analysis in other tabs.
 
+## Resetting the data
+
+To start over, for example after testing, select `resetData` in the editor's
+function menu and click **Run**. It clears every row below the headers in
+Installs, Population, and Usage, and the summary tabs empty themselves. There is
+no undo in the editor, but **File → Version history** in the spreadsheet still
+has the old data.
+
 ## Testing from a development install
 
 Unpacked (development) installs never send to `TELEMETRY_ENDPOINT`, so your own

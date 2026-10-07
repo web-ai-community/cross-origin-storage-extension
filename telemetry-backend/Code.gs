@@ -267,6 +267,29 @@ function textOutput(text) {
   );
 }
 
+// Deletes every report, keeping the header rows, for example after testing.
+// Run it from the Apps Script editor. It can't be undone there, though the
+// spreadsheet's version history still has the old data. The summary tabs
+// are formulas and empty themselves.
+function resetData() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    for (const name of Object.keys(SHEETS)) {
+      const sheet = sheetFor(name);
+      const rows = sheet.getLastRow() - 1;
+      if (rows > 0) {
+        // Clearing leaves the rows in place, since a sheet can't lose all
+        // its non-frozen rows, and `appendRows()` writes below the last
+        // row with content anyway.
+        sheet.getRange(2, 1, rows, SHEETS[name].length).clearContent();
+      }
+    }
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 // Summary tabs, each a live QUERY over the data tabs. Those without
 // `allMonths` show one month, picked in B1: the latest by default, or any
 // `YYYY-MM` typed over it. `month` is the cell reference to splice into the
