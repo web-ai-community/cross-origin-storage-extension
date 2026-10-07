@@ -255,37 +255,59 @@ window.addEventListener('message', async (event) => {
       data.blobURL = URL.createObjectURL(blob);
     }
   }
-  chrome.runtime.sendMessage({ action, data }, async (response) => {
-    if (chrome.runtime.lastError || !response) {
-      // Background service worker was unloaded mid-request; retry once after it
-      // restarts (sending a new message wakes it up automatically).
-      chrome.runtime.sendMessage({ action, data }, async (retryResponse) => {
-        if (chrome.runtime.lastError || !retryResponse) {
-          window.postMessage(
-            { source: 'cos-polyfill-isolated', id, data: null },
-            event.origin
-          );
-          return;
-        }
-        await finalizeResponseData(action, retryResponse.data);
-        window.postMessage(
-          { source: 'cos-polyfill-isolated', id, data: retryResponse.data },
-          event.origin,
-          collectTransferables(retryResponse.data)
-        );
-      });
+
+  // Answers the page. A failure must reach it as `{ error, errorName }`, so
+  // the page's promise rejects: resolving with no data looks like success,
+  // and a failed store would then pass for a stored file.
+  const reply = async (response) => {
+    // The blob: URL keeps a whole copy of the file alive in Chrome's blob
+    // storage until the page unloads. That storage is small (2 GiB of memory
+    // when the disk is nearly full), so a store that leaves it behind can
+    // make the next large store fail.
+    if (data?.blobURL) URL.revokeObjectURL(data.blobURL);
+    if (!response) {
+      window.postMessage(
+        {
+          source: 'cos-polyfill-isolated',
+          id,
+          data: {
+            error: 'The Cross-Origin Storage extension did not respond.',
+            errorName: 'UnknownError',
+          },
+        },
+        event.origin
+      );
+      return;
+    }
+    if (response.error) {
+      window.postMessage(
+        {
+          source: 'cos-polyfill-isolated',
+          id,
+          data: { error: response.error, errorName: response.errorName },
+        },
+        event.origin
+      );
       return;
     }
     await finalizeResponseData(action, response.data);
     window.postMessage(
-      {
-        source: 'cos-polyfill-isolated',
-        id: id,
-        data: response.data,
-      },
+      { source: 'cos-polyfill-isolated', id, data: response.data },
       event.origin,
       collectTransferables(response.data)
     );
+  };
+
+  chrome.runtime.sendMessage({ action, data }, (response) => {
+    if (chrome.runtime.lastError || !response) {
+      // Background service worker was unloaded mid-request; retry once after it
+      // restarts (sending a new message wakes it up automatically).
+      chrome.runtime.sendMessage({ action, data }, (retryResponse) => {
+        reply(chrome.runtime.lastError ? null : retryResponse);
+      });
+      return;
+    }
+    reply(response);
   });
 });
 
