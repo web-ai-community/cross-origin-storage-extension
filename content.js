@@ -54,8 +54,8 @@ function base64ToArrayBuffer(base64) {
 // Pushes dataChunks (real ArrayBuffers, already chunked for the
 // window.postMessage hop from the MAIN world) to background.js in bounded,
 // base64-encoded pieces.
-async function safariStoreFileData({ hash, dataChunks, mimeType }) {
-  const blob = new Blob(dataChunks);
+async function safariStoreFileData({ hash, blob: fileBlob, dataChunks, mimeType }) {
+  const blob = fileBlob ?? new Blob(dataChunks);
   const totalChunks = Math.max(1, Math.ceil(blob.size / SAFARI_CHUNK_SIZE));
   const transferId = crypto.randomUUID();
   let result;
@@ -227,7 +227,40 @@ window.addEventListener('message', async (event) => {
   // assigning content-script objects as properties on page-owned objects.
   const data = event.data.data != null ? { ...event.data.data } : event.data.data;
 
-  if (IS_SAFARI && action === 'storeFileData' && data?.dataChunks) {
+  if (action === 'storeFileData' && data && 'blob' in data) {
+    // main-world.js posts the file as a Blob, which shares its data. Engines
+    // that don't carry a Blob across the MAIN-world boundary intact get a
+    // reply that makes main-world.js fall back to transferred chunks.
+    // Wrapping it in a Blob of our own copies no bytes, and gives later code
+    // an object from this realm (Firefox hands the page's own object over
+    // behind an Xray wrapper).
+    let blob = null;
+    try {
+      if (Object.prototype.toString.call(data.blob) === '[object Blob]') {
+        blob = new Blob([data.blob], { type: data.blob.type });
+      }
+    } catch {
+      blob = null;
+    }
+    if (!blob) {
+      window.postMessage(
+        {
+          source: 'cos-polyfill-isolated',
+          id,
+          data: {
+            error: 'The file did not reach the extension as a Blob.',
+            // Must match BLOB_NOT_RECEIVED in main-world.js.
+            errorName: 'COSBlobNotReceived',
+          },
+        },
+        event.origin
+      );
+      return;
+    }
+    data.blob = blob;
+  }
+
+  if (IS_SAFARI && action === 'storeFileData' && (data?.blob || data?.dataChunks)) {
     // Bypass the generic single-message path entirely: push the file to
     // background.js via storeFileDataChunk instead (see the comment on
     // IS_SAFARI above for why).
@@ -239,12 +272,15 @@ window.addEventListener('message', async (event) => {
     return;
   }
 
-  if (data && data.dataChunks) {
-    // data.dataChunks arrives as an array of transferred ArrayBuffer slices
-    // (zero-copy from the main world, sliced there to keep peak memory
-    // bounded for large files) — reassemble into a Blob.
+  if (data && (data.blob || data.dataChunks)) {
+    // The file arrives as a Blob, or as an array of transferred ArrayBuffer
+    // slices (zero-copy from the main world, sliced there to keep peak memory
+    // bounded for large files) to reassemble into one.
     const mimeType = data.mimeType?.['content-type'] || 'application/octet-stream';
-    const blob = new Blob(data.dataChunks, { type: mimeType });
+    const blob = data.blob
+      ? new Blob([data.blob], { type: mimeType })
+      : new Blob(data.dataChunks, { type: mimeType });
+    delete data.blob;
     delete data.dataChunks;
     if (!chrome.runtime.getURL('').startsWith('chrome-extension://')) {
       // Firefox: blob URLs created in content scripts carry the page's

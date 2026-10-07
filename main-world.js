@@ -90,12 +90,11 @@
 
   // Blob structured-clone across the MAIN-world/isolated-world content
   // script boundary isn't part of the DOM spec (isolated worlds are a
-  // WebExtensions-only construct) and isn't reliably supported by every
-  // engine, so file bytes cross that boundary as transferred ArrayBuffers
-  // instead. Slicing into fixed-size chunks (rather than one arrayBuffer()
-  // call on the whole Blob) keeps peak memory bounded and avoids the
-  // whole-file materialization that can fail for very large (multi-GiB)
-  // files.
+  // WebExtensions-only construct), so file bytes can also cross it as
+  // transferred ArrayBuffers. Slicing into fixed-size chunks (rather than
+  // one arrayBuffer() call on the whole Blob) keeps peak memory bounded and
+  // avoids the whole-file materialization that can fail for very large
+  // (multi-GiB) files.
   const TRANSFER_CHUNK_SIZE = 4 * 1024 * 1024; // 4 MiB
   async function blobToTransferChunks(blob) {
     const chunks = [];
@@ -105,6 +104,34 @@
       );
     }
     return chunks;
+  }
+
+  // The error name content.js answers with when a Blob posted to it didn't
+  // arrive as a Blob. Must match content.js.
+  const BLOB_NOT_RECEIVED = 'COSBlobNotReceived';
+  let blobsCrossToBridge = true;
+
+  // Sends a file to the bridge to store. Posting the Blob itself shares the
+  // file's data with the content script, where reading it into ArrayBuffers
+  // holds a whole extra copy in this page's memory, and a third in the Blob
+  // the content script rebuilds from them. A multi-GiB file then needs a
+  // fraction of the memory and blob storage. If the Blob can't be posted
+  // (DataCloneError) or the content script reports that it didn't arrive as
+  // one, the file goes as transferred chunks, for this store and every
+  // later one.
+  async function storeViaBridge(hash, blob, mimeType) {
+    if (blobsCrossToBridge) {
+      try {
+        return await talkToBridge('storeFileData', { hash, blob, mimeType });
+      } catch (err) {
+        if (err.name !== BLOB_NOT_RECEIVED && err.name !== 'DataCloneError') {
+          throw err;
+        }
+        blobsCrossToBridge = false;
+      }
+    }
+    const dataChunks = await blobToTransferChunks(blob);
+    return talkToBridge('storeFileData', { hash, dataChunks, mimeType }, dataChunks);
   }
 
   // Inline copy of sha256.js — main-world.js is a classic MAIN-world content
@@ -117,9 +144,24 @@
   // loop is a poor fit for at least one JS engine's GC behavior at scale:
   // observed 500 MiB taking over a minute in Safari).
   const NATIVE_DIGEST_MAX_SIZE = 1.5 * 1024 * 1024 * 1024; // 1.5 GiB
+  // Reads a whole Blob into one buffer, 4 MiB at a time. Safari (27.0, in
+  // Technology Preview) fails `blob.arrayBuffer()` with NotReadableError for
+  // a Blob of 128 MiB or more, while reading the same Blob in slices works.
+  async function readBlobInSlices(blob) {
+    const SLICE = 4 * 1024 * 1024;
+    const bytes = new Uint8Array(blob.size);
+    for (let offset = 0; offset < blob.size; offset += SLICE) {
+      bytes.set(
+        new Uint8Array(await blob.slice(offset, offset + SLICE).arrayBuffer()),
+        offset
+      );
+    }
+    return bytes.buffer;
+  }
+
   async function streamingHexDigest(algorithm, blob) {
     if (algorithm !== 'SHA-256' || blob.size <= NATIVE_DIGEST_MAX_SIZE) {
-      const buf = await blob.arrayBuffer();
+      const buf = await readBlobInSlices(blob);
       return Array.from(
         new Uint8Array(await crypto.subtle.digest(algorithm, buf))
       )
@@ -298,16 +340,9 @@
                   'DataError'
                 );
               }
-              const dataChunks = await blobToTransferChunks(blob);
-              await talkToBridge(
-                'storeFileData',
-                {
-                  hash,
-                  dataChunks,
-                  mimeType: { 'content-type': detectedMimeType },
-                },
-                dataChunks
-              );
+              await storeViaBridge(hash, blob, {
+                'content-type': detectedMimeType,
+              });
             },
           });
 
@@ -673,7 +708,20 @@
               chunks.push(chunk);
             },
             async close() {
-              const arrayBuffer = await new Blob(chunks).arrayBuffer();
+              // Read in 4 MiB slices: Safari fails `arrayBuffer()` on a
+              // whole Blob of 128 MiB or more (see readBlobInSlices() in the
+              // page code, which this serialized function can't reach).
+              const whole = new Blob(chunks);
+              const bytes = new Uint8Array(whole.size);
+              for (let offset = 0; offset < whole.size; offset += 4194304) {
+                bytes.set(
+                  new Uint8Array(
+                    await whole.slice(offset, offset + 4194304).arrayBuffer()
+                  ),
+                  offset
+                );
+              }
+              const arrayBuffer = bytes.buffer;
               const hashBuffer = await crypto.subtle.digest(
                 _hash.algorithm,
                 arrayBuffer
@@ -1217,13 +1265,10 @@ ${xhr.responseText}`;
                   return;
                 } else if (action === 'storeFileData') {
                   const { hash } = workerHandles.get(data.handleId);
-                  const dataChunks = await blobToTransferChunks(
-                    new Blob([data.arrayBuffer])
-                  );
-                  await talkToBridge(
-                    'storeFileData',
-                    { hash, dataChunks, mimeType: data.mimeType },
-                    dataChunks
+                  await storeViaBridge(
+                    hash,
+                    new Blob([data.arrayBuffer]),
+                    data.mimeType
                   );
                   result = {};
                 } else if (action === 'resolveDeclarativeResource') {
@@ -1435,13 +1480,10 @@ self.addEventListener('message', function __cosBufferFn(e) {
                     // The worker already verified the hash; forward raw bytes to
                     // the bridge, skipping the redundant check in the handle wrapper.
                     const { hash } = workerHandles.get(data.handleId);
-                    const dataChunks = await blobToTransferChunks(
-                      new Blob([data.arrayBuffer])
-                    );
-                    await talkToBridge(
-                      'storeFileData',
-                      { hash, dataChunks, mimeType: data.mimeType },
-                      dataChunks
+                    await storeViaBridge(
+                      hash,
+                      new Blob([data.arrayBuffer]),
+                      data.mimeType
                     );
                     result = {};
                   } else if (action === 'resolveDeclarativeResource') {
