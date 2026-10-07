@@ -111,7 +111,7 @@ const publicHashList = new PublicHashList();
 // is in COS, so phl-details.html can show where those resources were seen
 // without downloading the list a second time.
 publicHashList.provenanceHashes = async () => {
-  await resourceManager.loadManagerFromStorage();
+  await resourceManager.ready();
   return new Set(resourceManager.getAllHashes());
 };
 
@@ -264,7 +264,7 @@ const offscreenSetupPromise = (async () => {
     await setupOffscreenDocument('offscreen.html');
   }
   // Load the initial state when the extension starts.
-  await resourceManager.loadManagerFromStorage();
+  await resourceManager.ready();
 })();
 
 // Open the cache once when the service worker starts.
@@ -367,6 +367,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
     try {
+      // Every handler below reads or changes the resource records, so none
+      // may run before they're loaded: a change made first would be
+      // overwritten by the load.
+      await resourceManager.ready();
       switch (action) {
         // Internal wire action. The payload carries a 'hashes' array; callers
         // using the singular API pass exactly one element. See WICG/cross-origin-storage#61.
@@ -375,7 +379,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const tabId = sender.tab?.id;
           maybeResetForNewPage(tabId, sender.documentId);
           const success = [];
-          await resourceManager.loadManagerFromStorage();
           for (const hash of hashes) {
             // The original storer always has access to a resource it stored,
             // regardless of PHL or visibility tier.
@@ -618,10 +621,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             deleteSuccess = true;
           }
           if (deleteSuccess) {
-            await resourceManager.loadManagerFromStorage();
             await resourceManager.deleteResourcesByHash(hash.value);
           }
           responseData = { success: deleteSuccess };
+          break;
+        }
+        // Changes from extension pages. The popup keeps its own read-only
+        // copy of the state and sends every change here, so that this
+        // instance stays the only writer (see ResourceManager.ready()).
+        case 'deleteResourceRecords': {
+          await resourceManager.deleteResourcesByHash(data.hashes);
+          responseData = { success: true };
+          break;
+        }
+        case 'resetStats': {
+          await resourceManager.resetStats();
+          responseData = { success: true };
+          break;
+        }
+        case 'recordResourceMetadata': {
+          const { hash, size, mimeType } = data;
+          resourceManager.recordSize(hash, size);
+          resourceManager.recordMimeType(hash, mimeType);
+          responseData = { success: true };
           break;
         }
         case 'getWorkerPatchSetting': {
@@ -695,7 +717,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             break;
           }
           const matches = findCOSMatches(cssText);
-          await resourceManager.loadManagerFromStorage();
           let rewritten = cssText;
           const fonts = [];
           let fontIdx = 0;
@@ -822,7 +843,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const lookup = seedOnly
             ? async () => !!(await cache.match(generateCacheKey(hash)))
             : () => getFileData(hash);
-          await resourceManager.loadManagerFromStorage();
 
           const isStorer = resourceManager.isStoringOrigin(hash.value, origin);
           const phlBlocked =
@@ -904,7 +924,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         case 'getResourceForViewer': {
           const { hash } = data;
-          await resourceManager.loadManagerFromStorage();
           const hashObj = { algorithm: 'SHA-256', value: hash };
           const key = generateCacheKey(hashObj);
           const match = await cache.match(key);

@@ -335,6 +335,18 @@ class ResourceManager {
     }
   }
 
+  /**
+   * Loads the stored state the first time it's called, and resolves once it
+   * is in memory. The background's instance is the only one that writes the
+   * stored state (pages send their changes to it as messages), so from then
+   * on its in-memory state is the source of truth. Reloading it would throw
+   * away changes that concurrent message handlers haven't saved yet.
+   */
+  ready() {
+    this._ready ??= this.loadManagerFromStorage();
+    return this._ready;
+  }
+
   async loadManagerFromStorage() {
     try {
       const data = await chrome.storage.local.get(STORAGE_KEY);

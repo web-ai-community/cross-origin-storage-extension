@@ -413,11 +413,83 @@ async function main() {
   }
   await popupPage.close();
 
+  // ── Concurrent record updates ─────────────────────────────────────────────
+
+  // Many requests at once, the way a page loading many COS resources sends
+  // them, must each leave their mark in the stored records. Handlers used to
+  // reload the records from storage mid-flight, which dropped other
+  // handlers' unsaved changes: hit counts, sizes, and visibility.
+  console.log('\nChecking records under concurrent requests…');
+  const concurrencyResults = [];
+  {
+    const label = '[Records] 20 concurrent stores and 60 concurrent hits are all recorded';
+    const COUNT = 20;
+    const READS = 3;
+    const bodies = Array.from({ length: COUNT }, (_, i) => `concurrent record ${i} ${Date.now()}`);
+    const page = await context.newPage();
+    try {
+      await page.goto(`http://a.test:${PORT}/test-legacy.html`, { waitUntil: 'load' });
+      await page.evaluate(async ({ bodies, reads }) => {
+        const hashOf = async (text) =>
+          [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))]
+            .map((b) => b.toString(16).padStart(2, '0'))
+            .join('');
+        const hashes = await Promise.all(bodies.map(hashOf));
+        await Promise.all(
+          hashes.map(async (value, i) => {
+            const handle = await navigator.crossOriginStorage.getFileHandle(
+              { algorithm: 'SHA-256', value },
+              { create: true, origins: '*' }
+            );
+            const writable = await handle.createWritable();
+            await writable.write(new Blob([bodies[i]]));
+            await writable.close();
+          })
+        );
+        await Promise.all(
+          hashes.flatMap((value) =>
+            Array.from({ length: reads }, () =>
+              navigator.crossOriginStorage.getFileHandle({ algorithm: 'SHA-256', value })
+            )
+          )
+        );
+      }, { bodies, reads: READS });
+      // Saves are asynchronous; give the last one a moment to land.
+      await new Promise((r) => setTimeout(r, 1000));
+      const records = await sw.evaluate(
+        async () => (await chrome.storage.local.get('resourceManagerData')).resourceManagerData
+      );
+      const problems = [];
+      bodies.forEach((body, i) => {
+        const hash = sha256Hex(body);
+        if (records.hashToHitCount?.[hash] !== READS) {
+          problems.push(`#${i}: ${records.hashToHitCount?.[hash] ?? 0} hits`);
+        }
+        if (records.hashToSize?.[hash] !== Buffer.byteLength(body)) {
+          problems.push(`#${i}: size ${records.hashToSize?.[hash]}`);
+        }
+        if (records.hashToVisibility?.[hash] !== '*') {
+          problems.push(`#${i}: visibility ${JSON.stringify(records.hashToVisibility?.[hash])}`);
+        }
+      });
+      concurrencyResults.push({
+        label,
+        status: problems.length ? 'fail' : 'pass',
+        detail: problems.length
+          ? `Lost updates (expected ${READS} hits, the size, and '*' each): ${problems.join(', ')}`
+          : `${COUNT} resources, each with ${READS} hits, its size, and '*' visibility`,
+      });
+    } catch (err) {
+      concurrencyResults.push({ label, status: 'fail', detail: err.message.split('\n')[0] });
+    }
+    await page.close();
+  }
+
   // ── Collect + report all results ──────────────────────────────────────────
 
   console.log('\n── Test Results ──────────────────────────────────────');
   let passed = 0, failed = 0;
-  for (const r of [...results, ...legacyResults, ...popupResults]) {
+  for (const r of [...results, ...legacyResults, ...popupResults, ...concurrencyResults]) {
     if (r.status === 'n/a') continue;
     const icon = r.status === 'pass' ? '✅' : '❌';
     console.log(`${icon} [${r.status}] ${r.label}`);

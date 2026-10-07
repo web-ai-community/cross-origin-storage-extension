@@ -580,25 +580,44 @@ async function initializePopup() {
 
   async function getResourcesWithMetadata(hashes) {
     return Promise.all(
-      hashes.map(async (hash) => {
-        let size = resourceManager.getSizeByHash(hash);
-        let mimeType = resourceManager.getMimeTypeByHash(hash);
-        if (size === undefined || mimeType === undefined) {
-          const response = await chrome.runtime.sendMessage({
-            action: 'getResourceMetadata',
-            target: 'offscreen-doc',
-            data: { hash },
-          });
-          size = response.data.size ?? size;
-          mimeType = response.data.mimeType ?? mimeType;
-          if (response.data.size !== undefined)
-            resourceManager.recordSize(hash, size);
-          if (response.data.mimeType !== undefined)
-            resourceManager.recordMimeType(hash, mimeType);
-        }
-        return { hash, size, mimeType };
-      })
+      hashes.map(async (hash) => ({ hash, ...(await metadataFor(hash)) }))
     );
+  }
+
+  // A resource's size and MIME type, read from Cache Storage when the records
+  // lack them. Only the background writes the stored records (see
+  // ResourceManager.ready()), so it records what was found, and the popup
+  // keeps a copy in memory without saving it.
+  async function metadataFor(hash) {
+    let size = resourceManager.getSizeByHash(hash);
+    let mimeType = resourceManager.getMimeTypeByHash(hash);
+    if (size === undefined || mimeType === undefined) {
+      const response = await chrome.runtime.sendMessage({
+        action: 'getResourceMetadata',
+        target: 'offscreen-doc',
+        data: { hash },
+      });
+      size = response.data.size ?? size;
+      mimeType = response.data.mimeType ?? mimeType;
+      if (typeof size === 'number') resourceManager.hashToSize[hash] = size;
+      if (typeof mimeType === 'string') {
+        resourceManager.hashToMimeType[hash] = mimeType;
+      }
+      chrome.runtime.sendMessage({
+        action: 'recordResourceMetadata',
+        data: { hash, size, mimeType },
+      });
+    }
+    return { size, mimeType };
+  }
+
+  // Only the background writes the stored records (see
+  // ResourceManager.ready()); the popup's copy is reloaded afterward.
+  function deleteResourceRecords(hashes) {
+    return chrome.runtime.sendMessage({
+      action: 'deleteResourceRecords',
+      data: { hashes },
+    });
   }
 
   async function deleteHashesFromStorage(hashes) {
@@ -614,7 +633,7 @@ async function initializePopup() {
         );
       });
     }
-    await resourceManager.deleteResourcesByHash(hashes);
+    await deleteResourceRecords(hashes);
     await refreshUI();
   }
 
@@ -805,7 +824,7 @@ async function initializePopup() {
               console.error(`Deleting resource with hash ${hash} failed.`);
               return;
             }
-            await resourceManager.deleteResourcesByHash(hash);
+            await deleteResourceRecords([hash]);
             await refreshUI();
           }
         );
@@ -884,26 +903,7 @@ async function initializePopup() {
 
     // Create an array of objects with hash and size to facilitate sorting.
     const resourcesWithSize = await Promise.all(
-      hashes.map(async (hash) => {
-        let size = resourceManager.getSizeByHash(hash);
-        let mimeType = resourceManager.getMimeTypeByHash(hash);
-        // If metadata is not in the manager, query it from the offscreen document.
-        if (size === undefined || mimeType === undefined) {
-          const response = await chrome.runtime.sendMessage({
-            action: 'getResourceMetadata',
-            target: 'offscreen-doc',
-            data: { hash },
-          });
-          size = response.data.size ?? size;
-          mimeType = response.data.mimeType ?? mimeType;
-          // Record the metadata in the manager for future use.
-          if (response.data.size !== undefined)
-            resourceManager.recordSize(hash, size);
-          if (response.data.mimeType !== undefined)
-            resourceManager.recordMimeType(hash, mimeType);
-        }
-        return { hash, size, mimeType };
-      })
+      hashes.map(async (hash) => ({ hash, ...(await metadataFor(hash)) }))
     );
 
     // Build and render MIME filter chips from the discovered types.
@@ -1191,21 +1191,7 @@ async function initializePopup() {
     originsList.innerHTML = '';
     if (!selectedHash) return;
 
-    let size = resourceManager.getSizeByHash(selectedHash);
-    let mimeType = resourceManager.getMimeTypeByHash(selectedHash);
-    if (size === undefined || mimeType === undefined) {
-      const response = await chrome.runtime.sendMessage({
-        action: 'getResourceMetadata',
-        target: 'offscreen-doc',
-        data: { hash: selectedHash },
-      });
-      size = response.data.size ?? size;
-      mimeType = response.data.mimeType ?? mimeType;
-      if (response.data.size !== undefined)
-        resourceManager.recordSize(selectedHash, size);
-      if (response.data.mimeType !== undefined)
-        resourceManager.recordMimeType(selectedHash, mimeType);
-    }
+    const { size, mimeType } = await metadataFor(selectedHash);
 
     originsList.append(
       buildResourceItem(selectedHash, size, mimeType, null, null)
@@ -1408,24 +1394,7 @@ async function initializePopup() {
       let hashSelected = false;
 
       const resourcesWithSize = await Promise.all(
-        allHashes.map(async (hash) => {
-          let size = resourceManager.getSizeByHash(hash);
-          let mimeType = resourceManager.getMimeTypeByHash(hash);
-          if (size === undefined || mimeType === undefined) {
-            const response = await chrome.runtime.sendMessage({
-              action: 'getResourceMetadata',
-              target: 'offscreen-doc',
-              data: { hash },
-            });
-            size = response.data.size ?? size;
-            mimeType = response.data.mimeType ?? mimeType;
-            if (response.data.size !== undefined)
-              resourceManager.recordSize(hash, size);
-            if (response.data.mimeType !== undefined)
-              resourceManager.recordMimeType(hash, mimeType);
-          }
-          return { hash, size, mimeType };
-        })
+        allHashes.map(async (hash) => ({ hash, ...(await metadataFor(hash)) }))
       );
 
       // Sort resources by size in descending order.
@@ -1795,7 +1764,8 @@ async function initializePopup() {
   pickFileBtn.addEventListener('click', addResourcesFromFiles);
 
   resetStatsBtn.addEventListener('click', async () => {
-    await resourceManager.resetStats();
+    await chrome.runtime.sendMessage({ action: 'resetStats' });
+    await resourceManager.loadManagerFromStorage();
     renderStats();
     showToast('Statistics reset.');
   });
@@ -1837,7 +1807,7 @@ async function initializePopup() {
             console.error('Deleting all resources failed.');
             return;
           }
-          await resourceManager.deleteResourcesByHash(allHashes);
+          await deleteResourceRecords(allHashes);
           await refreshUI();
         }
       );

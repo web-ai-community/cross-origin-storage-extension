@@ -411,7 +411,7 @@ async function flushTelemetry({ publicHashList, resourceManager, getSite }) {
 
   const queue = await takeQueue();
   try {
-    await resourceManager.loadManagerFromStorage();
+    await resourceManager.ready();
     const snapshotHashes = snapshotDue ? resourceManager.getAllHashes() : null;
     if (!snapshotHashes && !Object.keys(queue).length) return;
 
