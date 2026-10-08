@@ -6,6 +6,7 @@ import { PublicHashList } from './public-hash-list.js';
 import { getSite, isSameSite } from './same-site.js';
 import { initTelemetry, recordTelemetryEvent } from './telemetry.js';
 import { initNativeMigration, handleMigrationMessage } from './native-migration.js';
+import { createSha256, incrementalHexDigest, streamingHexDigest } from './sha256.js';
 
 let creating; // A global promise to avoid concurrency issues
 
@@ -249,6 +250,77 @@ function countForTelemetry(event, hashValue, origin, api) {
   });
 }
 
+// Whether a message comes from one of the extension's own pages (popup,
+// options, viewer, ...). Content scripts send with the URL of the page they
+// run in.
+function fromExtensionPage(sender) {
+  return !!sender.url?.startsWith(chrome.runtime.getURL(''));
+}
+
+function cosError(name, message) {
+  const err = new Error(message);
+  err.cosErrorName = name;
+  return err;
+}
+
+// Messages reach this background from any web page, through content.js's
+// relay, so nothing a message says about who sent it can be trusted: the
+// requesting origin is always the origin of the frame the content script
+// runs in (`senderOrigin()`), never the message's own `origin` field.
+
+// The actions only the extension's own pages may use. They expose or change
+// what every site stored, or what other tabs did.
+const EXTENSION_PAGE_ACTIONS = new Set([
+  'getResourceForViewer',
+  'getTabStats',
+  'deleteResourceRecords',
+  'resetStats',
+  'recordResourceMetadata',
+  'getPublicHashListStatus',
+  'getPublicHashListProgress',
+]);
+
+const HASH_ALGORITHMS = new Set(['SHA-256', 'SHA-384', 'SHA-512']);
+const HEX_LENGTHS = { 'SHA-256': 64, 'SHA-384': 96, 'SHA-512': 128 };
+
+// Hash values end up in Cache Storage keys, so only well-formed ones pass.
+function assertValidHash(hash) {
+  if (
+    !HASH_ALGORITHMS.has(hash?.algorithm) ||
+    typeof hash.value !== 'string' ||
+    !new RegExp(`^[0-9a-f]{${HEX_LENGTHS[hash.algorithm]}}$`).test(hash.value)
+  ) {
+    throw new TypeError('Invalid hash.');
+  }
+}
+
+// Whether `origin` may read a stored file: the checks requestFileHandle makes
+// before revealing that a file is there.
+async function mayRead(hashValue, origin) {
+  if (resourceManager.isStoringOrigin(hashValue, origin)) return true;
+  if (await isBlockedByPublicHashList(hashValue, origin)) return false;
+  return (await resolveVisibility(hashValue, origin)).reachable;
+}
+
+// Above this size, stored files are hashed 4 MiB at a time, so a multi-GiB
+// file never sits in this worker's memory whole. Below it, the native digest
+// on one buffer is used: the hand-rolled one runs at about 270 MiB/s in V8,
+// but only about 33 MiB/s in Firefox.
+const NATIVE_VERIFY_MAX_SIZE = 1024 * 1024 * 1024; // 1 GiB
+
+// Stored bytes must match the hash they're stored under. A page can post a
+// store to the relay directly, past main-world.js's own check, and a wrong
+// file under a widely used hash would reach every site that reads it.
+async function assertMatchesHash(hash, blob) {
+  const actual =
+    hash.algorithm === 'SHA-256' && blob.size > NATIVE_VERIFY_MAX_SIZE
+      ? await incrementalHexDigest(blob)
+      : await streamingHexDigest(hash.algorithm, blob);
+  if (actual !== hash.value) {
+    throw cosError('DataError', 'The data does not match the declared hash.');
+  }
+}
+
 function senderOrigin(sender) {
   try {
     return sender.origin ?? new URL(sender.url).origin;
@@ -374,11 +446,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // may run before they're loaded: a change made first would be
       // overwritten by the load.
       await resourceManager.ready();
+      if (EXTENSION_PAGE_ACTIONS.has(action) && !fromExtensionPage(sender)) {
+        throw cosError('NotAllowedError', `${action} is only available to the extension.`);
+      }
       switch (action) {
         // Internal wire action. The payload carries a 'hashes' array; callers
         // using the singular API pass exactly one element. See WICG/cross-origin-storage#61.
         case 'requestFileHandle': {
-          const { origin, hashes, create, origins: requestedOrigins } = data;
+          const { hashes, create, origins: requestedOrigins } = data;
+          const origin = senderOrigin(sender);
+          hashes.forEach(assertValidHash);
           const tabId = sender.tab?.id;
           maybeResetForNewPage(tabId, sender.documentId);
           const success = [];
@@ -486,6 +563,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         case 'getFileData': {
           const { hash } = data;
+          assertValidHash(hash);
+          // A file the requesting origin may not read is reported as absent,
+          // like a miss, so the answer reveals nothing about it.
+          if (
+            !fromExtensionPage(sender) &&
+            !(await mayRead(hash.value, senderOrigin(sender)))
+          ) {
+            throw cosError('NotFoundError', 'File not found in cross-origin storage.');
+          }
           const fileResult = await getFileData(hash);
           const size = resourceManager.getSizeByHash(hash.value);
           const mimeType = resourceManager.getMimeTypeByHash(hash.value);
@@ -499,6 +585,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         case 'getFileDataMeta': {
           const { hash } = data;
+          assertValidHash(hash);
+          if (
+            !fromExtensionPage(sender) &&
+            !(await mayRead(hash.value, senderOrigin(sender)))
+          ) {
+            responseData = { found: false };
+            break;
+          }
           const match = await cache.match(generateCacheKey(hash));
           if (!match) {
             responseData = { found: false };
@@ -531,6 +625,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         case 'storeFileData': {
           let { hash, blobURL, mimeType } = data;
+          assertValidHash(hash);
+          // Only the blob: URL content.js or an extension page made for the
+          // file, never an arbitrary URL for this worker to fetch.
+          if (blobURL && !String(blobURL).startsWith('blob:')) {
+            throw cosError('NotAllowedError', 'Invalid file URL.');
+          }
           const blob = blobURL
             ? await fetch(blobURL).then((response) => response.blob())
             : data.data instanceof Blob
@@ -538,6 +638,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               : new Blob([data.data], {
                   type: mimeType?.['content-type'] || 'application/octet-stream',
                 });
+          await assertMatchesHash(hash, blob);
           await storeFileData(hash, blob, mimeType);
           countForTelemetry('store', hash.value, senderOrigin(sender), 'getFileHandle');
           resourceManager.recordSize(hash.value, blob.size);
@@ -557,6 +658,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const { transferId, hash, mimeType, chunkIndex, totalChunks, base64, totalSize } = data;
           let entry = pendingSafariWrites.get(transferId);
           if (!entry) {
+            assertValidHash(hash);
             await checkStorageQuota(totalSize);
             const { readable, writable } = new TransformStream();
             const putPromise = cache
@@ -577,16 +679,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               mimeType,
               putPromise,
               bytesWritten: 0,
+              // Verified as the chunks arrive (see assertMatchesHash()).
+              sha: hash.algorithm === 'SHA-256' ? createSha256() : null,
             };
             pendingSafariWrites.set(transferId, entry);
           }
           const bytes = base64ToUint8Array(base64);
+          entry.sha?.update(bytes);
           await entry.writer.write(bytes); // awaits cache-storage backpressure
           entry.bytesWritten += bytes.length;
           if (chunkIndex === totalChunks - 1) {
             pendingSafariWrites.delete(transferId);
+            if (entry.sha && entry.sha.hexDigest() !== entry.hash.value) {
+              // Aborting the stream makes the put fail, so nothing is stored.
+              const err = cosError('DataError', 'The data does not match the declared hash.');
+              await entry.writer.abort(err).catch(() => {});
+              await entry.putPromise.catch(() => {});
+              throw err;
+            }
             await entry.writer.close();
             await entry.putPromise;
+            if (!entry.sha) {
+              // SHA-384 and SHA-512 can only be checked once stored.
+              const stored = await cache.match(generateCacheKey(entry.hash));
+              try {
+                await assertMatchesHash(entry.hash, await stored.blob());
+              } catch (err) {
+                await cache.delete(generateCacheKey(entry.hash));
+                throw err;
+              }
+            }
             countForTelemetry(
               'store',
               entry.hash.value,
@@ -606,6 +728,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         case 'deleteResource': {
           const { hash } = data;
+          assertValidHash(hash);
+          // A site may only delete what it stored; the extension's pages may
+          // delete anything.
+          if (
+            !fromExtensionPage(sender) &&
+            !resourceManager.isStoringOrigin(hash.value, senderOrigin(sender))
+          ) {
+            throw cosError('NotAllowedError', 'Only an origin that stored this file may delete it.');
+          }
           let deleteSuccess;
           if (chrome.offscreen) {
             const offscreenResp = await new Promise((resolve) => {
@@ -704,7 +835,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'rewriteStylesheet': {
           const tabId = sender.tab?.id;
           maybeResetForNewPage(tabId, sender.documentId);
-          let { cssText, url, origin } = data;
+          let { cssText, url } = data;
+          const origin = senderOrigin(sender);
           if (!cssText && url) {
             try {
               const resp = await fetch(url, { cache: 'no-cache' });
@@ -762,6 +894,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 const fontResp = await fetch(fm.fontUrl);
                 if (!fontResp.ok) throw new Error(`HTTP ${fontResp.status}`);
                 const fontBlob = await fontResp.blob();
+                // The stylesheet came from the page, so its integrity() hash
+                // is only a claim until the bytes are checked against it. A
+                // mismatch falls back to the font's own URL, below.
+                await assertMatchesHash(hash, fontBlob);
                 const mimeType =
                   fontResp.headers.get('content-type') || 'font/woff2';
                 await storeFileData(hash, fontBlob, {
@@ -836,7 +972,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'resolveDeclarativeResource': {
           const tabId = sender.tab?.id;
           maybeResetForNewPage(tabId, sender.documentId);
-          const { url, integrity, origins, origin, via, seedOnly } = data;
+          const { url, integrity, origins, via, seedOnly } = data;
+          const origin = senderOrigin(sender);
           const hash = sriToHashObj(integrity);
           // The fetch() integration shares this action, and says so.
           const api = via === 'fetch' ? 'fetch' : 'declarative';

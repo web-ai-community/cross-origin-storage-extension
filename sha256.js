@@ -15,16 +15,14 @@
 // It contains an inline copy of this function.  All other consumers (popup.js,
 // docs/test.html) import from this file.
 const NATIVE_DIGEST_MAX_SIZE = 1.5 * 1024 * 1024 * 1024; // 1.5 GiB
-export async function streamingHexDigest(algorithm, blob) {
-  if (algorithm !== 'SHA-256' || blob.size <= NATIVE_DIGEST_MAX_SIZE) {
-    const buf = await blob.arrayBuffer();
-    return Array.from(
-      new Uint8Array(await crypto.subtle.digest(algorithm, buf))
-    )
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
-  }
-  const CHUNK = 4 * 1024 * 1024; // 4 MiB
+const CHUNK = 4 * 1024 * 1024; // 4 MiB
+
+/**
+ * An incremental SHA-256: `update()` with consecutive chunks of bytes, then
+ * `hexDigest()` once. Memory stays O(chunk), so the background can verify a
+ * multi-GiB file as it streams through (about 270 MiB/s in V8).
+ */
+export function createSha256() {
   const K = new Int32Array([
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
     0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
@@ -38,7 +36,7 @@ export async function streamingHexDigest(algorithm, blob) {
     0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
     0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
   ]);
-  let H = new Int32Array([
+  const H = new Int32Array([
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c,
     0x1f83d9ab, 0x5be0cd19,
   ]);
@@ -97,38 +95,72 @@ export async function streamingHexDigest(algorithm, blob) {
     H[6] = (H[6] + g) | 0;
     H[7] = (H[7] + h) | 0;
   }
+  return {
+    update(chunk) {
+      byteCount += chunk.length;
+      // Whole 64-byte blocks are processed straight from `chunk`; only a
+      // trailing partial block is carried over to the next call.
+      let buf = chunk;
+      if (pending.length) {
+        buf = new Uint8Array(pending.length + chunk.length);
+        buf.set(pending);
+        buf.set(chunk, pending.length);
+      }
+      let i = 0;
+      for (; i + 64 <= buf.length; i += 64) processBlock(buf.subarray(i, i + 64));
+      pending = buf.slice(i);
+    },
+    hexDigest() {
+      const k = Math.ceil((pending.length + 9) / 64);
+      const pad = new Uint8Array(k * 64);
+      pad.set(pending);
+      pad[pending.length] = 0x80;
+      const dv = new DataView(pad.buffer);
+      dv.setUint32(k * 64 - 8, Math.floor(byteCount / 0x20000000), false);
+      dv.setUint32(k * 64 - 4, (byteCount % 0x20000000) * 8, false);
+      for (let i = 0; i < pad.length; i += 64) processBlock(pad.subarray(i, i + 64));
+      return Array.from(H)
+        .map((w) => (w >>> 0).toString(16).padStart(8, '0'))
+        .join('');
+    },
+  };
+}
+
+// Reads a whole Blob into one buffer, 4 MiB at a time. Safari (27.0, in
+// Technology Preview) fails `blob.arrayBuffer()` with NotReadableError for a
+// Blob of 128 MiB or more, while reading the same Blob in slices works.
+async function readBlobInSlices(blob) {
+  const bytes = new Uint8Array(blob.size);
   for (let offset = 0; offset < blob.size; offset += CHUNK) {
-    const chunk = new Uint8Array(
-      await blob.slice(offset, offset + CHUNK).arrayBuffer()
+    bytes.set(
+      new Uint8Array(await blob.slice(offset, offset + CHUNK).arrayBuffer()),
+      offset
     );
-    byteCount += chunk.length;
-    // pending is empty whenever CHUNK is a multiple of 64 (always true here)
-    // and every prior chunk was full-sized (true for all but the last) --
-    // i.e. in practice on every iteration except possibly the final one.
-    // Concatenating into a fresh buffer in that (common) case was a wholly
-    // unnecessary multi-MiB allocation + copy on every single chunk.
-    let buf;
-    if (pending.length === 0) {
-      buf = chunk;
-    } else {
-      buf = new Uint8Array(pending.length + chunk.length);
-      buf.set(pending);
-      buf.set(chunk, pending.length);
-    }
-    let i = 0;
-    for (; i + 64 <= buf.length; i += 64) processBlock(buf.subarray(i, i + 64));
-    pending = buf.subarray(i);
   }
-  const k = Math.ceil((pending.length + 9) / 64);
-  const pad = new Uint8Array(k * 64);
-  pad.set(pending);
-  pad[pending.length] = 0x80;
-  const dv = new DataView(pad.buffer);
-  dv.setUint32(k * 64 - 8, Math.floor(byteCount / 0x20000000), false);
-  dv.setUint32(k * 64 - 4, (byteCount % 0x20000000) * 8, false);
-  for (let i = 0; i < pad.length; i += 64)
-    processBlock(pad.subarray(i, i + 64));
-  return Array.from(H)
-    .map((w) => (w >>> 0).toString(16).padStart(8, '0'))
-    .join('');
+  return bytes.buffer;
+}
+
+export async function streamingHexDigest(algorithm, blob) {
+  if (algorithm !== 'SHA-256' || blob.size <= NATIVE_DIGEST_MAX_SIZE) {
+    const buf = await readBlobInSlices(blob);
+    return Array.from(
+      new Uint8Array(await crypto.subtle.digest(algorithm, buf))
+    )
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  }
+  return incrementalHexDigest(blob);
+}
+
+/**
+ * Hashes a Blob with SHA-256 4 MiB at a time, with O(chunk) memory however
+ * large the Blob is. Slower than the native digest, which needs the whole
+ * file in one buffer.
+ */
+export async function incrementalHexDigest(blob) {
+  const sha = createSha256();
+  for (let offset = 0; offset < blob.size; offset += CHUNK) {
+    sha.update(new Uint8Array(await blob.slice(offset, offset + CHUNK).arrayBuffer()));
+  }
+  return sha.hexDigest();
 }

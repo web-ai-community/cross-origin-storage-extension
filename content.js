@@ -209,6 +209,28 @@ async function finalizeResponseData(action, payload, asChunks) {
   }
 }
 
+// The actions a page may send the background through the relays below: the
+// ones main-world.js uses. Anything else the background handles is for the
+// extension's own pages, or for this script (the Safari chunk transfers and
+// the move to native storage), and the background trusts those callers, so
+// no page may reach them.
+const PAGE_ACTIONS = new Set([
+  'requestFileHandle',
+  'getFileData',
+  'storeFileData',
+  'deleteResource',
+  'resolveDeclarativeResource',
+  'rewriteStylesheet',
+  'getWorkerPatchSetting',
+  'getFetchPatchSetting',
+  'getPublicHashListSetting',
+]);
+const SETTINGS_ACTIONS = new Set([
+  'getWorkerPatchSetting',
+  'getFetchPatchSetting',
+  'getPublicHashListSetting',
+]);
+
 // Expose the extension relay URL so test.html can use an always-cross-origin iframe.
 document.documentElement.dataset.cosRelayUrl = chrome.runtime.getURL('relay-extension.html');
 
@@ -223,6 +245,7 @@ window.addEventListener('message', (event) => {
     !event.data?.id
   ) return;
   const { id, action } = event.data;
+  if (!SETTINGS_ACTIONS.has(action)) return;
   chrome.runtime.sendMessage({ action }, (response) => {
     if (chrome.runtime.lastError) return;
     window.postMessage({ source: 'cos-settings-reply', id, ...response.data }, '*');
@@ -242,6 +265,24 @@ window.addEventListener('message', async (event) => {
   // postMessage data from the main world in Xray Vision, which disallows
   // assigning content-script objects as properties on page-owned objects.
   const data = event.data.data != null ? { ...event.data.data } : event.data.data;
+
+  if (!PAGE_ACTIONS.has(action)) {
+    window.postMessage(
+      {
+        source: 'cos-polyfill-isolated',
+        id,
+        data: { error: `Unknown action: ${action}`, errorName: 'NotAllowedError' },
+      },
+      event.origin
+    );
+    return;
+  }
+  // The file of a store reaches the background only as this script builds it
+  // below. A page could otherwise name any URL for the background to fetch.
+  if (action === 'storeFileData' && data) {
+    delete data.blobURL;
+    delete data.data;
+  }
 
   if (action === 'storeFileData' && data && 'blob' in data) {
     // main-world.js posts the file as a Blob, which shares its data. Engines
