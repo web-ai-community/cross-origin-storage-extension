@@ -286,6 +286,12 @@ class PublicHashList {
         `HTTP ${sha256Response.status} fetching Public Hash List checksum`
       );
     }
+    // Guard against a MITM-triggered redirect downgrading either request
+    // to plain HTTP, which would skip TLS certificate validation entirely
+    // rather than merely weaken it.
+    if (!datResponse.url.startsWith('https://') || !sha256Response.url.startsWith('https://')) {
+      throw new Error('Public Hash List fetch was redirected away from HTTPS');
+    }
 
     // Read the body in chunks rather than with arrayBuffer(), so the popup
     // can show how much of the list has arrived. Content-Length is absent on
