@@ -654,6 +654,33 @@ them to a Google Sheet; [`telemetry-backend/`](telemetry-backend/) has the
 script, setup instructions, and the report format. See
 [PRIVACY.md](PRIVACY.md) for the user-facing description.
 
+## Moving to native Cross-Origin Storage
+
+Once the browser supports Cross-Origin Storage itself, the polyfill steps
+aside, and the files in the extension's cache can move into the browser's own
+storage (`native-migration.js`). The first time the extension finds the native
+API while its cache holds files (on install, on update, or at browser startup),
+it opens `migration.html`, which offers to move them; `options.html` opens the
+same page on request. Moving is opt-in.
+
+Who writes a file into native storage decides who may read it there, so files
+move in two steps:
+
+- Files stored with `origins: '*'` that are on the Public Hash List are copied
+  right away, from `migration.html`, so every site can use them at once.
+- Every file moves fully the next time the user visits a site that stored it:
+  the content script writes it into native storage from that site's page, with
+  the file's recorded `origins`, so the same sites keep access to it. Only then
+  does the extension delete its copy. This includes the files copied right
+  away: a browser's own copy of the Public Hash List can be older than the
+  extension's, and a file it doesn't share would otherwise be readable by no
+  site.
+
+Each file is read back from native storage before the extension deletes its
+copy. The extension supports both `getFileHandle()` and the earlier
+`requestFileHandle()`, which implementations built before the rename still
+have.
+
 ## Publishing
 
 `publish-extension.mjs` builds the archive with `zip-extension.sh` and submits

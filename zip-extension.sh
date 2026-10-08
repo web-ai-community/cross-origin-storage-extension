@@ -49,6 +49,9 @@ COMMON_FILES=(
   "telemetry-switch.js"
   "telemetry-notice.html"
   "telemetry-notice.js"
+  "native-migration.js"
+  "migration.html"
+  "migration.js"
 )
 
 if [ "$BROWSER" = "chrome" ]; then

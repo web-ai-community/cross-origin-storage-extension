@@ -55,3 +55,17 @@ publicHashListCheckbox.addEventListener('change', () => {
 });
 
 bindTelemetrySwitch(document.getElementById('telemetry'), showToast);
+
+// Moving files into the browser's own Cross-Origin Storage (see
+// native-migration.js). In an extension page, `navigator.crossOriginStorage`
+// can only be the browser's own.
+const openMigration = document.getElementById('open-migration');
+if ('crossOriginStorage' in navigator) {
+  document.getElementById('native-status').textContent =
+    'Your browser supports Cross-Origin Storage itself. Files this extension stored can move into the browser\'s own storage.';
+} else {
+  openMigration.disabled = true;
+}
+openMigration.addEventListener('click', () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL('migration.html') });
+});

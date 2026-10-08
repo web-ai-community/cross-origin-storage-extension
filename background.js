@@ -5,6 +5,7 @@ import ResourceManager from './resource-manager.js';
 import { PublicHashList } from './public-hash-list.js';
 import { getSite, isSameSite } from './same-site.js';
 import { initTelemetry, recordTelemetryEvent } from './telemetry.js';
+import { initNativeMigration, handleMigrationMessage } from './native-migration.js';
 
 let creating; // A global promise to avoid concurrency issues
 
@@ -269,6 +270,8 @@ const offscreenSetupPromise = (async () => {
 
 // Open the cache once when the service worker starts.
 const cachePromise = caches.open('cos-storage');
+
+initNativeMigration({ cachePromise });
 let cache;
 
 // Per-tab COS hit/miss tracking for the extension badge and popup annotations.
@@ -991,10 +994,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           };
           break;
         }
-        default:
+        default: {
+          const migrationResponse = await handleMigrationMessage(
+            action,
+            data,
+            sender,
+            { resourceManager, publicHashList, cache, senderOrigin }
+          );
+          if (migrationResponse) {
+            responseData = migrationResponse;
+            break;
+          }
           console.warn('Unknown action:', action);
           responseData = { error: `Unknown action: ${action}` };
           break;
+        }
       }
 
       if (responseData) {

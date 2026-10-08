@@ -1,0 +1,76 @@
+<!--
+  Copyright 2026 Google LLC.
+  SPDX-License-Identifier: Apache-2.0
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Move to Browser Storage</title>
+    <link rel="stylesheet" href="styles.css" />
+    <style>
+      body {
+        max-width: 640px;
+        margin: 2rem auto;
+      }
+
+      .panel {
+        min-width: 0;
+        margin-block-end: 1.5rem;
+      }
+
+      li {
+        color: light-dark(#666, #bbb);
+        margin-block-end: 0.4em;
+      }
+
+      .actions {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+      }
+
+      progress {
+        width: 100%;
+      }
+    </style>
+  </head>
+
+  <body>
+    <img class="logo" src="logo-cos.svg" alt="" width="512" height="512" />
+    <h1>Cross-Origin Storage</h1>
+    <div class="panel">
+      <h2>Move files to your browser's storage</h2>
+      <p id="status">Checking what there is to move…</p>
+      <div id="plan" hidden>
+        <p>
+          Your browser now supports Cross-Origin Storage itself, so sites no
+          longer need this extension to share files. The extension stored
+          <span id="total-count"></span> for you (<span id="total-size"></span
+          >), which can move into the browser's own storage, so sites can keep
+          using them without downloading them again.
+        </p>
+        <ul>
+          <li id="now-item"></li>
+          <li>
+            Each file moves fully the next time you visit a site that stored it:
+            the extension copies it into the browser's storage from that site,
+            so the same sites keep access to it, and then deletes its own copy.
+          </li>
+        </ul>
+        <div class="actions" id="actions">
+          <button type="button" id="move">Move files</button>
+          <button type="button" id="not-now">Not now</button>
+        </div>
+        <p id="progress-text" hidden></p>
+        <progress id="progress" hidden></progress>
+        <p>
+          You can come back to this page any time from the extension's options.
+        </p>
+      </div>
+    </div>
+    <script type="module" src="migration.js"></script>
+  </body>
+</html>

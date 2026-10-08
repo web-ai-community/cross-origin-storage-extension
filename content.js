@@ -363,4 +363,70 @@ window.addEventListener('message', async (event) => {
   });
 });
 
+// Moving files into the browser's own Cross-Origin Storage, for a browser
+// that has it (see native-migration.js). In this isolated world,
+// `navigator.crossOriginStorage` can only be the browser's own, since the
+// polyfill lives in the MAIN world, and a file written from here is stored
+// under this page's origin, which is what keeps its readers the same. Page
+// scripts can't see or affect any of it.
+
+// The explainer renamed `requestFileHandle()` to `getFileHandle()`;
+// implementations built before that still have the old name.
+function nativeFileHandle(hash, options) {
+  const cos = navigator.crossOriginStorage;
+  const get = cos.getFileHandle ?? cos.requestFileHandle;
+  return get.call(cos, hash, options);
+}
+
+// Writes a file into native COS and reads it back, so the extension's copy is
+// only deleted once the browser verifiably has it. Must match
+// copyIntoNativeCOS() in migration.js.
+async function copyIntoNativeCOS(hash, blob, origins) {
+  const options = { create: true };
+  if (origins !== undefined) options.origins = origins;
+  const writable = await (await nativeFileHandle(hash, options)).createWritable();
+  await writable.write(blob);
+  await writable.close();
+  const stored = await (await nativeFileHandle(hash)).getFile();
+  if (stored.size !== blob.size) {
+    throw new Error(`Stored ${stored.size} of ${blob.size} bytes`);
+  }
+}
+
+async function moveFilesIntoNativeCOS() {
+  const work = await sendRuntimeMessage({ action: 'getMigrationWork' });
+  // One at a time: files can be gigabytes, and this runs behind the page.
+  // Every file is written from this page even if the page can already read
+  // it (say, one migration.html copied right away): only a write records
+  // this origin as a storer, and a successful read proves nothing, since the
+  // browser may disclose a file it doesn't share to a random few reads
+  // (GREASE'ing) to keep probing unreliable.
+  for (const { hash, origins } of work?.data?.files || []) {
+    try {
+      const response = await sendRuntimeMessage({
+        action: 'getFileData',
+        data: { hash },
+      });
+      if (!response?.data) throw new Error(response?.error || 'No response');
+      const payload = response.data;
+      await finalizeResponseData('getFileData', payload, false);
+      if (!payload.dataChunks) throw new Error('Not in the extension cache');
+      const blob = new Blob(payload.dataChunks, { type: payload.mimeType || '' });
+      await copyIntoNativeCOS(hash, blob, origins);
+      await sendRuntimeMessage({ action: 'migrationDone', data: { hash: hash.value } });
+    } catch (err) {
+      // The file stays in the extension's cache and is tried again on a later
+      // visit.
+      console.warn(`[COS] Could not move ${hash.value} into the browser's storage:`, err);
+    }
+  }
+}
+
+if ('crossOriginStorage' in navigator) {
+  // Behind the page's own loading, so it never competes with it.
+  const start = () => setTimeout(() => moveFilesIntoNativeCOS().catch(() => {}), 3000);
+  if (document.readyState === 'complete') start();
+  else window.addEventListener('load', start, { once: true });
+}
+
 })();
