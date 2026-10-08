@@ -37,7 +37,7 @@ opened.
 
 A report contains:
 
-- **Once a month, per file on the Public Hash List:** for each file in your
+- **Once a week, per file on the Public Hash List:** for each file in your
   Cross-Origin Storage cache that is on the
   [Public Hash List](https://github.com/WICG/cross-origin-storage/tree/main/public-hash-list/implementation),
   a public list of widely deployed files: its SHA-256 hash, size, MIME type,
@@ -45,7 +45,7 @@ A report contains:
   origins and sites that have used it. Other files are only counted, grouped by
   their top-level MIME type (such as `font/*`), with their total size rounded to
   two significant digits.
-- **Once a month, cache totals:** the number of files, their total size, the
+- **Once a week, cache totals:** the number of files, their total size, the
   number of origins and sites that have used the cache, and the storage saved by
   sharing, with sizes rounded to two significant digits.
 - **Once a day:** for files on the Public Hash List, how often each was found,
@@ -53,7 +53,7 @@ A report contains:
   for files found, whether the requesting site is the one that stored the file.
   Other files are again only counted.
 - The Extension version, the browser (Chrome, Firefox, or Safari), and a random
-  identifier that is replaced every calendar month.
+  identifier that is replaced every week.
 
 Reports never contain URLs, origins, site names, or the hash of any file outside
 the Public Hash List. Origins and sites are only counted. Activity on

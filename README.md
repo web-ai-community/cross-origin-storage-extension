@@ -636,7 +636,7 @@ the same switch is in `options.html`. In Firefox, the switch is Firefox's
 - Once a day, counts of hits, misses, and stores per hash, with MIME type,
   bytes, the API path, and, for hits, whether the requester is same-site with
   the storer.
-- Once a month, a snapshot of the hashes in the cache, each with its size, MIME
+- Once a week, a snapshot of the hashes in the cache, each with its size, MIME
   type, visibility tier, and the number of origins and sites that used it,
   plus the cache totals the popup shows (resources, bytes, origins, sites, and
   deduplication savings).
@@ -645,7 +645,7 @@ the same switch is in `options.html`. In Firefox, the switch is Firefox's
   and rounded sizes. This needs the list, so an install with something to
   report downloads it (about 88 MB) at most once a month.
 - No URLs, origins, or sites, only their counts; a random install ID that
-  changes every month; nothing from `localhost` or `.test` origins; nothing
+  changes every week; nothing from `localhost` or `.test` origins; nothing
   sent until a day after the notice opened.
 
 Development (unpacked) installs log their reports to the background console

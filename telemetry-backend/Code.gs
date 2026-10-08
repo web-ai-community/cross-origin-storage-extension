@@ -3,7 +3,7 @@
 
 // Receives the Cross-Origin Storage extension's anonymous usage reports (see
 // `telemetry.js` in the extension) and appends them to the spreadsheet this
-// script is bound to: one Installs row and the Population rows per monthly
+// script is bound to: one Installs row and the Population rows per weekly
 // snapshot, and the Usage rows from every daily report. `setUpSummaries()`
 // adds tabs that rank the data. Setup is in README.md.
 //
@@ -20,7 +20,9 @@ const MAX_COUNT = 10000000;
 const HASH_RE = /^(?:[0-9a-f]{64}|other)$/;
 const ID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const MONTH_RE = /^\d{4}-(?:0[1-9]|1[0-2])$/;
+// A snapshot's period: an ISO week (`2026-W41`), or a month (`2026-10`) from
+// extension versions before 0.1.32, which sent monthly snapshots.
+const PERIOD_RE = /^\d{4}-(?:W(?:0[1-9]|[1-4]\d|5[0-3])|0[1-9]|1[0-2])$/;
 const VERSION_RE = /^\d+(?:\.\d+){0,3}$/;
 const PHL_VERSION_RE = /^[\w.:+-]{1,64}$/;
 const MIME_TYPE_RE =
@@ -32,13 +34,13 @@ const APIS = ['getFileHandle', 'declarative', 'fetch', 'css'];
 const VISIBILITIES = ['global', 'list', 'same-site', ''];
 
 // Every column is plain text except the numeric ones, so Sheets doesn't
-// read a hash like `1234e5…` as a number or a month like `2026-10` as a date.
+// read a hash like `1234e5…` as a number or a period like `2026-10` as a date.
 // The summary formulas in `SUMMARIES` refer to these columns by letter, so
 // add new columns at the end.
 const SHEETS = {
   Installs: [
     ['Received', '@'], // A
-    ['Month', '@'], // B
+    ['Week', '@'], // B
     ['Install ID', '@'], // C
     ['Version', '@'], // D
     ['Browser', '@'], // E
@@ -52,7 +54,7 @@ const SHEETS = {
   ],
   Population: [
     ['Received', '@'], // A
-    ['Month', '@'], // B
+    ['Week', '@'], // B
     ['Install ID', '@'], // C
     ['Version', '@'], // D
     ['Browser', '@'], // E
@@ -67,7 +69,7 @@ const SHEETS = {
   ],
   Usage: [
     ['Received', '@'], // A
-    ['Month', '@'], // B
+    ['Week', '@'], // B
     ['Install ID', '@'], // C
     ['Version', '@'], // D
     ['Browser', '@'], // E
@@ -96,7 +98,7 @@ function doPost(e) {
   // The day only, in UTC, so rows can't be lined up with each other by time.
   const now = new Date();
   const received = Utilities.formatDate(now, 'UTC', 'yyyy-MM-dd');
-  const month = Utilities.formatDate(now, 'UTC', 'yyyy-MM');
+  const week = isoWeek(now);
   const common = [
     report.id,
     report.version,
@@ -106,7 +108,7 @@ function doPost(e) {
 
   const usageRows = report.usage.map((u) => [
     received,
-    month,
+    week,
     ...common,
     u.hash,
     u.mimeType,
@@ -120,11 +122,12 @@ function doPost(e) {
   const installRows = [];
   const populationRows = [];
   const { snapshot } = report;
+  const snapshotWeek = snapshot?.week ?? snapshot?.month;
   if (snapshot) {
     const i = snapshot.install;
     installRows.push([
       received,
-      snapshot.month,
+      snapshotWeek,
       ...common,
       i.resources,
       i.listedResources,
@@ -136,7 +139,7 @@ function doPost(e) {
     for (const r of snapshot.resources) {
       populationRows.push([
         received,
-        snapshot.month,
+        snapshotWeek,
         ...common,
         r.hash,
         r.mimeType,
@@ -188,8 +191,11 @@ function parseReport(e) {
   }
 
   if (report.snapshot != null) {
-    const { month, install, resources } = report.snapshot;
-    check(MONTH_RE.test(month), 'snapshot month');
+    const { install, resources } = report.snapshot;
+    check(
+      PERIOD_RE.test(report.snapshot.week ?? report.snapshot.month),
+      'snapshot week',
+    );
     check(install != null, 'snapshot install');
     for (const field of [
       'resources',
@@ -261,6 +267,18 @@ function appendRows(sheetName, rows) {
   range.setValues(rows);
 }
 
+// The ISO 8601 week of `date` in UTC, as `YYYY-Www`. Must match
+// currentWeek() in the extension's telemetry.js.
+function isoWeek(date) {
+  const day = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+  );
+  day.setUTCDate(day.getUTCDate() + 4 - (day.getUTCDay() || 7));
+  const yearStart = Date.UTC(day.getUTCFullYear(), 0, 1);
+  const week = Math.ceil(((day - yearStart) / 86400000 + 1) / 7);
+  return `${day.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
 function textOutput(text) {
   return ContentService.createTextOutput(text).setMimeType(
     ContentService.MimeType.TEXT,
@@ -291,73 +309,78 @@ function resetData() {
 }
 
 // Summary tabs, each a live QUERY over the data tabs. Those without
-// `allMonths` show one month, picked in B1: the latest by default, or any
-// `YYYY-MM` typed over it. `month` is the cell reference to splice into the
+// `allWeeks` show one week, picked in B1: the latest by default, or any
+// `YYYY-Www` typed over it. `week` is the cell reference to splice into the
 // query.
 const SUMMARIES = {
   Overview: {
-    note: 'Per month: installs that sent a snapshot, and what their caches hold.',
-    allMonths: true,
+    note: 'Per week: installs that sent a snapshot, and what their caches hold.',
+    allWeeks: true,
     query: () =>
-      `=QUERY(Installs!A:L, "select B, count(C), sum(G), sum(H), sum(I), avg(J), avg(K), sum(L) where B is not null group by B order by B desc label B 'Month', count(C) 'Installs', sum(G) 'Resources', sum(H) 'PHL resources', sum(I) 'Bytes', avg(J) 'Origins per install', avg(K) 'Sites per install', sum(L) 'Dedup savings'", 1)`,
+      `=QUERY(Installs!A:L, "select B, count(C), sum(G), sum(H), sum(I), avg(J), avg(K), sum(L) where B is not null group by B order by B desc label B 'Week', count(C) 'Installs', sum(G) 'Resources', sum(H) 'PHL resources', sum(I) 'Bytes', avg(J) 'Origins per install', avg(K) 'Sites per install', sum(L) 'Dedup savings'", 1)`,
   },
   'Installs by browser': {
-    note: 'Per month: participating installs per browser.',
-    allMonths: true,
+    note: 'Per week: participating installs per browser.',
+    allWeeks: true,
     query: () =>
-      `=QUERY(Installs!A:L, "select B, count(C) where B is not null group by B pivot E label B 'Month'", 1)`,
+      `=QUERY(Installs!A:L, "select B, count(C) where B is not null group by B pivot E label B 'Week'", 1)`,
   },
   'Installs by version': {
     note: 'Participating installs per extension version and browser.',
-    query: (month) =>
-      `=QUERY(Installs!A:L, "select D, count(C) where B = '"&${month}&"' group by D pivot E label D 'Version'", 1)`,
+    query: (week) =>
+      `=QUERY(Installs!A:L, "select D, count(C) where B = '"&${week}&"' group by D pivot E label D 'Version'", 1)`,
   },
   'Most stored': {
     note: 'Public Hash List resources by the number of installs storing them.',
-    query: (month) =>
-      `=QUERY(Population!A:M, "select G, H, max(I), count(C), sum(L), max(L) where B = '"&${month}&"' and G <> 'other' group by G, H order by count(C) desc label G 'Hash', H 'MIME type', max(I) 'Size', count(C) 'Installs', sum(L) 'Sites (sum over installs)', max(L) 'Most sites on one install'", 1)`,
+    query: (week) =>
+      `=QUERY(Population!A:M, "select G, H, max(I), count(C), sum(L), max(L) where B = '"&${week}&"' and G <> 'other' group by G, H order by count(C) desc label G 'Hash', H 'MIME type', max(I) 'Size', count(C) 'Installs', sum(L) 'Sites (sum over installs)', max(L) 'Most sites on one install'", 1)`,
   },
   'Most shared': {
     note: 'Public Hash List resources by the number of distinct sites using them, summed over installs.',
-    query: (month) =>
-      `=QUERY(Population!A:M, "select G, H, max(I), sum(L), sum(K), count(C) where B = '"&${month}&"' and G <> 'other' group by G, H order by sum(L) desc label G 'Hash', H 'MIME type', max(I) 'Size', sum(L) 'Sites (sum over installs)', sum(K) 'Origins (sum over installs)', count(C) 'Installs'", 1)`,
+    query: (week) =>
+      `=QUERY(Population!A:M, "select G, H, max(I), sum(L), sum(K), count(C) where B = '"&${week}&"' and G <> 'other' group by G, H order by sum(L) desc label G 'Hash', H 'MIME type', max(I) 'Size', sum(L) 'Sites (sum over installs)', sum(K) 'Origins (sum over installs)', count(C) 'Installs'", 1)`,
   },
   'Most hit': {
     note: 'Public Hash List resources by hits, with the bytes those hits served.',
-    query: (month) =>
-      `=QUERY(Usage!A:M, "select G, H, sum(L), sum(M) where B = '"&${month}&"' and I = 'hit' and G <> 'other' group by G, H order by sum(L) desc label G 'Hash', H 'MIME type', sum(L) 'Hits', sum(M) 'Bytes served'", 1)`,
+    query: (week) =>
+      `=QUERY(Usage!A:M, "select G, H, sum(L), sum(M) where B = '"&${week}&"' and I = 'hit' and G <> 'other' group by G, H order by sum(L) desc label G 'Hash', H 'MIME type', sum(L) 'Hits', sum(M) 'Bytes served'", 1)`,
   },
   'Hits by relation': {
     note: 'Hits per resource, by whether the requesting site is the one that stored it.',
-    query: (month) =>
-      `=QUERY(Usage!A:M, "select G, sum(L) where B = '"&${month}&"' and I = 'hit' group by G pivot J label G 'Hash'", 1)`,
+    query: (week) =>
+      `=QUERY(Usage!A:M, "select G, sum(L) where B = '"&${week}&"' and I = 'hit' group by G pivot J label G 'Hash'", 1)`,
   },
   Events: {
     note: 'Hits, misses, and stores per API. Hit ratio is hit / (hit + miss).',
-    query: (month) =>
-      `=QUERY(Usage!A:M, "select K, sum(L) where B = '"&${month}&"' group by K pivot I label K 'API'", 1)`,
+    query: (week) =>
+      `=QUERY(Usage!A:M, "select K, sum(L) where B = '"&${week}&"' group by K pivot I label K 'API'", 1)`,
   },
   'MIME types': {
     note: 'Stored resources by MIME type. Resources not on the Public Hash List appear by top-level type only.',
-    query: (month) =>
-      `=QUERY(Population!A:M, "select H, sum(M), sum(I) where B = '"&${month}&"' group by H order by sum(M) desc label H 'MIME type', sum(M) 'Resources', sum(I) 'Bytes'", 1)`,
+    query: (week) =>
+      `=QUERY(Population!A:M, "select H, sum(M), sum(I) where B = '"&${week}&"' group by H order by sum(M) desc label H 'MIME type', sum(M) 'Resources', sum(I) 'Bytes'", 1)`,
   },
 };
 
 // Run once from the Apps Script editor. Running it again rebuilds the tabs.
 function setUpSummaries() {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  // The QUERY formulas need the data tabs to exist.
-  for (const name of Object.keys(SHEETS)) sheetFor(name);
-  for (const [name, { note, allMonths, query }] of Object.entries(SUMMARIES)) {
+  // The QUERY formulas need the data tabs to exist, and their header rows to
+  // match SHEETS (the period column was once called Month).
+  for (const [name, columns] of Object.entries(SHEETS)) {
+    sheetFor(name)
+      .getRange(1, 1, 1, columns.length)
+      .setValues([columns.map(([header]) => header)]);
+  }
+  for (const [name, { note, allWeeks, query }] of Object.entries(SUMMARIES)) {
     const existing = spreadsheet.getSheetByName(name);
     if (existing) spreadsheet.deleteSheet(existing);
     const sheet = spreadsheet.insertSheet(name);
-    if (allMonths) {
+    if (allWeeks) {
       sheet.getRange('A1').setValue(note);
       sheet.getRange('A2').setFormula(query());
     } else {
-      sheet.getRange('A1').setValue('Month');
+      sheet.getRange('A1').setValue('Week');
       sheet
         .getRange('B1')
         .setNumberFormat('@')
