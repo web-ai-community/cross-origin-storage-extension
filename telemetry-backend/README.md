@@ -9,10 +9,10 @@ The extension's anonymous usage reports (see [`telemetry.js`](../telemetry.js))
 go to a Google Apps Script web app, which appends them to a Google Sheet with
 three data tabs:
 
-- **Installs**: one row per install per month, with the cache totals the popup
+- **Installs**: one row per install per week, with the cache totals the popup
   shows: resources, bytes, origins, sites, and deduplication savings.
 - **Population**: one row per Public Hash List resource in an install's cache
-  per month, with its MIME type, size, visibility tier, and how many origins and
+  per week, with its MIME type, size, visibility tier, and how many origins and
   sites used it. Resources not on the list are folded into `other` rows, one per
   top-level MIME type (`font/*`).
 - **Usage**: daily counts of hits, misses, and stores per Public Hash List hash,
@@ -46,15 +46,16 @@ status, as a quick check that the deployment is live.
 
 `setUpSummaries()` adds tabs that rank the data with live `QUERY` formulas, so
 they stay current as reports arrive. Except for Overview and Installs by
-browser, each shows one month, picked in cell B1: the latest month by default,
-or any `YYYY-MM` typed over it. An install counts as participating in a month
-when it sent that month's snapshot, which every opted-in install does once a
-month, even with an empty cache.
+browser, each shows one ISO week, picked in cell B1: the latest week by default,
+or any `YYYY-Www` typed over it. An install counts as participating in a week
+when it sent that week's snapshot, which every opted-in install does once a
+week, even with an empty cache. Versions before 0.1.32 sent monthly snapshots,
+filed under their month (`YYYY-MM`).
 
 | Tab                 | Ranks                                                                                    |
 | ------------------- | ---------------------------------------------------------------------------------------- |
-| Overview            | Per month: installs, resources, bytes, origins and sites per install, dedup savings      |
-| Installs by browser | Per month: participating installs per browser                                            |
+| Overview            | Per week: installs, resources, bytes, origins and sites per install, dedup savings       |
+| Installs by browser | Per week: participating installs per browser                                             |
 | Installs by version | Participating installs per extension version, split by browser                           |
 | Most stored         | Public Hash List resources by the number of installs storing them                        |
 | Most shared         | Public Hash List resources by distinct sites using them, summed over installs            |
@@ -87,24 +88,25 @@ await chrome.storage.local.set({
 });
 ```
 
-The 24-hour grace period after the notice and the monthly snapshot can both be
-reset from the same console:
+The 24-hour grace period after the notice, the time of the next daily report,
+and the weekly snapshot can all be reset from the same console:
 
 ```js
 await chrome.storage.local.remove([
   'telemetryNotBefore',
-  'telemetrySnapshotMonth',
+  'telemetryNextReport',
+  'telemetrySnapshotWeek',
 ]);
 ```
 
-The service worker console has no direct handle on the module, so the way to
-trigger a report is to fire the daily alarm early (30 seconds is the shortest
-delay Chrome allows):
+The extension checks hourly whether a report is due. The service worker console
+has no direct handle on the module, so the way to trigger that check is to fire
+the alarm early (30 seconds is the shortest delay Chrome allows):
 
 ```js
 await chrome.alarms.create('cos-telemetry-flush', {
   delayInMinutes: 0.5,
-  periodInMinutes: 1440,
+  periodInMinutes: 60,
 });
 ```
 
@@ -113,7 +115,7 @@ await chrome.alarms.create('cos-telemetry-flush', {
 ```json
 {
   "schema": 1,
-  "id": "random UUID, replaced every calendar month (UTC)",
+  "id": "random UUID, replaced every ISO week (UTC)",
   "version": "extension version",
   "browser": "chrome | firefox | safari",
   "phlVersion": "Public Hash List version used to classify hashes, or null",
@@ -129,7 +131,7 @@ await chrome.alarms.create('cos-telemetry-flush', {
     }
   ],
   "snapshot": {
-    "month": "YYYY-MM",
+    "week": "YYYY-Www, the ISO week (UTC)",
     "install": {
       "resources": 3,
       "listedResources": 1,
@@ -153,7 +155,7 @@ await chrome.alarms.create('cos-telemetry-flush', {
 }
 ```
 
-`snapshot` is present in the first report of each month. `relation` says whether
+`snapshot` is present in the first report of each week. `relation` says whether
 the page that got a hit is same-site with the page that stored the resource;
 `unknown` covers resources stored before the extension tracked storers. Origin
 and site counts leave out `localhost` and `.test` origins. Deduplication savings
@@ -164,7 +166,7 @@ otherwise have stored its own copy.
 
 A Google Sheet holds at most 10 million cells, about 750,000 Usage rows. Once
 the sheet nears that, move older rows to an archive spreadsheet, or replace them
-with monthly totals.
+with weekly totals.
 
 The endpoint is public, so the numbers are indicative: anyone can post
 well-formed reports. `Code.gs` rejects anything that doesn't match the format

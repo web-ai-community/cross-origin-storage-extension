@@ -17,7 +17,7 @@
 //     resource's storer. Local development origins aren't counted.
 //   - Events are counted locally and sent once a day, so a report can't be
 //     lined up with a page visit by its timing.
-//   - The install ID is random and replaced every calendar month (UTC).
+//   - The install ID is random and replaced every week (ISO weeks, UTC).
 //   - Exact sizes and MIME types are reported only for Public Hash List
 //     resources, where the hash already determines them.
 // The receiving end lives in telemetry-backend/.
@@ -29,8 +29,15 @@ const TELEMETRY_ENDPOINT = 'https://script.google.com/macros/s/AKfycbwmo1mxvZVoh
 
 const SCHEMA_VERSION = 1;
 
+// Reports go out once a day. The time of the next one is kept in storage,
+// and an hourly alarm checks whether it has come: Chrome clears alarms when
+// an extension updates, and may clear them when the browser restarts, so an
+// alarm set to fire a day out was pushed back by every update and restart,
+// and an extension updated often, or a browser restarted daily, never
+// reported at all.
 const FLUSH_ALARM = 'cos-telemetry-flush';
-const FLUSH_PERIOD_MINUTES = 24 * 60;
+const FLUSH_CHECK_MINUTES = 60;
+const REPORT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 // Nothing is sent until a day after the notice was shown, so opting out
 // there takes effect before the first report.
@@ -55,7 +62,8 @@ const KEY_ENABLED = 'telemetryEnabled';
 const KEY_NOTICE_SHOWN = 'telemetryNoticeShown';
 const KEY_NOT_BEFORE = 'telemetryNotBefore';
 const KEY_INSTALL_ID = 'telemetryInstallId';
-const KEY_SNAPSHOT_MONTH = 'telemetrySnapshotMonth';
+const KEY_SNAPSHOT_WEEK = 'telemetrySnapshotWeek';
+const KEY_NEXT_REPORT = 'telemetryNextReport';
 const KEY_QUEUE = 'telemetryQueue';
 // Development installs never send to `TELEMETRY_ENDPOINT`. Setting this key
 // (from the background console) sends their reports here instead, for
@@ -143,16 +151,25 @@ function isDevelopmentOrigin(origin) {
   );
 }
 
-function currentMonth() {
-  return new Date().toISOString().slice(0, 7);
+// The current ISO 8601 week in UTC, as `YYYY-Www`: weeks start on Monday,
+// and a year's first week is the one with its first Thursday.
+function currentWeek() {
+  const now = new Date();
+  const day = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  );
+  day.setUTCDate(day.getUTCDate() + 4 - (day.getUTCDay() || 7));
+  const yearStart = Date.UTC(day.getUTCFullYear(), 0, 1);
+  const week = Math.ceil(((day - yearStart) / 86400000 + 1) / 7);
+  return `${day.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
 }
 
-async function installIdFor(month) {
+async function installIdFor(week) {
   const { [KEY_INSTALL_ID]: stored } =
     await chrome.storage.local.get(KEY_INSTALL_ID);
-  if (stored?.month === month) return stored.id;
+  if (stored?.week === week) return stored.id;
   const id = crypto.randomUUID();
-  await chrome.storage.local.set({ [KEY_INSTALL_ID]: { id, month } });
+  await chrome.storage.local.set({ [KEY_INSTALL_ID]: { id, week } });
   return id;
 }
 
@@ -261,7 +278,7 @@ function reportedMimeType(mimeType, listed) {
 }
 
 /**
- * Builds the report: usage counts from `queue`, plus the monthly snapshot
+ * Builds the report: usage counts from `queue`, plus the weekly snapshot
  * when `snapshot` is given. `describe()` returns what is known locally about
  * a hash, and `isListed()` decides which hashes are reported by value.
  *
@@ -273,7 +290,7 @@ function reportedMimeType(mimeType, listed) {
  */
 function buildReport({
   id,
-  month,
+  week,
   phlVersion,
   queue,
   snapshot,
@@ -355,7 +372,7 @@ function buildReport({
       });
     }
     report.snapshot = {
-      month,
+      week,
       install: {
         resources: snapshot.hashes.length,
         listedResources,
@@ -388,7 +405,7 @@ async function send(endpoint, report) {
 
 /**
  * Sends the daily report: queued usage counts, plus the population snapshot
- * if none has been sent this month (so the first report after install
+ * if none has been sent this week (so the first report after install
  * always carries one). Failed reports are requeued for the next day.
  */
 async function flushTelemetry({ publicHashList, resourceManager, getSite }) {
@@ -398,16 +415,22 @@ async function flushTelemetry({ publicHashList, resourceManager, getSite }) {
   }
   const stored = await chrome.storage.local.get([
     KEY_NOT_BEFORE,
-    KEY_SNAPSHOT_MONTH,
+    KEY_NEXT_REPORT,
+    KEY_SNAPSHOT_WEEK,
     KEY_DEBUG_ENDPOINT,
   ]);
-  if (Date.now() < (stored[KEY_NOT_BEFORE] ?? 0)) return;
+  const now = Date.now();
+  if (now < (stored[KEY_NOT_BEFORE] ?? 0)) return;
+  if (now < (stored[KEY_NEXT_REPORT] ?? 0)) return;
+  // Set before sending, so a check that runs meanwhile doesn't send again. A
+  // report that fails is requeued for this next one.
+  await chrome.storage.local.set({ [KEY_NEXT_REPORT]: now + REPORT_INTERVAL_MS });
 
   const endpoint = (await isDevelopmentInstall())
     ? stored[KEY_DEBUG_ENDPOINT]
     : TELEMETRY_ENDPOINT;
-  const month = currentMonth();
-  const snapshotDue = stored[KEY_SNAPSHOT_MONTH] !== month;
+  const week = currentWeek();
+  const snapshotDue = stored[KEY_SNAPSHOT_WEEK] !== week;
 
   const queue = await takeQueue();
   try {
@@ -453,8 +476,8 @@ async function flushTelemetry({ publicHashList, resourceManager, getSite }) {
     }
 
     const report = buildReport({
-      id: await installIdFor(month),
-      month,
+      id: await installIdFor(week),
+      week,
       phlVersion: needsList ? publicHashList.version : null,
       queue,
       snapshot,
@@ -477,7 +500,7 @@ async function flushTelemetry({ publicHashList, resourceManager, getSite }) {
       );
     }
     if (snapshotDue) {
-      await chrome.storage.local.set({ [KEY_SNAPSHOT_MONTH]: month });
+      await chrome.storage.local.set({ [KEY_SNAPSHOT_WEEK]: week });
     }
   } catch (error) {
     await requeue(queue);
@@ -488,8 +511,8 @@ async function flushTelemetry({ publicHashList, resourceManager, getSite }) {
 async function ensureFlushAlarm() {
   if (await chrome.alarms.get(FLUSH_ALARM)) return;
   await chrome.alarms.create(FLUSH_ALARM, {
-    delayInMinutes: FLUSH_PERIOD_MINUTES,
-    periodInMinutes: FLUSH_PERIOD_MINUTES,
+    delayInMinutes: 1,
+    periodInMinutes: FLUSH_CHECK_MINUTES,
   });
 }
 
