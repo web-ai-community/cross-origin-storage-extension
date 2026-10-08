@@ -91,10 +91,26 @@ async function safariFetchDataChunksByHash(hash) {
 }
 
 // Accepts either a blob: URL (Chrome's offscreen doc) or a real Blob
-// (Firefox's background page) and slices it into transferable ArrayBuffer
-// chunks sized for the window.postMessage hop to the MAIN world.
-async function toTransferChunks(source) {
-  const blob = typeof source === 'string' ? await fetch(source).then((r) => r.blob()) : source;
+// (Firefox's background page) and returns the file as `dataChunks` for the
+// MAIN world. That's normally the Blob itself, which shares the file's data
+// (from a blob: URL, the fetched Blob still points at the cached file):
+// ArrayBuffer chunks hold a whole copy in this script's memory, and the page
+// then copies them again into a Blob of its own. main-world.js builds a
+// Blob from `dataChunks` either way, so it takes both. `asChunks` asks for
+// transferable ArrayBuffer chunks, sized for the window.postMessage hop,
+// which main-world.js requests if a Blob ever fails to reach it intact.
+async function toPageChunks(source, asChunks) {
+  let blob = source;
+  if (typeof source === 'string') {
+    blob = await fetch(source).then((r) => r.blob());
+    // The offscreen document's URL keeps the file referenced until revoked.
+    chrome.runtime.sendMessage({
+      action: 'revokeBlobURL',
+      target: 'offscreen-doc',
+      data: { url: source },
+    });
+  }
+  if (!asChunks) return { chunks: [blob], mimeType: blob.type };
   const chunks = [];
   for (let offset = 0; offset < blob.size; offset += TRANSFER_CHUNK_SIZE) {
     chunks.push(
@@ -108,14 +124,14 @@ async function toTransferChunks(source) {
 // Blob sent directly by the background page (Firefox); normalize both to
 // transferable ArrayBuffer chunks before crossing into the MAIN world.
 // (Safari never reaches here — see finalizeResponseData below.)
-async function normalizeFileDataForMainWorld(payload) {
+async function normalizeFileDataForMainWorld(payload, asChunks) {
   // blobURL is `false` (not absent) when background.js found no cached
   // resource for the hash — a falsy check, not a nullish one, is required
   // to treat that "not found" sentinel as "nothing to normalize".
   const source =
     payload?.blobURL || (payload?.data instanceof Blob ? payload.data : undefined);
   if (!source) return;
-  const { chunks } = await toTransferChunks(source);
+  const { chunks } = await toPageChunks(source, asChunks);
   payload.dataChunks = chunks;
   delete payload.data;
   delete payload.blobURL;
@@ -138,14 +154,14 @@ function collectTransferables(payload) {
 // blob URL (Chrome) or the Blob sent directly by the background page
 // (Firefox) into transferable ArrayBuffer chunks. (Safari never reaches
 // here — see finalizeResponseData below.)
-async function resolveFontBlobs(responseData) {
+async function resolveFontBlobs(responseData, asChunks) {
   const fonts = responseData?.fonts;
   if (!fonts?.length) return;
   await Promise.all(
     fonts.map(async (font) => {
       const source = font.blobURL ?? font.blob;
       if (source == null) return;
-      const { chunks, mimeType } = await toTransferChunks(source);
+      const { chunks, mimeType } = await toPageChunks(source, asChunks);
       font.dataChunks = chunks;
       font.mimeType = mimeType;
       delete font.blobURL;
@@ -158,10 +174,10 @@ async function resolveFontBlobs(responseData) {
 // single-message path, depending on the browser, for a getFileData or
 // resolveDeclarativeResource response, or a rewriteStylesheet response's
 // fonts.
-async function finalizeResponseData(action, payload) {
+async function finalizeResponseData(action, payload, asChunks) {
   if (!IS_SAFARI) {
-    await normalizeFileDataForMainWorld(payload);
-    await resolveFontBlobs(payload);
+    await normalizeFileDataForMainWorld(payload, asChunks);
+    await resolveFontBlobs(payload, asChunks);
     return;
   }
   if (
@@ -326,7 +342,7 @@ window.addEventListener('message', async (event) => {
       );
       return;
     }
-    await finalizeResponseData(action, response.data);
+    await finalizeResponseData(action, response.data, !!data?.transferAsChunks);
     window.postMessage(
       { source: 'cos-polyfill-isolated', id, data: response.data },
       event.origin,

@@ -71,7 +71,27 @@
     }
   });
 
-  function talkToBridge(action, payload, transfer) {
+  // content.js hands files to this world as Blobs inside `dataChunks`, which
+  // share the file's data. If one ever arrives as anything but a Blob or an
+  // ArrayBuffer, the request is repeated asking for transferred ArrayBuffer
+  // chunks, and so is every later one.
+  let blobsCrossFromBridge = true;
+  function hasUnusableChunks(data) {
+    return [data?.dataChunks, ...(data?.fonts || []).map((font) => font.dataChunks)]
+      .flat()
+      .some((chunk) => chunk != null && !(chunk instanceof Blob) && !(chunk instanceof ArrayBuffer));
+  }
+
+  async function talkToBridge(action, payload, transfer) {
+    if (blobsCrossFromBridge) {
+      const data = await postToBridge(action, payload, transfer);
+      if (!hasUnusableChunks(data)) return data;
+      blobsCrossFromBridge = false;
+    }
+    return postToBridge(action, { ...payload, transferAsChunks: true }, transfer);
+  }
+
+  function postToBridge(action, payload, transfer) {
     return new Promise((resolve, reject) => {
       const id = crypto.randomUUID();
       pendingRequests.set(id, { resolve, reject });

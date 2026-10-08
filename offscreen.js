@@ -44,6 +44,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           },
         });
         break;
+      case 'revokeBlobURL':
+        // content.js has fetched the getBlobURL result and no longer needs it.
+        URL.revokeObjectURL(data.url);
+        sendResponse({ data: { success: true } });
+        break;
       case 'deleteAllResources':
         const keys = await cache.keys();
         for (const key of keys) {
