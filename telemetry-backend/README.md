@@ -75,6 +75,33 @@ Installs, Population, and Usage, and the summary tabs empty themselves. There is
 no undo in the editor, but **File → Version history** in the spreadsheet still
 has the old data.
 
+## Prototype browser downloads
+
+[`DownloadStats.gs`](DownloadStats.gs) is independent of the telemetry: it
+counts downloads of the prototype browser builds listed under
+[Prototype Browser Implementations](https://tomayac.github.io/awesome-cross-origin-storage/#prototype-browser-implementations).
+It reads the browser list from that page, so a browser added there is picked up
+on the next run, and asks the GitHub API for each release asset's download
+count. It writes two tabs:
+
+- **Downloads**, rebuilt on every run: downloads per browser with a total row
+  (releases, assets, the latest release, and the most downloaded asset),
+  downloads per browser and platform with totals, and every release asset.
+- **Download history**: each browser's running total and the overall total, one
+  row each per day. GitHub only reports running totals, so this is the only
+  record of when downloads happened; chart it to see growth.
+
+To set it up, add a script file named `DownloadStats` in the Apps Script editor,
+paste [`DownloadStats.gs`](DownloadStats.gs) into it, and run
+`updateDownloadStats` once (it asks for permission to fetch URLs). Then run
+`installDailyDownloadStats` once to have it update every day at about 06:00.
+
+Unauthenticated GitHub API calls are rate-limited per IP address, and Apps
+Script shares its addresses with other scripts. If a run fails with a GitHub API
+403, create a fine-grained GitHub token with no permissions (public repositories
+need none) and save it as the script property `GITHUB_TOKEN` under **Project
+Settings → Script properties**.
+
 ## Testing from a development install
 
 Unpacked (development) installs never send to `TELEMETRY_ENDPOINT`, so your own
