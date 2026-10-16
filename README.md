@@ -605,6 +605,15 @@ individual user. See the
 [PHL design explainer](https://github.com/WICG/cross-origin-storage/blob/main/public-hash-list/phl-explainer.md)
 for the full rationale, data format, and proposed governance model.
 
+Every other grant is keyed to the top-level site, as the spec requires: an
+origin reads back what it stored, and an `origins` list admits the origins it
+names, only under the top-level site the write ran under. A list written
+first-party also admits its origins wherever they run first-party (as a
+top-level page, or in a frame same-site with it). So
+a frame embedded on two sites can't read back on one what it wrote on the other.
+The extension takes the top-level site from the tab's URL, which the browser
+reports, and records the grants only once the written bytes match the hash.
+
 The popup marks every stored resource as "On PHL" or "Not on PHL", whether or
 not the setting is enabled, so you can see which globally-shared resources the
 gate would hide from origins other than the one that stored them. The list is

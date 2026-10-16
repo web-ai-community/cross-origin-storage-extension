@@ -16,16 +16,6 @@ const STORAGE_KEY = 'resourceManagerData';
 // "related" origins by probing hashes, so a small cap is kept here too.
 const MAX_ORIGINS_PER_RESOURCE = 6;
 
-// Visibility permissiveness ranks, used to enforce the spec's
-// upgrade-only rule (a resource's visibility can only become MORE
-// permissive over time, never less):
-// https://wicg.github.io/cross-origin-storage/#resource-visibility-upgrades
-const VISIBILITY_RANK = {
-  'same-site': 0,
-  list: 1,
-  global: 2,
-};
-
 class ResourceManager {
   constructor() {
     this.historyLimit = HISTORY_LIMIT;
@@ -36,18 +26,27 @@ class ResourceManager {
     this.hashToMimeType = {};
     this.hashToHitCount = {};
     this.totalMissCount = 0;
-    // hash -> '*' (global) | string[] (origins list) | undefined (absent
-    // entry means same-site-only, the spec's default when `origins` is
-    // omitted at creation time).
-    this.hashToVisibility = {};
-    // hash -> string[] of all origins that have successfully written this entry.
-    // Grows monotonically; every writing origin gets permanent read access
-    // regardless of the `origins` field or PHL membership.
-    this.hashToStoringOrigins = {};
+    // The three grants of a COS entry, as in the spec
+    // (https://wicg.github.io/cross-origin-storage/#cos-entries). Each grant
+    // is { origin, partition }, where `partition` is the schemeful site of
+    // the top-level page the write ran under.
+    //
+    // hash -> grants for the origins that wrote the entry. A storing origin,
+    // and the origins same-site with it, read the entry under its partition.
+    this.hashToStoringGrants = {};
+    // hash -> grants for the `origins` list, each also { firstParty }: a
+    // list written first-party (by a top-level page, or a frame same-site
+    // with it) also admits the listed origins wherever they run first-party.
+    this.hashToListGrants = {};
+    // hash -> true once written with `origins: '*'`. Never keyed.
+    this.hashToGlobal = {};
+    // Computes a schemeful site from an origin. Only the background's
+    // instance has one, and it's what migrates records from before grants.
+    this.siteOf = null;
   }
 
   /**
-   * Classifies a stored `origins` value (or its absence) into one of
+   * Classifies a legacy `origins` value (see getVisibility()) into one of
    * the three visibility tiers from the COS explainer.
    * @returns {'global'|'list'|'same-site'}
    */
@@ -58,104 +57,116 @@ class ResourceManager {
   }
 
   /**
-   * Returns the current visibility for a hash: '*' (global), a string[]
-   * of allowed origins, or undefined (same-site-only, the default when
-   * no resource has been stored under this hash with an explicit
-   * `origins` value yet).
+   * The widest grant a hash carries, in the shape of an `origins` value: '*'
+   * if it's globally disclosable, the listed origins if it has a list, and
+   * undefined (same-site) otherwise. Used for reporting and for migrating to
+   * native COS, which re-declares it.
    */
   getVisibility(hash) {
-    return this.hashToVisibility[hash];
+    if (this.hashToGlobal[hash]) return '*';
+    const listed = this.hashToListGrants[hash];
+    if (listed?.length) return [...new Set(listed.map((g) => g.origin))];
+    return undefined;
   }
 
   /**
-   * Applies a requested `origins` value (from `create: true`) to a
-   * hash's stored visibility, enforcing the spec's upgrade-only rule:
-   * visibility can become more permissive (same-site -> list -> global)
-   * but never more restrictive. A request to move to a less-or-equally
-   * permissive tier is ignored, and a warning is logged -- mirroring
-   * "the user agent should log a warning to the console to inform the
-   * developer that the restriction was not applied" from the explainer.
+   * Applies a requested `origins` value to a hash's grants. Grants only ever
+   * add up: '*' sets the global grant on top of any list, and a list merges
+   * into the existing one, up to MAX_ORIGINS_PER_RESOURCE grants.
+   * https://wicg.github.io/cross-origin-storage/#resource-visibility-upgrades
    *
    * @param {string} hash
    * @param {'*'|string[]|undefined} requestedOrigins
-   * @returns {{applied: boolean, visibility: '*'|string[]|undefined}}
+   * @param {string} partition - The writer's partition.
+   * @param {boolean} firstParty - Whether the write ran first-party.
    */
-  setVisibility(hash, requestedOrigins) {
-    const current = this.hashToVisibility[hash];
-    const currentTier = ResourceManager.classifyVisibility(current);
-    const requestedTier = ResourceManager.classifyVisibility(requestedOrigins);
-
-    if (
-      requestedTier === 'list' &&
-      Array.isArray(requestedOrigins) &&
-      requestedOrigins.length > MAX_ORIGINS_PER_RESOURCE
-    ) {
+  upgradeVisibility(hash, requestedOrigins, partition, firstParty) {
+    if (requestedOrigins === '*') {
+      this.hashToGlobal[hash] = true;
+      return;
+    }
+    if (!Array.isArray(requestedOrigins) || !requestedOrigins.length) return;
+    if (requestedOrigins.length > MAX_ORIGINS_PER_RESOURCE) {
       console.warn(
         `[COS] Rejected origins list of ${requestedOrigins.length} entries ` +
-          `for hash ${hash}: exceeds the maximum of ${MAX_ORIGINS_PER_RESOURCE}. ` +
-          `The resource's visibility was not changed.`
+          `for hash ${hash}: exceeds the maximum of ${MAX_ORIGINS_PER_RESOURCE}.`
       );
-      return { applied: false, visibility: current };
+      return;
     }
-
-    if (VISIBILITY_RANK[requestedTier] <= VISIBILITY_RANK[currentTier]) {
-      // No-op (same tier) or a downgrade attempt -- both are ignored per
-      // spec. Only warn for genuine downgrade attempts, since
-      // re-requesting the same tier (e.g. the same list) is a normal,
-      // expected no-op rather than a developer mistake.
-      if (VISIBILITY_RANK[requestedTier] < VISIBILITY_RANK[currentTier]) {
-        console.warn(
-          `[COS] Ignored attempt to restrict hash ${hash} from '${currentTier}' ` +
-            `to '${requestedTier}' visibility. Visibility can only become more ` +
-            `permissive, never more restrictive; the resource remains '${currentTier}'.`
-        );
+    const grants = (this.hashToListGrants[hash] ??= []);
+    for (const origin of requestedOrigins) {
+      if (
+        grants.some(
+          (g) =>
+            g.origin === origin &&
+            g.partition === partition &&
+            g.firstParty === firstParty
+        )
+      ) {
+        continue;
       }
-      return { applied: false, visibility: current };
-    }
-
-    this.hashToVisibility[hash] = requestedOrigins;
-    return { applied: true, visibility: requestedOrigins };
-  }
-
-  /**
-   * Adds `origin` to the storing-origins set for this hash. Every origin
-   * that successfully writes an entry is added here and gains permanent
-   * read access regardless of the `origins` field or PHL membership.
-   */
-  addStoringOrigin(hash, origin) {
-    if (!this.hashToStoringOrigins[hash]) {
-      this.hashToStoringOrigins[hash] = [];
-    }
-    if (!this.hashToStoringOrigins[hash].includes(origin)) {
-      this.hashToStoringOrigins[hash].push(origin);
+      if (grants.length >= MAX_ORIGINS_PER_RESOURCE) {
+        console.warn(
+          `[COS] The origins list of hash ${hash} is full; ${origin} was not added.`
+        );
+        break;
+      }
+      grants.push({ origin, partition, firstParty });
     }
   }
 
-  /** Returns true if `origin` has ever successfully written this hash. */
-  isStoringOrigin(hash, origin) {
-    return (this.hashToStoringOrigins[hash] ?? []).includes(origin);
+  /** Records that `origin` wrote this hash's bytes under `partition`. */
+  addStoringGrant(hash, origin, partition) {
+    const grants = (this.hashToStoringGrants[hash] ??= []);
+    if (!grants.some((g) => g.origin === origin && g.partition === partition)) {
+      grants.push({ origin, partition });
+    }
+  }
+
+  getStoringGrants(hash) {
+    return this.hashToStoringGrants[hash] ?? [];
+  }
+
+  getListGrants(hash) {
+    return this.hashToListGrants[hash] ?? [];
+  }
+
+  isGloballyDisclosable(hash) {
+    return !!this.hashToGlobal[hash];
+  }
+
+  /** Returns true if `origin` wrote this hash under `partition`. */
+  isStoringOrigin(hash, origin, partition) {
+    return this.getStoringGrants(hash).some(
+      (g) => g.origin === origin && g.partition === partition
+    );
   }
 
   /** Returns all origins that have successfully written this hash, or []. */
   getStoringOrigins(hash) {
-    return this.hashToStoringOrigins[hash] ?? [];
+    return [...new Set(this.getStoringGrants(hash).map((g) => g.origin))];
   }
 
   /** Returns the first origin to store this hash, or null if unknown. */
   getStorer(hash) {
-    return this.hashToStoringOrigins[hash]?.[0] ?? null;
+    return this.getStoringGrants(hash)[0]?.origin ?? null;
   }
 
   /**
-   * Backfills hashToStoringOrigins for resources that pre-date storing-origin
-   * tracking by seeding each hash with the origin that has the earliest
-   * recorded access timestamp (the most likely original writer). Returns true
-   * if any entries were added (caller should save).
+   * Turns records from before grants were keyed into grants. A storing origin
+   * gets its own site as the partition, as for a top-level write; one that
+   * pre-dates storing-origin tracking at all is the origin with the earliest
+   * recorded access, the most likely original writer. A list is treated as
+   * written first-party by the entry's first storing origin. Runs once, on records without grants, and always
+   * returns true so the caller saves the result.
    */
-  _backfillStorers() {
-    let changed = false;
+  async _migrateLegacyGrants(stored) {
+    const storers = { ...(stored.hashToStoringOrigins || {}) };
+    for (const [hash, origin] of Object.entries(stored.hashToStorer || {})) {
+      storers[hash] ??= [origin];
+    }
     for (const hash of Object.keys(this.hashToOrigins)) {
-      if (this.hashToStoringOrigins[hash]?.length) continue;
+      if (storers[hash]?.length || this.hashToStoringGrants[hash]) continue;
       let earliestOrigin = null;
       let earliestTime = null;
       for (const origin of this.hashToOrigins[hash]) {
@@ -168,12 +179,25 @@ class ResourceManager {
           earliestOrigin = origin;
         }
       }
-      if (earliestOrigin) {
-        this.hashToStoringOrigins[hash] = [earliestOrigin];
-        changed = true;
+      if (earliestOrigin) storers[hash] = [earliestOrigin];
+    }
+    for (const [hash, origins] of Object.entries(storers)) {
+      if (this.hashToStoringGrants[hash]) continue;
+      for (const origin of origins) {
+        this.addStoringGrant(hash, origin, await this.siteOf(origin));
       }
     }
-    return changed;
+    for (const [hash, origins] of Object.entries(stored.hashToVisibility || {})) {
+      if (this.hashToGlobal[hash] || this.hashToListGrants[hash]) continue;
+      const storer = this.getStorer(hash);
+      this.upgradeVisibility(
+        hash,
+        origins,
+        storer && (await this.siteOf(storer)),
+        true
+      );
+    }
+    return true;
   }
 
   recordAccess(origin, hash, timestamp = new Date()) {
@@ -327,7 +351,9 @@ class ResourceManager {
       delete this.hashToSize[hash];
       delete this.hashToMimeType[hash];
       delete this.hashToHitCount[hash];
-      delete this.hashToStoringOrigins[hash];
+      delete this.hashToStoringGrants[hash];
+      delete this.hashToListGrants[hash];
+      delete this.hashToGlobal[hash];
     }
 
     if (itemsWereDeleted) {
@@ -359,18 +385,18 @@ class ResourceManager {
         this.hashToMimeType = stored.hashToMimeType || {};
         this.hashToHitCount = stored.hashToHitCount || {};
         this.totalMissCount = stored.totalMissCount || 0;
-        this.hashToVisibility = stored.hashToVisibility || {};
-        // Migrate legacy single-storer entries to the storing-origins set.
-        const oldStorers = stored.hashToStorer || {};
-        const storingOrigins = stored.hashToStoringOrigins || {};
-        for (const [hash, origin] of Object.entries(oldStorers)) {
-          if (!storingOrigins[hash]) storingOrigins[hash] = [origin];
-        }
-        this.hashToStoringOrigins = storingOrigins;
+        this.hashToStoringGrants = stored.hashToStoringGrants || {};
+        this.hashToListGrants = stored.hashToListGrants || {};
+        this.hashToGlobal = stored.hashToGlobal || {};
       }
-      const backfilled = this._backfillStorers();
+      const migrated =
+        this.siteOf &&
+        data[STORAGE_KEY] &&
+        !('hashToStoringGrants' in data[STORAGE_KEY])
+          ? await this._migrateLegacyGrants(data[STORAGE_KEY])
+          : false;
       const sanitized = this._sanitizeHitCounts();
-      if (backfilled || sanitized) {
+      if (migrated || sanitized) {
         await this.saveManagerToStorage();
       }
     } catch (error) {
@@ -404,8 +430,9 @@ class ResourceManager {
           hashToMimeType: this.hashToMimeType,
           hashToHitCount: this.hashToHitCount,
           totalMissCount: this.totalMissCount,
-          hashToVisibility: this.hashToVisibility,
-          hashToStoringOrigins: this.hashToStoringOrigins,
+          hashToStoringGrants: this.hashToStoringGrants,
+          hashToListGrants: this.hashToListGrants,
+          hashToGlobal: this.hashToGlobal,
         },
       });
     } catch (error) {

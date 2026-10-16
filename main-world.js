@@ -303,7 +303,7 @@
       .join('');
   }
 
-  async function handleRequestFileHandlesResponse(data) {
+  async function handleRequestFileHandlesResponse(data, create = false) {
     if (data.success.length !== data.hashes.length) {
       throw new DOMException(
         `File${data.hashes.length > 1 ? 's' : ''} "${data.hashes.map((hash) => hash.value).join(', ')}" not found in cross-origin storage.`,
@@ -314,8 +314,17 @@
     const { hashes } = data;
     const handles = [];
     for (const hash of hashes) {
+      // The spec's "may read": a create handle can't read until it has been
+      // written through, whatever is stored under its hash.
+      let mayRead = !create;
       handles.push({
         getFile: async () => {
+          if (!mayRead) {
+            throw new DOMException(
+              `File contents must be written before getFile() can be called.`,
+              'NotAllowedError'
+            );
+          }
           const { dataChunks, mimeType } = await talkToBridge('getFileData', {
             hash,
           });
@@ -363,6 +372,7 @@
               await storeViaBridge(hash, blob, {
                 'content-type': detectedMimeType,
               });
+              mayRead = true;
             },
           });
 
@@ -417,7 +427,7 @@
       origins,
       origin: location.origin,
     });
-    return handleRequestFileHandlesResponse(responseData);
+    return handleRequestFileHandlesResponse(responseData, create);
   }
 
   // Deprecation warning for the plural requestFileHandles() method, logged

@@ -27,4 +27,22 @@ async function isSameSite(originA, originB) {
   return _psl.isSameSite(originA, originB);
 }
 
-export { getSite, isSameSite };
+/**
+ * Returns the schemeful site for an origin, as HTML's "obtain a site" does:
+ * the scheme plus the registrable domain, or plus the host when it has none.
+ * @param {string} origin - e.g. "https://sub.example.co.uk"
+ * @returns {Promise<string|null>} - e.g. "https://example.co.uk"
+ */
+async function getSchemefulSite(origin) {
+  let url;
+  try {
+    url = new URL(origin);
+  } catch {
+    return null;
+  }
+  if (!url.hostname) return null;
+  await _psl.init();
+  return `${url.protocol}//${_psl.getSite(origin) || url.hostname}`;
+}
+
+export { getSite, getSchemefulSite, isSameSite };

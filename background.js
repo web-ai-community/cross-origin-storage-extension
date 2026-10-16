@@ -3,7 +3,7 @@
 
 import ResourceManager from './resource-manager.js';
 import { PublicHashList } from './public-hash-list.js';
-import { getSite, isSameSite } from './same-site.js';
+import { getSchemefulSite, getSite, isSameSite } from './same-site.js';
 import { initTelemetry, recordTelemetryEvent } from './telemetry.js';
 import { initNativeMigration, handleMigrationMessage } from './native-migration.js';
 import { createSha256, incrementalHexDigest, streamingHexDigest } from './sha256.js';
@@ -118,84 +118,65 @@ publicHashList.provenanceHashes = async () => {
 };
 
 /**
- * Resolves whether `requestingOrigin` may learn about a stored hash at
- * all, and -- separately -- whether that resolution counts as
- * "globally reachable" for the purposes of Public Hash List gating.
+ * How `origin`, running under the top-level site `partition`, may read a
+ * stored hash, per "determine COS disclosure" in the spec
+ * (https://wicg.github.io/cross-origin-storage/#reading-files):
+ *   - 'grant'  through a storing grant or a list grant, which the Public
+ *              Hash List never gates;
+ *   - 'global' through the global grant alone, which it does;
+ *   - null     not at all.
  *
- * Per https://wicg.github.io/cross-origin-storage/#resource-visibility-upgrades
- * a resource's visibility is one of three tiers, set at creation time:
- *   - 'global'    (origins: '*')      reachable by any origin
- *   - 'list'      (origins: [...])    reachable only by listed origins
- *   - 'same-site' (origins omitted)   reachable only by same-site origins
- *
- * The Public Hash List exists to stop a hash from being globally
- * "probeable" by an arbitrary site. A 'list' or 'same-site' resource is
- * already not globally probeable by construction -- only origins the
- * storer explicitly chose (or same-site siblings) can ever get a hit,
- * regardless of PHL membership. So the PHL gate only needs to apply to
- * the 'global' tier; gating 'list'/'same-site' resources too would add
- * no privacy benefit while breaking legitimate restricted-sharing use
- * cases (e.g. a company's own proprietary, same-site-shared model).
- *
- * @param {string} hash
- * @param {string} requestingOrigin
- * @returns {{reachable: boolean, isGlobal: boolean}}
+ * Grants count under the partition they were written under, so a frame
+ * embedded on two sites can't read back on one what it wrote on the other. A
+ * list written first-party also admits its origins wherever they run
+ * first-party.
  */
-async function resolveVisibility(hash, requestingOrigin) {
-  const visibility = resourceManager.getVisibility(hash);
-  const tier = ResourceManager.classifyVisibility(visibility);
-
-  if (tier === 'global') {
-    return { reachable: true, isGlobal: true };
+async function grantFor(hash, origin, partition) {
+  const site = await getSchemefulSite(origin);
+  if (site && partition) {
+    for (const grant of resourceManager.getStoringGrants(hash)) {
+      if (
+        grant.partition === partition &&
+        (await getSchemefulSite(grant.origin)) === site
+      ) {
+        return 'grant';
+      }
+    }
+    const firstParty = site === partition;
+    for (const grant of resourceManager.getListGrants(hash)) {
+      if (
+        (grant.partition === partition || (grant.firstParty && firstParty)) &&
+        (await getSchemefulSite(grant.origin)) === site
+      ) {
+        return 'grant';
+      }
+    }
   }
-  if (tier === 'list') {
-    const allowed = Array.isArray(visibility)
-      ? visibility.includes(requestingOrigin)
-      : false;
-    return { reachable: allowed, isGlobal: false };
-  }
-  // 'same-site': no explicit storer recorded yet (hash never stored
-  // with create:true through this gate), or stored same-site-only.
-  // Without a recorded storer origin we can't compute same-siteness, so
-  // fall back to the access-history origins already tracked for this
-  // hash and check same-site against any of them.
-  const knownOrigins = resourceManager.getOriginsByHash(hash);
-  const checks = await Promise.all(
-    knownOrigins.map((origin) => isSameSite(origin, requestingOrigin))
-  );
-  const allowed = checks.some(Boolean);
-  return { reachable: allowed, isGlobal: false };
+  return resourceManager.isGloballyDisclosable(hash) ? 'global' : null;
 }
 
 /**
- * Returns true if the PHL gate should block this hash: the setting is
- * enabled, the resolved visibility for this (hash, requestingOrigin)
- * pair is 'global', AND the hash is not on the Public Hash List. Logs
- * the reason when blocking so the decision is debuggable from the
- * service worker's console.
+ * Returns true if the Public Hash List gate should block this hash: the
+ * setting is enabled and the hash is not on the list. Callers only ask for a
+ * read that qualifies through the global grant alone.
  */
-async function isBlockedByPublicHashList(hashValue, requestingOrigin) {
+async function isBlockedByPublicHashList(hashValue) {
   const { publicHashListEnabled } = await chrome.storage.local.get(
     'publicHashListEnabled'
   );
   if (!publicHashListEnabled) return false;
+  if (await publicHashList.has(hashValue)) return false;
+  console.warn(`[COS] Blocked: hash ${hashValue} not in Public Hash List`);
+  return true;
+}
 
-  const { isGlobal } = await resolveVisibility(hashValue, requestingOrigin);
-  if (!isGlobal) {
-    // Restricted (list or same-site) resources are not globally
-    // probeable by construction -- the origins check below in the
-    // caller already governs access, independent of the PHL.
-    return false;
-  }
-
-  const allowed = await publicHashList.has(hashValue);
-  if (!allowed) {
-    console.warn(
-      `[COS] Blocked: hash ${hashValue} not in Public Hash List`
-    );
-    return true;
-  }
-  return false;
+// Whether `origin` may read a stored file under `partition`: every check a
+// read makes before revealing that a file is there.
+async function mayRead(hashValue, origin, partition) {
+  const grant = await grantFor(hashValue, origin, partition);
+  if (grant === 'grant') return true;
+  if (grant !== 'global') return false;
+  return !(await isBlockedByPublicHashList(hashValue));
 }
 
 async function setupOffscreenDocument(path) {
@@ -225,6 +206,8 @@ async function setupOffscreenDocument(path) {
 }
 
 const resourceManager = new ResourceManager();
+// Lets the records from before grants were keyed migrate when they load.
+resourceManager.siteOf = getSchemefulSite;
 
 initTelemetry({ publicHashList, resourceManager, getSite });
 
@@ -294,14 +277,6 @@ function assertValidHash(hash) {
   }
 }
 
-// Whether `origin` may read a stored file: the checks requestFileHandle makes
-// before revealing that a file is there.
-async function mayRead(hashValue, origin) {
-  if (resourceManager.isStoringOrigin(hashValue, origin)) return true;
-  if (await isBlockedByPublicHashList(hashValue, origin)) return false;
-  return (await resolveVisibility(hashValue, origin)).reachable;
-}
-
 // Above this size, stored files are hashed 4 MiB at a time, so a multi-GiB
 // file never sits in this worker's memory whole. Below it, the native digest
 // on one buffer is used: the hand-rolled one runs at about 270 MiB/s in V8,
@@ -327,6 +302,59 @@ function senderOrigin(sender) {
   } catch {
     return '';
   }
+}
+
+// The schemeful site of the top-level page the sender runs under, the key
+// the spec puts on storing and list grants. A top-level frame is its own top
+// level; for a subframe it's the tab's URL, which comes from the browser, so
+// the page can't fake it. Null when the browser doesn't say.
+async function senderPartition(sender) {
+  try {
+    const topLevel =
+      sender.frameId === 0 ? senderOrigin(sender) : new URL(sender.tab.url).origin;
+    return await getSchemefulSite(topLevel);
+  } catch {
+    return null;
+  }
+}
+
+// The `origins` values of create requests whose bytes haven't arrived yet,
+// keyed by origin, partition, and hash. A create request discloses nothing
+// and grants nothing (see "complete a create request" in the spec); the
+// grants only apply once the bytes are verified, in recordWrite().
+const pendingCreates = new Map();
+const PENDING_CREATES_MAX = 1000;
+
+function rememberCreate(origin, partition, hashValue, requestedOrigins) {
+  const key = `${origin}|${partition}|${hashValue}`;
+  const requests = pendingCreates.get(key) ?? [];
+  pendingCreates.delete(key);
+  pendingCreates.set(key, [...requests, requestedOrigins]);
+  if (pendingCreates.size > PENDING_CREATES_MAX) {
+    pendingCreates.delete(pendingCreates.keys().next().value);
+  }
+}
+
+// Records the grants of a write whose bytes were just verified and stored:
+// a storing grant for the writer under its partition, and the `origins`
+// values it asked for. `requests` defaults to the pending create requests;
+// a write that skipped them gets the same-site default.
+async function recordWrite(hashValue, origin, partition, requests) {
+  if (!partition) return;
+  const key = `${origin}|${partition}|${hashValue}`;
+  requests ??= pendingCreates.get(key) ?? [];
+  pendingCreates.delete(key);
+  const firstParty = (await getSchemefulSite(origin)) === partition;
+  resourceManager.addStoringGrant(hashValue, origin, partition);
+  for (const requestedOrigins of requests) {
+    resourceManager.upgradeVisibility(
+      hashValue,
+      requestedOrigins,
+      partition,
+      firstParty
+    );
+  }
+  await resourceManager.saveManagerToStorage();
 }
 
 // Create the offscreen document for Blob operations.
@@ -455,27 +483,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'requestFileHandle': {
           const { hashes, create, origins: requestedOrigins } = data;
           const origin = senderOrigin(sender);
+          const partition = await senderPartition(sender);
           hashes.forEach(assertValidHash);
           const tabId = sender.tab?.id;
           maybeResetForNewPage(tabId, sender.documentId);
           const success = [];
           for (const hash of hashes) {
-            // The original storer always has access to a resource it stored,
-            // regardless of PHL or visibility tier.
-            const isStorer =
-              !create && resourceManager.isStoringOrigin(hash.value, origin);
-
-            // Public Hash List gate: when enabled, a hash that isn't on
-            // the allowlist is treated as unavailable before the COS
-            // cache is even queried, regardless of what's actually
-            // cached locally. Only applies to 'global' resources --
-            // see resolveVisibility() for why list/same-site resources
-            // are exempt.
-            if (
-              !create &&
-              !isStorer &&
-              (await isBlockedByPublicHashList(hash.value, origin))
-            ) {
+            // A read must clear the grants (and, for the global grant alone,
+            // the Public Hash List) before the cache is even queried, so a
+            // refusal looks exactly like a file that isn't there.
+            if (!create && !(await mayRead(hash.value, origin, partition))) {
               resourceManager.recordMiss();
               countForTelemetry('miss', hash.value, origin, 'getFileHandle');
               if (tabId) {
@@ -489,33 +506,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               responseData = { hashes, success };
               sendResponse({ data: responseData });
               return;
-            }
-            // For reads (create is falsy), a non-global resource must
-            // also pass the origins/same-site check before being
-            // revealed -- a hash not on the PHL was already rejected
-            // above, but a hash that IS allowed past the PHL gate (or
-            // isn't gated because it's 'list'/'same-site') still needs
-            // this check, since resolveVisibility() determines whether
-            // the requesting origin itself is allowed to see this hash.
-            if (!create && !isStorer) {
-              const { reachable } = await resolveVisibility(hash.value, origin);
-              if (!reachable) {
-                resourceManager.recordMiss();
-                countForTelemetry('miss', hash.value, origin, 'getFileHandle');
-                if (tabId) {
-                  if (!tabMissHashes[tabId])
-                    tabMissHashes[tabId] = new Set();
-                  tabMissHashes[tabId].add(hash.value);
-                  if (!tabMissOrigins[tabId])
-                    tabMissOrigins[tabId] = new Set();
-                  tabMissOrigins[tabId].add(origin);
-                  updateBadge(tabId);
-                }
-                await resourceManager.saveManagerToStorage();
-                responseData = { hashes, success };
-                sendResponse({ data: responseData });
-                return;
-              }
             }
             const handle = await getFileHandle(hash, create);
             if (!handle) {
@@ -537,12 +527,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
             success.push(handle);
             if (create) {
-              // Apply the requested origins value to this hash's stored
-              // visibility tier (global/list/same-site), enforcing the
-              // spec's upgrade-only rule. requestedOrigins is undefined
-              // when the page omitted `origins` entirely (same-site).
-              resourceManager.setVisibility(hash.value, requestedOrigins);
-              resourceManager.addStoringOrigin(hash.value, origin);
+              // Nothing is granted until the bytes arrive and match the
+              // hash. Recording the writer now would let a create request
+              // with no bytes read back an entry another site stored.
+              // requestedOrigins is undefined when the page omitted
+              // `origins` entirely (same-site).
+              rememberCreate(origin, partition, hash.value, requestedOrigins);
             }
             resourceManager.recordAccess(origin, hash.value);
             if (!create) {
@@ -568,7 +558,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           // like a miss, so the answer reveals nothing about it.
           if (
             !fromExtensionPage(sender) &&
-            !(await mayRead(hash.value, senderOrigin(sender)))
+            !(await mayRead(
+              hash.value,
+              senderOrigin(sender),
+              await senderPartition(sender)
+            ))
           ) {
             throw cosError('NotFoundError', 'File not found in cross-origin storage.');
           }
@@ -588,7 +582,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           assertValidHash(hash);
           if (
             !fromExtensionPage(sender) &&
-            !(await mayRead(hash.value, senderOrigin(sender)))
+            !(await mayRead(
+              hash.value,
+              senderOrigin(sender),
+              await senderPartition(sender)
+            ))
           ) {
             responseData = { found: false };
             break;
@@ -640,6 +638,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 });
           await assertMatchesHash(hash, blob);
           await storeFileData(hash, blob, mimeType);
+          if (!fromExtensionPage(sender)) {
+            await recordWrite(
+              hash.value,
+              senderOrigin(sender),
+              await senderPartition(sender)
+            );
+          }
           countForTelemetry('store', hash.value, senderOrigin(sender), 'getFileHandle');
           resourceManager.recordSize(hash.value, blob.size);
           resourceManager.recordMimeType(
@@ -709,6 +714,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 throw err;
               }
             }
+            await recordWrite(
+              entry.hash.value,
+              senderOrigin(sender),
+              await senderPartition(sender)
+            );
             countForTelemetry(
               'store',
               entry.hash.value,
@@ -733,7 +743,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           // delete anything.
           if (
             !fromExtensionPage(sender) &&
-            !resourceManager.isStoringOrigin(hash.value, senderOrigin(sender))
+            !resourceManager.isStoringOrigin(
+              hash.value,
+              senderOrigin(sender),
+              await senderPartition(sender)
+            )
           ) {
             throw cosError('NotAllowedError', 'Only an origin that stored this file may delete it.');
           }
@@ -837,6 +851,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           maybeResetForNewPage(tabId, sender.documentId);
           let { cssText, url } = data;
           const origin = senderOrigin(sender);
+          const partition = await senderPartition(sender);
           if (!cssText && url) {
             try {
               const resp = await fetch(url, { cache: 'no-cache' });
@@ -863,23 +878,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               let om;
               while ((om = oRe.exec(trimmed)) !== null) allowed.push(om[1]);
             }
-            if (allowed !== '*' && !allowed.includes(origin)) {
-              rewritten = rewritten.replace(fm.full, `url("${fm.fontUrl}")`);
-              continue;
-            }
             const hash = sriToHashObj(fm.sriHash);
-            // Public Hash List gate: if this hash isn't allowlisted,
-            // treat it as not available in the COS cache — even if it
-            // actually is — and fall through to the normal network-fetch
-            // path below, same as a genuine cache miss. Only applies to
-            // 'global' resources -- see resolveVisibility().
-            // The original storer is always exempt from the PHL gate.
-            const isStorer = resourceManager.isStoringOrigin(hash.value, origin);
-            const phlBlocked =
-              !isStorer &&
-              (await isBlockedByPublicHashList(hash.value, origin));
-            let fileResult = phlBlocked ? false : await getFileData(hash);
-            const alreadyCached = !phlBlocked && !!fileResult;
+            // The same grants as getFileHandle(): a file this origin may
+            // not read counts as a miss, even if it's actually cached, and
+            // falls through to the network-fetch path below. What the
+            // declaration's own origins list says decides only what a store
+            // grants, never what this page may read.
+            const readable = await mayRead(hash.value, origin, partition);
+            let fileResult = readable ? await getFileData(hash) : false;
+            const alreadyCached = !!fileResult;
             if (!fileResult) {
               resourceManager.recordMiss();
               countForTelemetry('miss', hash.value, origin, 'css');
@@ -906,16 +913,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 countForTelemetry('store', hash.value, origin, 'css');
                 resourceManager.recordSize(hash.value, fontBlob.size);
                 resourceManager.recordMimeType(hash.value, mimeType);
-                // Persist this hash's visibility from the CSS
-                // cross-origin-storage() modifier's own origins list,
-                // using the same upgrade-only resourceManager state as
-                // the JS getFileHandle() path, so a hash stored via
-                // CSS is governed by the same rules either way.
-                resourceManager.setVisibility(
-                  hash.value,
-                  allowed === '*' ? '*' : allowed
-                );
-                resourceManager.addStoringOrigin(hash.value, origin);
+                // The grants come from the cross-origin-storage()
+                // modifier's own origins list, recorded the same way as for
+                // the JS getFileHandle() path, so a hash stored via CSS is
+                // governed by the same rules either way.
+                await recordWrite(hash.value, origin, partition, [
+                  allowed === '*' ? '*' : allowed.length ? allowed : undefined,
+                ]);
                 fileResult = await getFileData(hash);
               } catch (e) {
                 rewritten = rewritten.replace(fm.full, `url("${fm.fontUrl}")`);
@@ -961,14 +965,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // and <script integrity crossoriginstorage>. See
         // https://github.com/WICG/cross-origin-storage/blob/main/README.md#declarative-html-integration
         //
-        // Unlike getFileHandle()'s persisted-visibility read check, reads
-        // here are gated by resolveVisibility() exactly the same way -- the
-        // difference from the CSS integration above is deliberate: the CSS
-        // form re-derives "allowed" from the declaration's own origins list
-        // on every read, which silently never matches for the same-site
-        // (no-origins) form. Using the persisted visibility tier instead
-        // makes the spec's first example (a bare `crossoriginstorage`
-        // attribute, same-site-only) actually work.
+        // Reads are gated by mayRead(), exactly like getFileHandle() and the
+        // CSS integration above.
         case 'resolveDeclarativeResource': {
           const tabId = sender.tab?.id;
           maybeResetForNewPage(tabId, sender.documentId);
@@ -984,15 +982,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             ? async () => !!(await cache.match(generateCacheKey(hash)))
             : () => getFileData(hash);
 
-          const isStorer = resourceManager.isStoringOrigin(hash.value, origin);
-          const phlBlocked =
-            !isStorer && (await isBlockedByPublicHashList(hash.value, origin));
-          let reachable = isStorer;
-          if (!reachable && !phlBlocked) {
-            ({ reachable } = await resolveVisibility(hash.value, origin));
-          }
-
-          let fileResult = reachable && !phlBlocked ? await lookup() : false;
+          const partition = await senderPartition(sender);
+          const readable = await mayRead(hash.value, origin, partition);
+          let fileResult = readable ? await lookup() : false;
           const alreadyCached = !!fileResult;
 
           if (!fileResult) {
@@ -1023,11 +1015,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               countForTelemetry('store', hash.value, origin, api);
               resourceManager.recordSize(hash.value, blob.size);
               resourceManager.recordMimeType(hash.value, mimeType);
-              // Persist this hash's visibility from the crossoriginstorage
-              // attribute's own origins value, using the same upgrade-only
-              // resourceManager state as the JS getFileHandle() path.
-              resourceManager.setVisibility(hash.value, origins);
-              resourceManager.addStoringOrigin(hash.value, origin);
+              // The grants come from the crossoriginstorage attribute's own
+              // origins value, recorded the same way as for the JS
+              // getFileHandle() path.
+              await recordWrite(hash.value, origin, partition, [origins]);
               fileResult = await lookup();
             } catch (e) {
               responseData = { hash, data: null };

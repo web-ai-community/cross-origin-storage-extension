@@ -96,6 +96,12 @@ function startServer() {
   return new Promise((resolve) => {
     const server = createServer(async (req, res) => {
       const url = new URL(req.url, `http://localhost:${PORT}`);
+      // An empty page for the top-level-site keying tests to frame.
+      if (url.pathname === '/blank.html') {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end('<!doctype html><title>blank</title>');
+        return;
+      }
       const fp = join(DOCS_PATH, url.pathname === '/' ? 'test.html' : url.pathname);
       try {
         const data = await readFile(fp);
@@ -234,10 +240,10 @@ async function main() {
       '--no-default-browser-check',
       // Route .test hostnames to the local server so the extension's
       // content script is injected and COS calls reach the right origin.
-      `--host-resolver-rules=MAP a.test 127.0.0.1,MAP b.test 127.0.0.1,MAP sub.a.test 127.0.0.1`,
-      // Mark the three test origins as secure so crypto.subtle etc. are
+      `--host-resolver-rules=MAP a.test 127.0.0.1,MAP b.test 127.0.0.1,MAP sub.a.test 127.0.0.1,MAP sub.b.test 127.0.0.1,MAP c.test 127.0.0.1`,
+      // Mark the test origins as secure so crypto.subtle etc. are
       // available (required by test.html's sha256Hex helper).
-      `--unsafely-treat-insecure-origin-as-secure=http://a.test:${PORT},http://b.test:${PORT},http://sub.a.test:${PORT}`,
+      `--unsafely-treat-insecure-origin-as-secure=http://a.test:${PORT},http://b.test:${PORT},http://sub.a.test:${PORT},http://sub.b.test:${PORT},http://c.test:${PORT}`,
     ],
   });
 
@@ -468,8 +474,8 @@ async function main() {
         if (records.hashToSize?.[hash] !== Buffer.byteLength(body)) {
           problems.push(`#${i}: size ${records.hashToSize?.[hash]}`);
         }
-        if (records.hashToVisibility?.[hash] !== '*') {
-          problems.push(`#${i}: visibility ${JSON.stringify(records.hashToVisibility?.[hash])}`);
+        if (records.hashToGlobal?.[hash] !== true) {
+          problems.push(`#${i}: global grant ${JSON.stringify(records.hashToGlobal?.[hash])}`);
         }
       });
       concurrencyResults.push({
@@ -485,11 +491,127 @@ async function main() {
     await page.close();
   }
 
+  // ── Grants keyed to the top-level site ─────────────────────────────────────
+
+  // A storing grant, and a list grant, only count under the top-level site
+  // they were written under, so a frame embedded on two sites can't carry an
+  // identifier between them. A create request grants nothing until its bytes
+  // arrive. https://wicg.github.io/cross-origin-storage/#cos-entries
+  console.log('\nChecking that grants are keyed to the top-level site…');
+  const keyingResults = [];
+  const at = (host) => `http://${host}:${PORT}`;
+  const B = at('b.test');
+
+  // Opens `host` top-level, optionally with a b.test frame, and returns the
+  // frame to run in: the b.test frame if there is one, else the page.
+  const contexts = [];
+  async function open(host, { frameB = false } = {}) {
+    const p = await context.newPage();
+    contexts.push(p);
+    await p.goto(`${at(host)}/blank.html`, { waitUntil: 'load' });
+    if (!frameB) {
+      await p.waitForFunction(() => !!navigator.crossOriginStorage);
+      return p.mainFrame();
+    }
+    await p.evaluate((src) => new Promise((resolve) => {
+      const f = document.createElement('iframe');
+      f.src = src;
+      f.onload = resolve;
+      document.body.append(f);
+    }), `${B}/blank.html`);
+    const frame = p.frames().find((f) => f.url().startsWith(B));
+    await frame.waitForFunction(() => !!navigator.crossOriginStorage);
+    return frame;
+  }
+  const write = (frame, text, options = {}) =>
+    frame.evaluate(async ({ text, options }) => {
+      const bytes = new TextEncoder().encode(text);
+      const value = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
+        .map((b) => b.toString(16).padStart(2, '0')).join('');
+      const handle = await navigator.crossOriginStorage.getFileHandle(
+        { algorithm: 'SHA-256', value }, { create: true, ...options });
+      const writable = await handle.createWritable();
+      await writable.write(bytes);
+      await writable.close();
+    }, { text, options });
+  // Resolves to the stored text, or to the name of the error a read threw.
+  const read = (frame, text) =>
+    frame.evaluate(async (text) => {
+      const bytes = new TextEncoder().encode(text);
+      const value = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
+        .map((b) => b.toString(16).padStart(2, '0')).join('');
+      try {
+        const handle = await navigator.crossOriginStorage.getFileHandle(
+          { algorithm: 'SHA-256', value });
+        return await (await handle.getFile()).text();
+      } catch (err) {
+        return err.name;
+      }
+    }, text);
+  async function check(label, text, frame, expectRead) {
+    try {
+      const got = await read(frame, text);
+      const want = expectRead ? text : 'NotFoundError';
+      keyingResults.push({
+        label: `[Keying] ${label}`,
+        status: got === want ? 'pass' : 'fail',
+        detail: `expected ${expectRead ? 'the stored bytes' : 'NotFoundError'}, got ${JSON.stringify(got)}`,
+      });
+    } catch (err) {
+      keyingResults.push({ label: `[Keying] ${label}`, status: 'fail', detail: err.message.split('\n')[0] });
+    }
+  }
+
+  try {
+    const stamp = Date.now();
+    const marker = `frame marker ${stamp}`;
+    const frameOnA = await open('a.test', { frameB: true });
+    await write(frameOnA, marker);
+    await check('b.test frame on a.test reads back what it wrote there', marker, frameOnA, true);
+    const frameOnC = await open('c.test', { frameB: true });
+    await check('b.test frame on c.test cannot read what it wrote on a.test', marker, frameOnC, false);
+    const topB = await open('b.test');
+    await check('b.test top-level cannot read what its frame wrote on a.test', marker, topB, false);
+
+    const firstParty = `first-party ${stamp}`;
+    await write(topB, firstParty);
+    await check('b.test frame on c.test cannot read what b.test wrote top-level', firstParty, frameOnC, false);
+    const topA = await open('a.test');
+    await topA.evaluate(async (text) => {
+      const bytes = new TextEncoder().encode(text);
+      const value = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
+        .map((b) => b.toString(16).padStart(2, '0')).join('');
+      await navigator.crossOriginStorage.getFileHandle(
+        { algorithm: 'SHA-256', value }, { create: true });
+    }, firstParty);
+    await check('a.test cannot read an entry after a create request with no bytes', firstParty, topA, false);
+
+    const listed = `listed ${stamp}`;
+    await write(topA, listed, { origins: [B] });
+    await check('list [b.test] from a.test: b.test top-level reads', listed, topB, true);
+    const topSubB = await open('sub.b.test');
+    await check('list [b.test] from a.test: sub.b.test (same-site) reads', listed, topSubB, true);
+    await check('list [b.test] from a.test: b.test frame on a.test reads', listed, frameOnA, true);
+    await check('list [b.test] from a.test: b.test frame on c.test cannot read', listed, frameOnC, false);
+
+    const upgraded = `listed then global ${stamp}`;
+    await write(topA, upgraded, { origins: [B] });
+    await write(topA, upgraded, { origins: '*' });
+    await check('list [b.test] survives a later "*" write for a hash off the PHL', upgraded, topB, true);
+
+    const selfListed = `frame lists itself ${stamp}`;
+    await write(frameOnA, selfListed, { origins: [B] });
+    await check('a list a b.test frame wrote on a.test does not reach b.test top-level', selfListed, topB, false);
+  } catch (err) {
+    keyingResults.push({ label: '[Keying] setup', status: 'fail', detail: err.message.split('\n')[0] });
+  }
+  for (const p of contexts) await p.close();
+
   // ── Collect + report all results ──────────────────────────────────────────
 
   console.log('\n── Test Results ──────────────────────────────────────');
   let passed = 0, failed = 0;
-  for (const r of [...results, ...legacyResults, ...popupResults, ...concurrencyResults]) {
+  for (const r of [...results, ...legacyResults, ...popupResults, ...concurrencyResults, ...keyingResults]) {
     if (r.status === 'n/a') continue;
     const icon = r.status === 'pass' ? '✅' : '❌';
     console.log(`${icon} [${r.status}] ${r.label}`);
