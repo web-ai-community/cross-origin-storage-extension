@@ -1,0 +1,121 @@
+{
+  "failures": {
+    "cross-origin-storage/allow-origin-header-wildcard.tentative.optional.https.html": {
+      "ceiling: a \"*\" write from a document with no Cross-Origin-Storage-Allow-Origin header is disclosed to a cross-site origin for a PHL resource": "Times out under cos-wpt, waiting on a cross-site read of a Public Hash List resource. Not yet investigated.",
+      "(harness)": "Times out under cos-wpt, waiting on a cross-site read of a Public Hash List resource. Not yet investigated."
+    },
+    "cross-origin-storage/allow-origin-header-workers.tentative.https.html": {
+      "shared worker: the ceiling is the intersection of every owner document's ceiling": "A shared worker is relayed through one owner page, so the extension can't combine what all of its owner documents allow."
+    },
+    "cross-origin-storage/allow-origin-header.tentative.https.html": {
+      "ceiling: an origin absent from the Cross-Origin-Storage-Allow-Origin header is dropped from the list, deterministically": "cos-wpt environment: there's a single cross-site mirror, so the cross-site pool's two origins are the same origin, and it is in the ceiling."
+    },
+    "cross-origin-storage/cross-mechanism-interop.tentative.https.html": {
+      "cross-mechanism interop: an entry written by the JS import attribute integration is readable via imperative getFileHandle()": "The JavaScript engine rejects integrity and crossOriginStorage as import attribute keys before any script runs, so the literal syntax can't be polyfilled (see README: JavaScript import attribute integration).",
+      "cross-mechanism interop: a wildcard-scoped entry written imperatively is served, deterministically, to its own storer by HTML crossoriginstorage=\"*\"": "The extension leaves <script> to the browser's own loader, so an entry another integration wrote is never served to a <script> from COS.",
+      "cross-mechanism interop: an entry written by the fetch() integration is served by HTML crossoriginstorage": "The extension leaves <script> to the browser's own loader, so an entry another integration wrote is never served to a <script> from COS."
+    },
+    "cross-origin-storage/css/cross-origin-storage-cross-origin.tentative.https.html": {
+      "(harness)": "cos-wpt environment: the origin pools include the test's own origin, and when the runner hosts the test on tomayac.github.io, whose service worker isn't at the origin root, a remote context there never loads."
+    },
+    "cross-origin-storage/css/cross-origin-storage-import.tentative.https.html": {
+      "CSS: an @import with cross-origin-storage() is served from COS on a subsequent request": "The CSS integration rewrites url() sources in @font-face and style rules, and an @import is fetched by the browser itself.",
+      "CSS: an @import with cross-origin-storage(*) is served from COS on a subsequent request": "The CSS integration rewrites url() sources in @font-face and style rules, and an @import is fetched by the browser itself."
+    },
+    "cross-origin-storage/css/cross-origin-storage-parsing.tentative.https.html": {
+      "e.style['background-image'] = \"url(\\\"https://example.com/resource.png\\\" cross-origin-storage())\" should set the property value": "The browser's CSS parser drops cross-origin-storage() and integrity() from url(), so CSSOM can't serialize them. Only a native implementation can pass this.",
+      "e.style['background-image'] = \"url(\\\"https://example.com/resource.png\\\" cross-origin-storage(*))\" should set the property value": "The browser's CSS parser drops cross-origin-storage() and integrity() from url(), so CSSOM can't serialize them. Only a native implementation can pass this.",
+      "e.style['background-image'] = \"url(\\\"https://example.com/resource.png\\\" cross-origin-storage(\\\"https://a.example\\\"))\" should set the property value": "The browser's CSS parser drops cross-origin-storage() and integrity() from url(), so CSSOM can't serialize them. Only a native implementation can pass this.",
+      "e.style['background-image'] = \"url(\\\"https://example.com/resource.png\\\" cross-origin-storage(\\\"https://a.example\\\", \\\"https://b.example\\\"))\" should set the property value": "The browser's CSS parser drops cross-origin-storage() and integrity() from url(), so CSSOM can't serialize them. Only a native implementation can pass this.",
+      "e.style['background-image'] = \"url(\\\"https://example.com/resource.png\\\" cross-origin-storage(\\\"not an origin\\\"))\" should set the property value": "The browser's CSS parser drops cross-origin-storage() and integrity() from url(), so CSSOM can't serialize them. Only a native implementation can pass this.",
+      "e.style['background-image'] = \"url(\\\"https://example.com/resource.png\\\" cross-origin-storage( * ))\" should set the property value": "The browser's CSS parser drops cross-origin-storage() and integrity() from url(), so CSSOM can't serialize them. Only a native implementation can pass this.",
+      "e.style['background-image'] = \"url(\\\"https://example.com/resource.png\\\" cross-origin-storage( \\\"https://a.example\\\" ,\\\"https://b.example\\\" ))\" should set the property value": "The browser's CSS parser drops cross-origin-storage() and integrity() from url(), so CSSOM can't serialize them. Only a native implementation can pass this.",
+      "e.style['background-image'] = \"url(\\\"https://example.com/resource.png\\\" integrity(\\\"sha256-foobar\\\") cross-origin-storage(*))\" should set the property value": "The browser's CSS parser drops cross-origin-storage() and integrity() from url(), so CSSOM can't serialize them. Only a native implementation can pass this.",
+      "e.style['background-image'] = \"url(\\\"https://example.com/resource.png\\\" cross-origin-storage(* *))\" should not set the property value": "The browser's CSS parser drops cross-origin-storage() and integrity() from url(), so CSSOM can't serialize them. Only a native implementation can pass this.",
+      "e.style['background-image'] = \"url(\\\"https://example.com/resource.png\\\" cross-origin-storage(*, \\\"https://a.example\\\"))\" should not set the property value": "The browser's CSS parser drops cross-origin-storage() and integrity() from url(), so CSSOM can't serialize them. Only a native implementation can pass this.",
+      "e.style['background-image'] = \"url(\\\"https://example.com/resource.png\\\" cross-origin-storage(\\\"https://a.example\\\", *))\" should not set the property value": "The browser's CSS parser drops cross-origin-storage() and integrity() from url(), so CSSOM can't serialize them. Only a native implementation can pass this.",
+      "e.style['background-image'] = \"url(\\\"https://example.com/resource.png\\\" cross-origin-storage(\\\"https://a.example\\\" \\\"https://b.example\\\"))\" should not set the property value": "The browser's CSS parser drops cross-origin-storage() and integrity() from url(), so CSSOM can't serialize them. Only a native implementation can pass this.",
+      "e.style['background-image'] = \"url(\\\"https://example.com/resource.png\\\" cross-origin-storage(\\\"https://a.example\\\",))\" should not set the property value": "The browser's CSS parser drops cross-origin-storage() and integrity() from url(), so CSSOM can't serialize them. Only a native implementation can pass this.",
+      "e.style['background-image'] = \"url(\\\"https://example.com/resource.png\\\" cross-origin-storage(,\\\"https://a.example\\\"))\" should not set the property value": "The browser's CSS parser drops cross-origin-storage() and integrity() from url(), so CSSOM can't serialize them. Only a native implementation can pass this.",
+      "e.style['background-image'] = \"url(\\\"https://example.com/resource.png\\\" cross-origin-storage(any))\" should not set the property value": "The browser's CSS parser drops cross-origin-storage() and integrity() from url(), so CSSOM can't serialize them. Only a native implementation can pass this.",
+      "e.style['background-image'] = \"url(\\\"https://example.com/resource.png\\\" cross-origin-storage(1))\" should not set the property value": "The browser's CSS parser drops cross-origin-storage() and integrity() from url(), so CSSOM can't serialize them. Only a native implementation can pass this."
+    },
+    "cross-origin-storage/css/cross-origin-storage.tentative.https.html": {
+      "CSS: a same-site-scoped @font-face is served from COS on a subsequent request": "Not yet understood: the font is stored, but the second @font-face with a broken URL isn't served from COS.",
+      "CSS: cross-origin-storage(*) opts a @font-face into a wildcard-scoped COS entry": "Not yet understood: the font is stored, but the second @font-face with a broken URL isn't served from COS.",
+      "CSS: cross-origin-storage(\"origin\", ...) opts a @font-face into COS": "Not yet understood: the font is stored, but the second @font-face with a broken URL isn't served from COS."
+    },
+    "cross-origin-storage/fetch/fetch-cross-origin.tentative.https.html": {
+      "fetch, cross-origin: a same-site origin is always served an entry the fetch integration stored": "cos-wpt environment: every *.github.io origin is its own site, so there's no same-site, cross-origin pair to read from."
+    },
+    "cross-origin-storage/fetch/fetch-service-worker.tentative.https.html": {
+      "fetch, service worker: a crossOriginStorage fetch() in a service worker never stores into COS": "cos-wpt environment: the test's service worker can't be registered, since its script request would bypass the worker that serves the virtual tree."
+    },
+    "cross-origin-storage/fetch/fetch-service-worker.tentative.optional.https.html": {
+      "fetch, service worker: a crossOriginStorage fetch() in a service worker is not served from COS": "cos-wpt environment: the test's service worker can't be registered, since its script request would bypass the worker that serves the virtual tree."
+    },
+    "cross-origin-storage/html/crossoriginstorage-cross-origin.tentative.https.html": {
+      "HTML, cross-origin: a same-site origin is always served a same-site-scoped <link> from COS": "cos-wpt environment: every *.github.io origin is its own site, so there's no same-site, cross-origin pair to read from."
+    },
+    "cross-origin-storage/html/crossoriginstorage-module.tentative.https.html": {
+      "HTML: a crossoriginstorage module <script> is served from COS on a subsequent request": "The extension leaves <script> to the browser's own loader, so a script is never served from COS (see README: Declarative HTML integration).",
+      "HTML: a crossoriginstorage <link rel=modulepreload> is served from COS": "The extension leaves <script> to the browser's own loader, so a script is never served from COS (see README: Declarative HTML integration)."
+    },
+    "cross-origin-storage/html/crossoriginstorage-parser-inserted.tentative.https.html": {
+      "HTML: <link> and <script> written in markup are served from COS on a subsequent load": "The extension leaves <script> to the browser's own loader, so a script is never served from COS (see README: Declarative HTML integration)."
+    },
+    "cross-origin-storage/html/crossoriginstorage-preload.tentative.https.html": {
+      "HTML: a crossoriginstorage <link rel=preload as=script> is served from COS": "The extension handles <link rel=stylesheet> only, so preload and modulepreload links load natively.",
+      "HTML: a crossoriginstorage <link rel=preload as=style> is served from COS": "The extension handles <link rel=stylesheet> only, so preload and modulepreload links load natively."
+    },
+    "cross-origin-storage/html/crossoriginstorage-public-hash-list.tentative.optional.https.html": {
+      "meta: the listed resource was served cross-site at least once": "No global-grant read of the Public Hash List resource was disclosed under cos-wpt. Not yet investigated."
+    },
+    "cross-origin-storage/html/crossoriginstorage.tentative.https.html": {
+      "HTML: a same-site (valueless crossoriginstorage) <script> resource is served from COS on a subsequent request": "The extension leaves <script> to the browser's own loader, so a script is never served from COS (see README: Declarative HTML integration)."
+    },
+    "cross-origin-storage/import-attribute/import-attribute-cross-origin.tentative.https.html": {
+      "JS import attribute, cross-origin: a \"*\"-scoped module that is not on the Public Hash List is never served cross-site": "The JavaScript engine rejects integrity and crossOriginStorage as import attribute keys before any script runs, so the literal syntax can't be polyfilled (see README: JavaScript import attribute integration).",
+      "JS import attribute, cross-origin: crossOriginStorage: \"\" (same-site) is never served from COS to a cross-site origin": "The JavaScript engine rejects integrity and crossOriginStorage as import attribute keys before any script runs, so the literal syntax can't be polyfilled (see README: JavaScript import attribute integration).",
+      "JS import attribute, cross-origin: a same-site origin is always served a same-site-scoped module from COS": "The JavaScript engine rejects integrity and crossOriginStorage as import attribute keys before any script runs, so the literal syntax can't be polyfilled (see README: JavaScript import attribute integration).",
+      "JS import attribute, cross-origin: crossOriginStorage: \"<origin>\" is served to a listed cross-site origin the resource's header authorizes": "The JavaScript engine rejects integrity and crossOriginStorage as import attribute keys before any script runs, so the literal syntax can't be polyfilled (see README: JavaScript import attribute integration).",
+      "JS import attribute, cross-origin: crossOriginStorage: \"<origin>\" without the resource's header is not served to a listed cross-site origin": "The JavaScript engine rejects integrity and crossOriginStorage as import attribute keys before any script runs, so the literal syntax can't be polyfilled (see README: JavaScript import attribute integration)."
+    },
+    "cross-origin-storage/import-attribute/import-attribute.tentative.https.html": {
+      "JS import attribute: dynamic import() with a real URL and crossOriginStorage: \"\" (same-site) succeeds and stores into COS": "The JavaScript engine rejects integrity and crossOriginStorage as import attribute keys before any script runs, so the literal syntax can't be polyfilled (see README: JavaScript import attribute integration).",
+      "JS import attribute: dynamic import() of a broken URL resolves from COS given a matching integrity hash (same-site)": "The JavaScript engine rejects integrity and crossOriginStorage as import attribute keys before any script runs, so the literal syntax can't be polyfilled (see README: JavaScript import attribute integration).",
+      "JS import attribute: crossOriginStorage: \"*\" opts a dynamic import() into a wildcard-scoped COS entry": "The JavaScript engine rejects integrity and crossOriginStorage as import attribute keys before any script runs, so the literal syntax can't be polyfilled (see README: JavaScript import attribute integration).",
+      "JS import attribute: crossOriginStorage: \"<origins...>\" (space-separated) opts a dynamic import() into COS": "The JavaScript engine rejects integrity and crossOriginStorage as import attribute keys before any script runs, so the literal syntax can't be polyfilled (see README: JavaScript import attribute integration).",
+      "JS import attribute: omitting crossOriginStorage preserves ordinary integrity behavior with no COS participation": "The JavaScript engine rejects integrity and crossOriginStorage as import attribute keys before any script runs, so the literal syntax can't be polyfilled (see README: JavaScript import attribute integration).",
+      "JS import attribute: the static import form (import ... with { integrity, crossOriginStorage }) is recognized": "The JavaScript engine rejects integrity and crossOriginStorage as import attribute keys before any script runs, so the literal syntax can't be polyfilled (see README: JavaScript import attribute integration).",
+      "JS import attribute: a static import of a broken URL resolves from COS given a matching integrity hash": "The JavaScript engine rejects integrity and crossOriginStorage as import attribute keys before any script runs, so the literal syntax can't be polyfilled (see README: JavaScript import attribute integration).",
+      "JS import attribute: a static import with integrity and no crossOriginStorage gets no COS participation": "The JavaScript engine rejects integrity and crossOriginStorage as import attribute keys before any script runs, so the literal syntax can't be polyfilled (see README: JavaScript import attribute integration).",
+      "JS import attribute: a JSON module (type: \"json\") is stored into and served from COS": "The JavaScript engine rejects integrity and crossOriginStorage as import attribute keys before any script runs, so the literal syntax can't be polyfilled (see README: JavaScript import attribute integration).",
+      "JS import attribute: a CSS module (type: \"css\") is stored into and served from COS": "The JavaScript engine rejects integrity and crossOriginStorage as import attribute keys before any script runs, so the literal syntax can't be polyfilled (see README: JavaScript import attribute integration)."
+    },
+    "cross-origin-storage/origins-scoping.tentative.https.html": {
+      "same-site baseline: a same-site sibling origin is authorized, deterministically": "cos-wpt environment: every *.github.io origin is its own site, so there's no same-site, cross-origin pair to read from.",
+      "(harness)": "cos-wpt environment: the origin pools include the test's own origin, and when the runner hosts the test on tomayac.github.io, whose service worker isn't at the origin root, a remote context there never loads."
+    },
+    "cross-origin-storage/permissions-policy-workers.tentative.https.html": {
+      "a service worker cannot use crossOriginStorage (empty owner set fails closed)": "cos-wpt environment: the test's service worker can't be registered, since its script request would bypass the worker that serves the virtual tree.",
+      "a shared worker owned by both an allowed and a disallowing document is blocked": "A shared worker is relayed through one owner page, so the extension can't combine what all of its owner documents allow."
+    },
+    "cross-origin-storage/top-level-site-keying.tentative.https.html": {
+      "an origins list written first-party admits the listed origins first-party and under the writer's top-level site": "cos-wpt environment: the runner frames every test, so a test hosted on a mirror isn't first-party, and its list grant is keyed to the runner's site."
+    },
+    "cross-origin-storage/visibility-upgrade-list-preserved.tentative.https.html": {
+      "(harness)": "cos-wpt environment: the origin pools include the test's own origin, and when the runner hosts the test on tomayac.github.io, whose service worker isn't at the origin root, a remote context there never loads."
+    }
+  },
+  "flaky": {
+    "cross-origin-storage/html/crossoriginstorage.tentative.https.html": {
+      "HTML: a same-site (valueless crossoriginstorage) <link> resource is served from COS on a subsequent request": "The extension resolves a <link> only after the browser has started loading it, and the test's next <link> can arrive before the store from the first has settled.",
+      "HTML: crossoriginstorage=\"*\" opts a <link> into COS": "The extension resolves a <link> only after the browser has started loading it, and the test's next <link> can arrive before the store from the first has settled.",
+      "HTML: crossoriginstorage=\"<space-separated origins>\" opts a <link> into COS": "The extension resolves a <link> only after the browser has started loading it, and the test's next <link> can arrive before the store from the first has settled."
+    },
+    "cross-origin-storage/html/crossoriginstorage-cross-origin.tentative.https.html": {
+      "HTML, cross-origin: a list-scoped <link> is served to a listed cross-site origin the resource's header authorizes": "The extension resolves a <link> only after the browser has started loading it, and the test's next <link> can arrive before the store from the first has settled."
+    }
+  }
+}

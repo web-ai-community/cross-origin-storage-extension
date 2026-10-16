@@ -690,6 +690,25 @@ copy. The extension supports both `getFileHandle()` and the earlier
 `requestFileHandle()`, which implementations built before the rename still
 have.
 
+## Web platform tests
+
+`npm run test:wpt` runs the official Cross-Origin Storage web platform tests
+([web-platform-tests/wpt#61811](https://github.com/web-platform-tests/wpt/pull/61811))
+against the extension in Chrome, through the
+[cos-wpt](https://tomayac.github.io/cos-wpt/) runner, which serves the tests
+straight from the pull request. `-- --filter <text>` runs only the tests whose
+name contains `<text>`, `WPT_DEBUG=1` prints the console of every frame and
+worker, and a run takes the better part of an hour.
+
+Every subtest result is compared with
+[`wpt-expectations.json`](wpt-expectations.json). Its `failures` are subtests
+the extension can't pass, each with the reason, such as syntax only the
+browser itself could accept, or a limit of the cos-wpt environment. Its
+`flaky` subtests depend on timing, so either result is accepted. Anything
+else that fails, or a listed failure that starts passing, fails the run.
+`-- --update` rewrites the file from a run, keeping the reasons it already
+has.
+
 ## Publishing
 
 `publish-extension.mjs` builds the archive with `zip-extension.sh` and submits
