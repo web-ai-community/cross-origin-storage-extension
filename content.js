@@ -231,6 +231,205 @@ const SETTINGS_ACTIONS = new Set([
   'getPublicHashListSetting',
 ]);
 
+// Two response headers of this document matter to COS, and an extension
+// can't see the response, so the document is fetched again, once, the first
+// time either is needed. The request goes through the page's own service
+// worker, as the navigation did, and runs in this isolated world, so page
+// script can't answer it.
+//   - Cross-Origin-Storage-Allow-Origin, the ceiling on what an `origins`
+//     list written from this document may name
+//     (https://wicg.github.io/cross-origin-storage/#allow-origin-header).
+//   - Permissions-Policy, for the cross-origin-storage feature
+//     (https://wicg.github.io/cross-origin-storage/#permissions-policy-integration).
+let documentHeadersPromise = null;
+function documentHeaders() {
+  documentHeadersPromise ??= (async () => {
+    const none = { ceiling: null, policy: null };
+    if (!/^https?:$/.test(location.protocol)) return none;
+    try {
+      // Firefox's content-script fetch() runs as the extension; content.fetch
+      // runs as the page, like the navigation.
+      const pageFetch = globalThis.content?.fetch?.bind(globalThis.content) ?? fetch;
+      const response = await pageFetch(location.href, {
+        cache: 'force-cache',
+        credentials: 'include',
+      });
+      response.body?.cancel().catch(() => {});
+      if (response.ok) {
+        return {
+          ceiling: response.headers.get('cross-origin-storage-allow-origin'),
+          policy: response.headers.get('permissions-policy'),
+        };
+      }
+    } catch {}
+    // Chrome sends this script's requests to the network, past the page's
+    // service worker, so a document only its service worker serves isn't
+    // found that way. main-world.js reads the headers then, with the fetch()
+    // it captured before any page script ran. Page script could forge that
+    // answer, which is the price of supporting such documents at all.
+    return (await askMainWorldForHeaders()) ?? none;
+  })();
+  return documentHeadersPromise;
+}
+
+function askMainWorldForHeaders() {
+  return new Promise((resolve) => {
+    const id = crypto.randomUUID();
+    const onReply = (event) => {
+      if (event.source !== window || event.data?.source !== 'cos-headers-reply') return;
+      if (event.data.id !== id) return;
+      window.removeEventListener('message', onReply);
+      clearTimeout(timer);
+      resolve({ ceiling: event.data.ceiling ?? null, policy: event.data.policy ?? null });
+    };
+    const timer = setTimeout(() => {
+      window.removeEventListener('message', onReply);
+      resolve(null);
+    }, 5000);
+    window.addEventListener('message', onReply);
+    window.postMessage({ source: 'cos-headers-query', id }, location.origin);
+  });
+}
+
+async function documentScopeCeiling() {
+  return (await documentHeaders()).ceiling;
+}
+
+// ── Permissions Policy ──────────────────────────────────────────────────────
+//
+// Browsers ignore a policy-controlled feature they don't implement, so the
+// extension evaluates cross-origin-storage itself, following Permissions
+// Policy's inherited-policy algorithm with the default allowlist 'self'.
+
+// An allowlist: { all, self, src, origins }. `self` and `src` stand for the
+// origins given for them where the allowlist is matched.
+function allowlistMatches(allowlist, origin, { selfOrigin, srcOrigin }) {
+  return (
+    allowlist.all ||
+    (allowlist.self && origin === selfOrigin) ||
+    (allowlist.src && origin === srcOrigin) ||
+    allowlist.origins.has(origin)
+  );
+}
+
+// The cross-origin-storage member of a Permissions-Policy header, a
+// structured-field dictionary such as `cross-origin-storage=(self
+// "https://a.example")`. Null when the header doesn't mention the feature.
+function policyHeaderAllowlist(value) {
+  if (!value) return null;
+  const match = /(?:^|,)\s*cross-origin-storage\s*=\s*(\([^)]*\)|[^,]*)/.exec(value);
+  if (!match) return null;
+  const allowlist = { all: false, self: false, src: false, origins: new Set() };
+  const members = match[1].trim().replace(/^\(|\)$/g, '').trim();
+  for (const member of members.split(/\s+/).filter(Boolean)) {
+    if (member === '*') allowlist.all = true;
+    else if (member === 'self') allowlist.self = true;
+    else if (/^".*"$/.test(member)) {
+      try {
+        allowlist.origins.add(new URL(member.slice(1, -1)).origin);
+      } catch {}
+    }
+  }
+  return allowlist;
+}
+
+// The cross-origin-storage directive of an iframe's `allow` attribute, such
+// as `cross-origin-storage` or `cross-origin-storage 'self' https://a.example`.
+// A bare feature name means 'src'. Null when the attribute doesn't mention it.
+function allowAttributeAllowlist(value) {
+  for (const directive of String(value || '').split(';')) {
+    const [feature, ...members] = directive.trim().split(/\s+/);
+    if (feature !== 'cross-origin-storage') continue;
+    const allowlist = { all: false, self: false, src: !members.length, origins: new Set() };
+    for (const member of members) {
+      if (member === '*') allowlist.all = true;
+      else if (member === "'self'") allowlist.self = true;
+      else if (member === "'src'") allowlist.src = true;
+      else if (member !== "'none'") {
+        try {
+          allowlist.origins.add(new URL(member).origin);
+        } catch {}
+      }
+    }
+    return allowlist;
+  }
+  return null;
+}
+
+// Asks the parent's content script about the <iframe> this document is in.
+// Resolves to { allow, parentOrigin, parentAllowed }, or null when nothing
+// answers, which is the case for a parent this extension doesn't run in.
+function askParentAboutContainer() {
+  return new Promise((resolve) => {
+    const nonce = crypto.randomUUID();
+    const onReply = (event) => {
+      if (event.source !== window.parent) return;
+      if (event.data?.source !== 'cos-policy-reply' || event.data.nonce !== nonce) return;
+      window.removeEventListener('message', onReply);
+      clearTimeout(timer);
+      resolve(event.data);
+    };
+    const timer = setTimeout(() => {
+      window.removeEventListener('message', onReply);
+      resolve(null);
+    }, 3000);
+    window.addEventListener('message', onReply);
+    window.parent.postMessage({ source: 'cos-policy-query', nonce }, '*');
+  });
+}
+
+// Answers a child frame's question about its <iframe>.
+window.addEventListener('message', async (event) => {
+  if (event.data?.source !== 'cos-policy-query' || !event.source) return;
+  const frame = [...document.querySelectorAll('iframe, frame')].find(
+    (element) => element.contentWindow === event.source
+  );
+  if (!frame) return;
+  event.source.postMessage(
+    {
+      source: 'cos-policy-reply',
+      nonce: event.data.nonce,
+      allow: frame.getAttribute('allow'),
+      parentOrigin: location.origin,
+      parentAllowed: await permissionsPolicyAllows(),
+    },
+    '*'
+  );
+});
+
+let policyPromise = null;
+function permissionsPolicyAllows() {
+  policyPromise ??= (async () => {
+    const header = policyHeaderAllowlist((await documentHeaders()).policy);
+    if (
+      header &&
+      !allowlistMatches(header, location.origin, { selfOrigin: location.origin })
+    ) {
+      return false;
+    }
+    if (window.parent === window) return true;
+    const container = await askParentAboutContainer();
+    if (!container) {
+      // No content script in the parent. Fall back to the default allowlist
+      // where the browser says who the parent is.
+      const parentOrigin = location.ancestorOrigins?.[0];
+      return parentOrigin === undefined || parentOrigin === location.origin;
+    }
+    if (!container.parentAllowed) return false;
+    const declared = allowAttributeAllowlist(container.allow);
+    if (declared) {
+      // 'src' is the origin the iframe's src names, taken to be this
+      // document's own origin, which it is unless the frame has navigated.
+      return allowlistMatches(declared, location.origin, {
+        selfOrigin: container.parentOrigin,
+        srcOrigin: location.origin,
+      });
+    }
+    return location.origin === container.parentOrigin;
+  })();
+  return policyPromise;
+}
+
 // Expose the extension relay URL so test.html can use an always-cross-origin iframe.
 document.documentElement.dataset.cosRelayUrl = chrome.runtime.getURL('relay-extension.html');
 
@@ -266,6 +465,20 @@ window.addEventListener('message', async (event) => {
   // assigning content-script objects as properties on page-owned objects.
   const data = event.data.data != null ? { ...event.data.data } : event.data.data;
 
+  // Answered here: the Permissions Policy check runs before anything else a
+  // getFileHandle() call does, validation included.
+  if (action === 'checkPermissionsPolicy') {
+    window.postMessage(
+      {
+        source: 'cos-polyfill-isolated',
+        id,
+        data: { allowed: await permissionsPolicyAllows() },
+      },
+      event.origin
+    );
+    return;
+  }
+
   if (!PAGE_ACTIONS.has(action)) {
     window.postMessage(
       {
@@ -276,6 +489,51 @@ window.addEventListener('message', async (event) => {
       event.origin
     );
     return;
+  }
+  // The policy answer and the ceiling are only ever this script's own.
+  if (
+    data &&
+    (action === 'requestFileHandle' ||
+      action === 'resolveDeclarativeResource' ||
+      action === 'rewriteStylesheet')
+  ) {
+    data.policyAllowed = await permissionsPolicyAllows();
+  }
+  // Resources the page fetched itself because the background couldn't (see
+  // fetchResource() in background.js): each Blob is rebuilt in this realm and
+  // handed over the way a store's file is, below.
+  const pageBlobURLs = [];
+  if (data?.pageFetched && typeof data.pageFetched === 'object') {
+    const converted = {};
+    for (const [url, entry] of Object.entries(data.pageFetched)) {
+      let blob = null;
+      try {
+        if (Object.prototype.toString.call(entry?.blob) === '[object Blob]') {
+          blob = new Blob([entry.blob], { type: entry.blob.type });
+        }
+      } catch {
+        blob = null;
+      }
+      if (!blob) continue;
+      const out = {
+        contentType: typeof entry.contentType === 'string' ? entry.contentType : null,
+        ceiling: typeof entry.ceiling === 'string' ? entry.ceiling : null,
+      };
+      if (chrome.runtime.getURL('').startsWith('chrome-extension://')) {
+        out.blobURL = URL.createObjectURL(blob);
+        pageBlobURLs.push(out.blobURL);
+      } else {
+        out.data = blob;
+      }
+      converted[String(url)] = out;
+    }
+    data.pageFetched = converted;
+  }
+  if (action === 'requestFileHandle' && data) {
+    delete data.scopeCeiling;
+    if (data.create && data.origins !== undefined && data.origins !== '*') {
+      data.scopeCeiling = await documentScopeCeiling();
+    }
   }
   // The file of a store reaches the background only as this script builds it
   // below. A page could otherwise name any URL for the background to fetch.
@@ -358,6 +616,7 @@ window.addEventListener('message', async (event) => {
     // when the disk is nearly full), so a store that leaves it behind can
     // make the next large store fail.
     if (data?.blobURL) URL.revokeObjectURL(data.blobURL);
+    for (const url of pageBlobURLs) URL.revokeObjectURL(url);
     if (!response) {
       window.postMessage(
         {

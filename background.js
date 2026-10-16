@@ -318,6 +318,150 @@ async function senderPartition(sender) {
   }
 }
 
+// Whether an origin could itself call getFileHandle(): an https: origin, or a
+// loopback http: one. http://*.test origins with an explicit port count too,
+// since the extension's own e2e pages run on them (e2e-test.chrome.mjs serves
+// them on a port, and Chrome is told to treat them as secure).
+function isPotentiallyTrustworthy(url) {
+  if (url.protocol === 'https:') return true;
+  if (url.protocol !== 'http:') return false;
+  const host = url.hostname;
+  return (
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    (host.endsWith('.test') && url.port !== '') ||
+    host === '[::1]' ||
+    /^127(\.\d{1,3}){3}$/.test(host)
+  );
+}
+
+// "parse a COS scope ceiling": the origins a Cross-Origin-Storage-Allow-Origin
+// header value names. A malformed value, or one naming '*', authorizes
+// nothing, exactly as an absent header does.
+function parseScopeCeiling(value) {
+  if (value == null) return new Set();
+  const ceiling = new Set();
+  for (let token of String(value).split(',')) {
+    token = token.trim();
+    if (!token) continue;
+    let url;
+    try {
+      url = new URL(token);
+    } catch {
+      return new Set();
+    }
+    if (!isPotentiallyTrustworthy(url)) return new Set();
+    ceiling.add(url.origin);
+  }
+  return ceiling;
+}
+
+// "apply a COS scope ceiling": drops each requested origin the ceiling
+// doesn't name. Returns the origins that remain, or undefined (the same-site
+// default) when none do, and the ones that were dropped.
+function applyScopeCeiling(requestedOrigins, ceiling) {
+  const kept = [];
+  const dropped = [];
+  for (const candidate of requestedOrigins) {
+    let origin;
+    try {
+      origin = new URL(candidate).origin;
+    } catch {
+      dropped.push(candidate);
+      continue;
+    }
+    if (ceiling.has(origin)) {
+      if (!kept.includes(origin)) kept.push(origin);
+    } else {
+      dropped.push(candidate);
+    }
+  }
+  return { origins: kept.length ? kept : undefined, dropped };
+}
+
+// Fetches a resource a host integration names. This worker's request goes to
+// the network, so a resource only the page's service worker serves isn't
+// found that way. The page then fetches it itself and sends the result along
+// as `pageFetched`, keyed by URL (see talkToBridge() in main-world.js), which
+// is answered as a Response here. Its bytes are verified against the hash
+// like any others. Its Cross-Origin-Storage-Allow-Origin value is the page's
+// word only, the price of supporting such resources at all.
+async function fetchResource(url, pageFetched) {
+  try {
+    const response = await fetch(url, { cache: 'no-cache' });
+    if (response.ok) return response;
+  } catch {}
+  const fetched = pageFetched?.[url];
+  if (!fetched) return null;
+  let blob = fetched.data;
+  if (fetched.blobURL) {
+    if (!String(fetched.blobURL).startsWith('blob:')) return null;
+    blob = await fetch(fetched.blobURL).then((response) => response.blob());
+  }
+  if (!(blob instanceof Blob)) return null;
+  const headers = new Headers();
+  if (fetched.contentType) headers.set('content-type', fetched.contentType);
+  if (fetched.ceiling != null) {
+    headers.set('cross-origin-storage-allow-origin', fetched.ceiling);
+  }
+  return new Response(blob, { headers });
+}
+
+// For a host integration, the ceiling comes from the fetched resource's own
+// response: its server supplies the bytes, so it decides who may read them.
+function withResponseCeiling(requestedOrigins, response) {
+  if (!requestedOrigins.length) return undefined;
+  const { origins, dropped } = applyScopeCeiling(
+    requestedOrigins,
+    parseScopeCeiling(response.headers.get('cross-origin-storage-allow-origin'))
+  );
+  if (dropped.length) {
+    console.warn(
+      `[COS] ${response.url} has no Cross-Origin-Storage-Allow-Origin header ` +
+        `authorizing ${dropped.join(', ')}, so they were dropped from its origins list.`
+    );
+  }
+  return origins;
+}
+
+// Stores a host integration has started and not finished, keyed by origin,
+// partition, and hash. A read from that same origin and partition waits for
+// them, the way a browser loading a resource twice would find the first load
+// finished. Nobody else waits, so the store's timing reveals nothing to any
+// other reader (https://wicg.github.io/cross-origin-storage/#in-progress-writes).
+const inFlightStores = new Map();
+const IN_FLIGHT_MAX_MS = 30_000;
+
+function beginStore(origin, partition, hashValues) {
+  let finish;
+  const store = { done: new Promise((resolve) => (finish = resolve)) };
+  const keys = hashValues.map((value) => `${origin}|${partition}|${value}`);
+  store.end = () => {
+    for (const key of keys) {
+      if (inFlightStores.get(key) === store) inFlightStores.delete(key);
+    }
+    finish();
+  };
+  for (const key of keys) inFlightStores.set(key, store);
+  // A page that never comes back with the bytes doesn't hold reads forever.
+  setTimeout(store.end, IN_FLIGHT_MAX_MS);
+  return store.end;
+}
+
+// Ends the store a first request began, when its retry with the page's bytes
+// settles.
+function endStore(origin, partition, hashValues) {
+  for (const value of hashValues) {
+    inFlightStores.get(`${origin}|${partition}|${value}`)?.end();
+  }
+}
+
+function storesInFlight(origin, partition, hashValues) {
+  return Promise.all(
+    hashValues.map((value) => inFlightStores.get(`${origin}|${partition}|${value}`)?.done)
+  );
+}
+
 // The `origins` values of create requests whose bytes haven't arrived yet,
 // keyed by origin, partition, and hash. A create request discloses nothing
 // and grants nothing (see "complete a create request" in the spec); the
@@ -481,7 +625,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Internal wire action. The payload carries a 'hashes' array; callers
         // using the singular API pass exactly one element. See WICG/cross-origin-storage#61.
         case 'requestFileHandle': {
-          const { hashes, create, origins: requestedOrigins } = data;
+          // content.js evaluated the document's Permissions Policy.
+          if (data.policyAllowed === false) {
+            throw cosError(
+              'NotAllowedError',
+              'The cross-origin-storage feature is not allowed in this document.'
+            );
+          }
+          const { hashes, create, scopeCeiling } = data;
+          let requestedOrigins = data.origins;
+          // A list may only name origins the document's
+          // Cross-Origin-Storage-Allow-Origin header authorizes. content.js
+          // read the header; the page can't supply it.
+          let droppedOrigins = [];
+          if (create && requestedOrigins !== undefined && requestedOrigins !== '*') {
+            const list = Array.isArray(requestedOrigins)
+              ? requestedOrigins
+              : [requestedOrigins];
+            ({ origins: requestedOrigins, dropped: droppedOrigins } =
+              applyScopeCeiling(list, parseScopeCeiling(scopeCeiling)));
+          }
           const origin = senderOrigin(sender);
           const partition = await senderPartition(sender);
           hashes.forEach(assertValidHash);
@@ -492,6 +655,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // A read must clear the grants (and, for the global grant alone,
             // the Public Hash List) before the cache is even queried, so a
             // refusal looks exactly like a file that isn't there.
+            // See inFlightStores: a host integration's store from this same
+            // document may still be settling.
+            if (!create) await storesInFlight(origin, partition, [hash.value]);
             if (!create && !(await mayRead(hash.value, origin, partition))) {
               resourceManager.recordMiss();
               countForTelemetry('miss', hash.value, origin, 'getFileHandle');
@@ -548,7 +714,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
           }
           await resourceManager.saveManagerToStorage();
-          responseData = { hashes, success };
+          responseData = { hashes, success, droppedOrigins };
           break;
         }
         case 'getFileData': {
@@ -853,14 +1019,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const origin = senderOrigin(sender);
           const partition = await senderPartition(sender);
           if (!cssText && url) {
-            try {
-              const resp = await fetch(url, { cache: 'no-cache' });
-              if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-              cssText = await resp.text();
-            } catch (e) {
-              responseData = { cssText: null, error: e.message };
+            const resp = await fetchResource(url, data.pageFetched);
+            if (!resp) {
+              responseData =
+                data.pageFetched === undefined
+                  ? { needsPageFetch: [url] }
+                  : { cssText: null, error: `${url} could not be fetched.` };
               break;
             }
+            cssText = await resp.text();
           }
           if (!cssText || !cssText.includes('cross-origin-storage')) {
             responseData = { cssText: cssText || null, changed: false };
@@ -868,8 +1035,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
           const matches = findCOSMatches(cssText);
           let rewritten = cssText;
+          // A document the Permissions Policy keeps from COS loads every
+          // font from its own URL.
+          if (data.policyAllowed === false) {
+            for (const fm of matches) {
+              rewritten = rewritten.replace(fm.full, `url("${fm.fontUrl}")`);
+            }
+            responseData = { cssText: rewritten, fonts: [], changed: rewritten !== cssText };
+            break;
+          }
           const fonts = [];
           let fontIdx = 0;
+          // Fonts this worker couldn't fetch, for the page to fetch instead.
+          const needsPageFetch = [];
           for (const fm of matches) {
             const trimmed = fm.originsStr.trim();
             let allowed = trimmed === '*' ? '*' : [];
@@ -884,6 +1062,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // falls through to the network-fetch path below. What the
             // declaration's own origins list says decides only what a store
             // grants, never what this page may read.
+            // See inFlightStores. A retry with the page's bytes is the store.
+            if (data.pageFetched === undefined) {
+              await storesInFlight(origin, partition, [hash.value]);
+            }
             const readable = await mayRead(hash.value, origin, partition);
             let fileResult = readable ? await getFileData(hash) : false;
             const alreadyCached = !!fileResult;
@@ -897,9 +1079,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 tabMissOrigins[tabId].add(origin);
                 updateBadge(tabId);
               }
+              const settle =
+                data.pageFetched === undefined
+                  ? beginStore(origin, partition, [hash.value])
+                  : () => endStore(origin, partition, [hash.value]);
+              let handedToPage = false;
               try {
-                const fontResp = await fetch(fm.fontUrl);
-                if (!fontResp.ok) throw new Error(`HTTP ${fontResp.status}`);
+                const fontResp = await fetchResource(fm.fontUrl, data.pageFetched);
+                if (!fontResp) {
+                  if (data.pageFetched === undefined) {
+                    needsPageFetch.push(fm.fontUrl);
+                    handedToPage = true;
+                  }
+                  throw new Error(`${fm.fontUrl} could not be fetched.`);
+                }
                 const fontBlob = await fontResp.blob();
                 // The stylesheet came from the page, so its integrity() hash
                 // is only a claim until the bytes are checked against it. A
@@ -918,12 +1111,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 // the JS getFileHandle() path, so a hash stored via CSS is
                 // governed by the same rules either way.
                 await recordWrite(hash.value, origin, partition, [
-                  allowed === '*' ? '*' : allowed.length ? allowed : undefined,
+                  allowed === '*'
+                    ? '*'
+                    : withResponseCeiling(allowed, fontResp),
                 ]);
                 fileResult = await getFileData(hash);
               } catch (e) {
                 rewritten = rewritten.replace(fm.full, `url("${fm.fontUrl}")`);
                 continue;
+              } finally {
+                if (!handedToPage) settle();
               }
             }
             if (fileResult) {
@@ -954,6 +1151,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
           }
           await resourceManager.saveManagerToStorage();
+          if (needsPageFetch.length) {
+            responseData = { needsPageFetch };
+            break;
+          }
           responseData = {
             cssText: rewritten,
             fonts,
@@ -972,7 +1173,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           maybeResetForNewPage(tabId, sender.documentId);
           const { url, integrity, origins, via, seedOnly } = data;
           const origin = senderOrigin(sender);
-          const hash = sriToHashObj(integrity);
+          // A document the Permissions Policy keeps from COS loads the
+          // resource from the network, as without the extension.
+          // The entry is keyed by whichever digest the bytes match, so a read
+          // tries each one, and a store picks the one that matches below.
+          const candidates = sriTokens(integrity);
+          let hash = candidates[0];
+          if (data.policyAllowed === false || !hash) {
+            responseData = { hash: hash ?? null, data: null };
+            break;
+          }
           // The fetch() integration shares this action, and says so.
           const api = via === 'fetch' ? 'fetch' : 'declarative';
           // A <script> only seeds COS and counts the hit or miss, since the
@@ -983,8 +1193,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             : () => getFileData(hash);
 
           const partition = await senderPartition(sender);
-          const readable = await mayRead(hash.value, origin, partition);
-          let fileResult = readable ? await lookup() : false;
+          // On a retry with the page's bytes, this request is the store
+          // itself, so only a first request waits.
+          if (data.pageFetched === undefined) {
+            await storesInFlight(origin, partition, candidates.map((c) => c.value));
+          }
+          let fileResult = false;
+          for (const candidate of candidates) {
+            if (!(await mayRead(candidate.value, origin, partition))) continue;
+            hash = candidate;
+            fileResult = await lookup();
+            if (fileResult) break;
+          }
+          hash = fileResult ? hash : candidates[0];
           const alreadyCached = !!fileResult;
 
           if (!fileResult) {
@@ -997,12 +1218,41 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               tabMissOrigins[tabId].add(origin);
               updateBadge(tabId);
             }
+            // Ended once this store settles, or, when the page has to fetch
+            // the bytes, once its retry does.
+            const candidateValues = candidates.map((c) => c.value);
+            const settle =
+              data.pageFetched === undefined
+                ? beginStore(origin, partition, candidateValues)
+                : () => endStore(origin, partition, candidateValues);
+            let handedToPage = false;
             try {
-              const resp = await fetch(url, { cache: 'no-cache' });
-              if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+              const resp = await fetchResource(url, data.pageFetched);
+              if (!resp) {
+                if (data.pageFetched === undefined) {
+                  handedToPage = true;
+                  responseData = { hash, needsPageFetch: true };
+                  break;
+                }
+                throw new Error(`${url} could not be fetched.`);
+              }
               const blob = await resp.blob();
-              const actualHashHex = await computeHashHex(hash.algorithm, blob);
-              if (actualHashHex !== hash.value) {
+              // A list that fails validation stores nothing ("store a fetched
+              // resource in Cross-Origin Storage"); the page loads the
+              // resource from the network as usual.
+              if (Array.isArray(origins) && !isValidOriginsList(origins)) {
+                responseData = { hash, data: null };
+                break;
+              }
+              let matched = null;
+              for (const candidate of candidates) {
+                if ((await computeHashHex(candidate.algorithm, blob)) === candidate.value) {
+                  matched = candidate;
+                  break;
+                }
+              }
+              if (matched) hash = matched;
+              if (!matched) {
                 // Hash mismatch: reject like SRI would and don't store
                 // poisoned bytes -- the caller falls back to letting the
                 // browser's native integrity check block the resource.
@@ -1018,11 +1268,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               // The grants come from the crossoriginstorage attribute's own
               // origins value, recorded the same way as for the JS
               // getFileHandle() path.
-              await recordWrite(hash.value, origin, partition, [origins]);
+              await recordWrite(hash.value, origin, partition, [
+                Array.isArray(origins) ? withResponseCeiling(origins, resp) : origins,
+              ]);
               fileResult = await lookup();
             } catch (e) {
               responseData = { hash, data: null };
               break;
+            } finally {
+              if (!handedToPage) settle();
             }
           }
 
@@ -1183,6 +1437,29 @@ function findCOSMatches(cssText) {
       originsStr: m[2],
     });
   return matches;
+}
+
+// Every COS-supported digest in an integrity value, as hashes. Integrity
+// metadata can list several, and a match against any one satisfies it.
+function sriTokens(integrity) {
+  return String(integrity || '')
+    .trim()
+    .split(/\s+/)
+    .filter((token) => /^sha(256|384|512)-/.test(token))
+    .map((token) => sriToHashObj(token.split('?')[0]));
+}
+
+// Whether every origin in a list passes "validate a COS request": an http(s)
+// URL whose origin is potentially trustworthy.
+function isValidOriginsList(origins) {
+  return origins.every((candidate) => {
+    try {
+      const url = new URL(candidate);
+      return /^https?:$/.test(url.protocol) && isPotentiallyTrustworthy(url);
+    } catch {
+      return false;
+    }
+  });
 }
 
 function sriToHashObj(sriHash) {

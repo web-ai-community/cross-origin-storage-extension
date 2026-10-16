@@ -92,10 +92,20 @@ const MIME = {
   '.wasm': 'application/wasm',
 };
 
+const CEILING = ['a.test', 'b.test', 'sub.a.test', 'sub.b.test', 'c.test']
+  .map((host) => `http://${host}:${PORT}`)
+  .concat('https://example.com')
+  .join(', ');
+
 function startServer() {
   return new Promise((resolve) => {
     const server = createServer(async (req, res) => {
       const url = new URL(req.url, `http://localhost:${PORT}`);
+      // Every page may list every test origin, the way a site authorizes its
+      // partners, unless the request asks for no header (?noceiling).
+      if (!url.searchParams.has('noceiling')) {
+        res.setHeader('Cross-Origin-Storage-Allow-Origin', CEILING);
+      }
       // An empty page for the top-level-site keying tests to frame.
       if (url.pathname === '/blank.html') {
         res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -505,16 +515,17 @@ async function main() {
   // Opens `host` top-level, optionally with a b.test frame, and returns the
   // frame to run in: the b.test frame if there is one, else the page.
   const contexts = [];
-  async function open(host, { frameB = false } = {}) {
+  async function open(host, { frameB = false, query = '' } = {}) {
     const p = await context.newPage();
     contexts.push(p);
-    await p.goto(`${at(host)}/blank.html`, { waitUntil: 'load' });
+    await p.goto(`${at(host)}/blank.html${query}`, { waitUntil: 'load' });
     if (!frameB) {
       await p.waitForFunction(() => !!navigator.crossOriginStorage);
       return p.mainFrame();
     }
     await p.evaluate((src) => new Promise((resolve) => {
       const f = document.createElement('iframe');
+      f.allow = 'cross-origin-storage';
       f.src = src;
       f.onload = resolve;
       document.body.append(f);
@@ -598,6 +609,11 @@ async function main() {
     await write(topA, upgraded, { origins: [B] });
     await write(topA, upgraded, { origins: '*' });
     await check('list [b.test] survives a later "*" write for a hash off the PHL', upgraded, topB, true);
+
+    const unauthorized = `listed without a header ${stamp}`;
+    const topANoCeiling = await open('a.test', { query: '?noceiling' });
+    await write(topANoCeiling, unauthorized, { origins: [B] });
+    await check('a list the document\'s Cross-Origin-Storage-Allow-Origin does not authorize is dropped', unauthorized, topB, false);
 
     const selfListed = `frame lists itself ${stamp}`;
     await write(frameOnA, selfListed, { origins: [B] });

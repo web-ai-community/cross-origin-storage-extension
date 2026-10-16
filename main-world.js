@@ -8,6 +8,458 @@
 
   const pendingRequests = new Map();
 
+  // content.js asks for this document's own response headers when its own
+  // request for them can't reach the document (see documentHeaders() there).
+  // fetch() and Headers#get are captured now, before any page script runs.
+  const pristineFetch = fetch.bind(window);
+  const pristineGet = Function.prototype.call.bind(Headers.prototype.get);
+  {
+    window.addEventListener('message', async (event) => {
+      if (event.source !== window || event.data?.source !== 'cos-headers-query') return;
+      let ceiling = null;
+      let policy = null;
+      try {
+        const response = await pristineFetch(location.href, {
+          cache: 'force-cache',
+          credentials: 'include',
+        });
+        ceiling = pristineGet(response.headers, 'cross-origin-storage-allow-origin');
+        policy = pristineGet(response.headers, 'permissions-policy');
+      } catch {}
+      window.postMessage(
+        { source: 'cos-headers-reply', id: event.data.id, ceiling, policy },
+        location.origin
+      );
+    });
+  }
+
+  // ── Shared with the worker polyfill ─────────────────────────────────────
+  //
+  // The functions below are serialized into every worker wrapper via
+  // .toString(), so they must stay self-contained: no outer-closure
+  // references, no imports.
+
+  // Validates a getFileHandle() call the way "validate a COS request" does
+  // (https://wicg.github.io/cross-origin-storage/#getfilehandle), and returns
+  // the hash with its algorithm name in canonical case and the origins as a
+  // list. Throws a TypeError for anything the spec rejects.
+  function cosValidateRequest(hash, options, methodName) {
+    const fail = (message) =>
+      new TypeError(`Failed to execute '${methodName}': ${message}`);
+    if (!hash || typeof hash !== 'object') {
+      throw fail("the first argument 'hash' is required.");
+    }
+    if (hash.algorithm === undefined || hash.algorithm === null) {
+      throw fail("missing required 'hash.algorithm'.");
+    }
+    if (hash.value === undefined || hash.value === null) {
+      throw fail("missing required 'hash.value'.");
+    }
+    const LENGTHS = { 'SHA-256': 64, 'SHA-384': 96, 'SHA-512': 128 };
+    const algorithm = String(hash.algorithm).toUpperCase();
+    if (!(algorithm in LENGTHS)) {
+      throw fail(`'${hash.algorithm}' is not a supported hash algorithm.`);
+    }
+    const value = String(hash.value);
+    if (!new RegExp(`^[0-9a-f]{${LENGTHS[algorithm]}}$`).test(value)) {
+      throw fail(
+        `'hash.value' must be ${LENGTHS[algorithm]} lowercase hexadecimal digits for ${algorithm}.`
+      );
+    }
+    options = options ?? {};
+    let origins = options.origins;
+    if (origins !== undefined && origins !== '*') {
+      const list =
+        typeof origins === 'string' ? [origins] : Array.from(origins, String);
+      // Matches MAX_ORIGINS_PER_RESOURCE in resource-manager.js.
+      if (list.length > 6) {
+        throw fail("the 'origins' list is longer than the maximum of 6.");
+      }
+      for (const candidate of list) {
+        let url;
+        try {
+          url = new URL(candidate);
+        } catch {
+          throw fail(`'${candidate}' in 'origins' is not a URL.`);
+        }
+        const host = url.hostname;
+        const trustworthy =
+          url.protocol === 'https:' ||
+          (url.protocol === 'http:' &&
+            (host === 'localhost' ||
+              host.endsWith('.localhost') ||
+              // The extension's own e2e pages run on http://*.test, on a
+              // port (see isPotentiallyTrustworthy() in background.js).
+              (host.endsWith('.test') && url.port !== '') ||
+              host === '[::1]' ||
+              /^127(\.\d{1,3}){3}$/.test(host)));
+        if (!trustworthy) {
+          throw fail(
+            `'${candidate}' in 'origins' must be an https: origin or a loopback http: one.`
+          );
+        }
+      }
+      origins = list;
+    }
+    return {
+      hash: { algorithm, value },
+      create: !!options.create,
+      origins,
+    };
+  }
+
+  // A FileSystemWritableFileStream for a COS create handle: write(), seek(),
+  // and truncate() assemble the final bytes, and closing hands them to
+  // `onClose(blob, type)`, which verifies and stores them. Appends are kept
+  // as a list of parts, so a large file written front to back is never
+  // copied before it closes.
+  function cosMakeWritable(onClose) {
+    let parts = [];
+    let size = 0;
+    let position = 0;
+    let type = 'application/octet-stream';
+    const toBlob = (data) => {
+      if (data instanceof Blob) {
+        if (data.type) type = data.type;
+        return data;
+      }
+      if (typeof data === 'string') return new Blob([data]);
+      if (ArrayBuffer.isView(data) || data instanceof ArrayBuffer) {
+        return new Blob([data]);
+      }
+      throw new TypeError('The data to write must be a string, a BufferSource, or a Blob.');
+    };
+    const whole = () => {
+      if (parts.length !== 1) parts = [new Blob(parts)];
+      return parts[0];
+    };
+    const writeAt = (blob) => {
+      if (position > size) {
+        parts.push(new Blob([new Uint8Array(position - size)]));
+        size = position;
+      }
+      if (position === size) {
+        parts.push(blob);
+      } else {
+        const current = whole();
+        parts = [
+          new Blob([
+            current.slice(0, position),
+            blob,
+            current.slice(position + blob.size),
+          ]),
+        ];
+      }
+      position += blob.size;
+      size = Math.max(size, position);
+    };
+    const apply = (chunk) => {
+      if (chunk && typeof chunk === 'object' && 'type' in chunk && !(chunk instanceof Blob)) {
+        if (chunk.type === 'seek') {
+          position = Number(chunk.position);
+          return;
+        }
+        if (chunk.type === 'truncate') {
+          const target = Number(chunk.size);
+          const current = whole();
+          parts = [
+            target <= size
+              ? current.slice(0, target)
+              : new Blob([current, new Uint8Array(target - size)]),
+          ];
+          size = target;
+          position = Math.min(position, target);
+          return;
+        }
+        if (chunk.type === 'write') {
+          if (chunk.position !== undefined && chunk.position !== null) {
+            position = Number(chunk.position);
+          }
+          writeAt(toBlob(chunk.data));
+          return;
+        }
+      }
+      writeAt(toBlob(chunk));
+    };
+    const ws = new WritableStream({
+      write: apply,
+      close: () => onClose(new Blob(parts, { type }), type),
+    });
+    const viaWriter = async (chunk) => {
+      const writer = ws.getWriter();
+      try {
+        await writer.write(chunk);
+      } finally {
+        writer.releaseLock();
+      }
+    };
+    Object.defineProperties(ws, {
+      write: { value: viaWriter },
+      seek: { value: (position) => viaWriter({ type: 'seek', position }) },
+      truncate: { value: (size) => viaWriter({ type: 'truncate', size }) },
+    });
+    return ws;
+  }
+
+  // Installs the API the way Web IDL would expose it: a
+  // CrossOriginStorageManager interface object whose constructor throws, the
+  // operations on its prototype with a brand check, and a crossOriginStorage
+  // getter on Navigator.prototype (or WorkerNavigator.prototype). `members`
+  // maps each operation name to its implementation.
+  function cosInstallInterface(members) {
+    const navigatorProto = Object.getPrototypeOf(navigator);
+    const NavigatorInterface = navigatorProto.constructor;
+    function CrossOriginStorageManager() {
+      throw new TypeError('Illegal constructor');
+    }
+    const proto = CrossOriginStorageManager.prototype;
+    Object.defineProperty(CrossOriginStorageManager, 'prototype', {
+      writable: false,
+      enumerable: false,
+      configurable: false,
+    });
+    const instance = Object.create(proto);
+    for (const [name, implementation] of Object.entries(members)) {
+      // A method definition, so the function's name is the operation's, and
+      // its length counts only the required argument.
+      const operation = {
+        [name](hash, ...rest) {
+          if (this !== instance) {
+            return Promise.reject(new TypeError('Illegal invocation'));
+          }
+          try {
+            return Promise.resolve(implementation(hash, ...rest));
+          } catch (err) {
+            return Promise.reject(err);
+          }
+        },
+      }[name];
+      Object.defineProperty(proto, name, {
+        value: operation,
+        writable: true,
+        enumerable: name === 'getFileHandle',
+        configurable: true,
+      });
+    }
+    Object.defineProperty(proto, Symbol.toStringTag, {
+      value: 'CrossOriginStorageManager',
+      configurable: true,
+    });
+    Object.defineProperty(self, 'CrossOriginStorageManager', {
+      value: CrossOriginStorageManager,
+      writable: true,
+      enumerable: false,
+      configurable: true,
+    });
+    const getter = {
+      get crossOriginStorage() {
+        if (!(this instanceof NavigatorInterface)) {
+          throw new TypeError('Illegal invocation');
+        }
+        return instance;
+      },
+    };
+    Object.defineProperty(navigatorProto, 'crossOriginStorage', {
+      get: Object.getOwnPropertyDescriptor(getter, 'crossOriginStorage').get,
+      enumerable: true,
+      configurable: true,
+    });
+  }
+
+  // The crossOriginStorage member of RequestInit: a string, a list, or the
+  // dictionary { origins, contentType }, of which "*" and the list are
+  // shorthands for { origins } and "" for {}. Returns the origins in the form
+  // the bridge takes ('*', a list, or undefined for same-site) and the
+  // declared content type, if any.
+  function cosParseFetchOption(value) {
+    const originsOf = (origins) => {
+      if (typeof origins === 'string') {
+        if (origins === '') return undefined;
+        return origins === '*' ? '*' : [origins];
+      }
+      if (Array.isArray(origins)) {
+        for (const origin of origins) {
+          if (typeof origin !== 'string') {
+            throw new TypeError(
+              "Failed to execute 'fetch': 'crossOriginStorage' origins must be strings."
+            );
+          }
+        }
+        return origins;
+      }
+      throw new TypeError(
+        "Failed to execute 'fetch': 'crossOriginStorage' must be a string, a list of origins, or { origins, contentType }."
+      );
+    };
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      return {
+        origins: value.origins === undefined ? undefined : originsOf(value.origins),
+        contentType:
+          value.contentType === undefined ? undefined : String(value.contentType),
+      };
+    }
+    return { origins: originsOf(value), contentType: undefined };
+  }
+
+  // Lets crossOriginStorage travel with a Request, as integrity does: the
+  // constructor reads it from RequestInit, or copies it from a Request it is
+  // given, and clone() keeps it. The browser's own prototype stays in place,
+  // so `instanceof Request` holds for every Request. Returns the WeakMap
+  // from each Request to its member.
+  function cosPatchRequest() {
+    if (cosPatchRequest.options) return cosPatchRequest.options;
+    const options = (cosPatchRequest.options = new WeakMap());
+    const NativeRequest = self.Request;
+    if (typeof NativeRequest !== 'function') return options;
+    const Request = function Request(input, init) {
+      if (!new.target) {
+        throw new TypeError(
+          "Failed to construct 'Request': Please use the 'new' operator."
+        );
+      }
+      const request = Reflect.construct(
+        NativeRequest,
+        [input, init],
+        new.target === Request ? NativeRequest : new.target
+      );
+      const value = init == null ? undefined : init.crossOriginStorage;
+      if (value !== undefined) {
+        options.set(request, value);
+      } else if (input instanceof NativeRequest && options.has(input)) {
+        options.set(request, options.get(input));
+      }
+      return request;
+    };
+    Object.defineProperty(Request, 'length', { value: 1 });
+    Request.prototype = NativeRequest.prototype;
+    Object.defineProperty(NativeRequest.prototype, 'constructor', {
+      value: Request,
+      writable: true,
+      configurable: true,
+    });
+    const nativeClone = NativeRequest.prototype.clone;
+    Object.defineProperty(NativeRequest.prototype, 'clone', {
+      value: {
+        clone() {
+          const copy = nativeClone.call(this);
+          if (options.has(this)) options.set(copy, options.get(this));
+          return copy;
+        },
+      }.clone,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+    Object.defineProperty(self, 'Request', {
+      value: Request,
+      writable: true,
+      configurable: true,
+    });
+    return options;
+  }
+
+  // A FileSystemFileHandle for a COS entry. It inherits from the browser's own
+  // FileSystemFileHandle.prototype, so `instanceof` holds, and shadows every
+  // method with the COS file system's behavior
+  // (https://wicg.github.io/cross-origin-storage/#cos-file-system).
+  // `readFile()` resolves to the entry's File, and `store(blob, type)`
+  // verifies and stores the bytes a create handle's writable closes with.
+  function cosMakeHandle({ hash, create, readFile, store }) {
+    const states = (cosMakeHandle.states ??= new WeakMap());
+    // The browser's own handles compare with a COS handle by [FS]'s rules: it
+    // is in another root, so a different entry. Their native isSameEntry()
+    // would reject one of ours as not being a FileSystemHandle at all.
+    if (!cosMakeHandle.patchedIsSameEntry && typeof FileSystemHandle === 'function') {
+      cosMakeHandle.patchedIsSameEntry = true;
+      const nativeIsSameEntry = FileSystemHandle.prototype.isSameEntry;
+      Object.defineProperty(FileSystemHandle.prototype, 'isSameEntry', {
+        value: {
+          isSameEntry(other) {
+            if (states.has(other)) return Promise.resolve(false);
+            return nativeIsSameEntry.call(this, other);
+          },
+        }.isSameEntry,
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
+    }
+    const proto =
+      typeof FileSystemFileHandle === 'function'
+        ? FileSystemFileHandle.prototype
+        : Object.prototype;
+    const notAllowed = (message) => new DOMException(message, 'NotAllowedError');
+    // The spec's "may read": a create handle can't read until it has been
+    // written through, whatever is stored under its hash.
+    const state = { hash, mayRead: !create };
+    const handle = Object.create(proto);
+    const methods = {
+      get kind() {
+        return 'file';
+      },
+      get name() {
+        return hash.value;
+      },
+      async getFile() {
+        if (!state.mayRead) {
+          throw notAllowed('File contents must be written before getFile() can be called.');
+        }
+        return readFile();
+      },
+      async createWritable() {
+        if (!create) {
+          throw notAllowed('Only a handle from a create request can be written.');
+        }
+        return cosMakeWritable(async (blob, type) => {
+          await store(blob, type);
+          state.mayRead = true;
+        });
+      },
+      async isSameEntry(other) {
+        const otherState = other && states.get(other);
+        if (!otherState) {
+          throw notAllowed('The other handle is not in the Cross-Origin Storage file system.');
+        }
+        return (
+          otherState.hash.algorithm === hash.algorithm &&
+          otherState.hash.value === hash.value
+        );
+      },
+      async move() {
+        throw notAllowed('Cross-Origin Storage entries cannot be moved.');
+      },
+      async remove() {
+        throw notAllowed('Cross-Origin Storage entries cannot be removed.');
+      },
+      async queryPermission(descriptor = {}) {
+        return descriptor.mode === 'readwrite' && !create ? 'denied' : 'granted';
+      },
+      async requestPermission(descriptor = {}) {
+        return descriptor.mode === 'readwrite' && !create ? 'denied' : 'granted';
+      },
+    };
+    if ('createSyncAccessHandle' in proto) {
+      methods.createSyncAccessHandle = async () => {
+        throw new DOMException(
+          'Cross-Origin Storage entries are not in a bucket file system.',
+          'InvalidStateError'
+        );
+      };
+    }
+    for (const name of Object.keys(methods)) {
+      const descriptor = Object.getOwnPropertyDescriptor(methods, name);
+      Object.defineProperty(
+        handle,
+        name,
+        descriptor.get
+          ? { get: descriptor.get, configurable: true }
+          : { value: descriptor.value, writable: true, configurable: true }
+      );
+    }
+    states.set(handle, state);
+    return handle;
+  }
+
   // QuotaExceededError is a newer, dedicated interface (not a DOMException)
   // but is Chrome-only so far (unsupported in Firefox and Safari as of this
   // writing); fall back to the long-established DOMException-with-that-name
@@ -82,7 +534,33 @@
       .some((chunk) => chunk != null && !(chunk instanceof Blob) && !(chunk instanceof ArrayBuffer));
   }
 
+  // A host integration's resource that the background can't fetch, because
+  // only this page's service worker serves it, is fetched here and sent along
+  // as `pageFetched` (see fetchResource() in background.js), with the fetch()
+  // captured before any page script ran.
   async function talkToBridge(action, payload, transfer) {
+    const data = await talkToBridgeOnce(action, payload, transfer);
+    if (!data?.needsPageFetch || payload?.pageFetched) return data;
+    const urls = data.needsPageFetch === true ? [payload.url] : data.needsPageFetch;
+    const pageFetched = {};
+    for (const url of urls) {
+      try {
+        const response = await pristineFetch(url, {
+          cache: 'no-cache',
+          credentials: 'same-origin',
+        });
+        if (!response.ok) continue;
+        pageFetched[url] = {
+          blob: await response.blob(),
+          contentType: pristineGet(response.headers, 'content-type'),
+          ceiling: pristineGet(response.headers, 'cross-origin-storage-allow-origin'),
+        };
+      } catch {}
+    }
+    return talkToBridgeOnce(action, { ...payload, pageFetched }, transfer);
+  }
+
+  async function talkToBridgeOnce(action, payload, transfer) {
     if (blobsCrossFromBridge) {
       const data = await postToBridge(action, payload, transfer);
       if (!hasUnusableChunks(data)) return data;
@@ -304,6 +782,13 @@
   }
 
   async function handleRequestFileHandlesResponse(data, create = false) {
+    if (data.droppedOrigins?.length) {
+      console.warn(
+        `Cross-Origin Storage: the document's Cross-Origin-Storage-Allow-Origin ` +
+          `header does not authorize ${data.droppedOrigins.join(', ')}, so ` +
+          `${data.droppedOrigins.length > 1 ? 'they were' : 'it was'} dropped from the origins list.`
+      );
+    }
     if (data.success.length !== data.hashes.length) {
       throw new DOMException(
         `File${data.hashes.length > 1 ? 's' : ''} "${data.hashes.map((hash) => hash.value).join(', ')}" not found in cross-origin storage.`,
@@ -314,106 +799,40 @@
     const { hashes } = data;
     const handles = [];
     for (const hash of hashes) {
-      // The spec's "may read": a create handle can't read until it has been
-      // written through, whatever is stored under its hash.
-      let mayRead = !create;
-      handles.push({
-        getFile: async () => {
-          if (!mayRead) {
-            throw new DOMException(
-              `File contents must be written before getFile() can be called.`,
-              'NotAllowedError'
-            );
-          }
-          const { dataChunks, mimeType } = await talkToBridge('getFileData', {
-            hash,
-          });
-          if (!dataChunks) {
-            throw new DOMException(
-              `File contents must be written before getFile() can be called.`,
-              'NotAllowedError'
-            );
-          }
-          return new File(dataChunks, 'file', {
-            type: mimeType,
-            lastModified: Date.now(),
-          });
-        },
-        createWritable: async () => {
-          const chunks = [];
-          let detectedMimeType = 'application/octet-stream';
-
-          const ws = new WritableStream({
-            write(chunk) {
-              if (chunk instanceof Blob && chunk.type) {
-                detectedMimeType = chunk.type;
-              }
-              chunks.push(chunk);
-            },
-            async close() {
-              // For Blob (or anything else), compute the hash in 4 MiB slices
-              // so peak memory stays O(chunk) rather than O(file).
-              const blob = new Blob(chunks);
-              if (IS_LIKELY_SAFARI && blob.size > SAFARI_MAX_RESOURCE_SIZE) {
-                throw makeQuotaExceededError(
-                  `This resource (${blob.size} bytes) exceeds the maximum size Safari's storage backend supports for a single resource (~2 GiB).`
-                );
-              }
-              const actualHashHex = await streamingHexDigest(
-                hash.algorithm,
-                blob
+      handles.push(
+        cosMakeHandle({
+          hash,
+          create,
+          readFile: async () => {
+            const { dataChunks, mimeType } = await talkToBridge('getFileData', {
+              hash,
+            });
+            return new File(dataChunks, 'file', {
+              type: mimeType,
+              lastModified: Date.now(),
+            });
+          },
+          store: async (blob, type) => {
+            if (IS_LIKELY_SAFARI && blob.size > SAFARI_MAX_RESOURCE_SIZE) {
+              throw makeQuotaExceededError(
+                `This resource (${blob.size} bytes) exceeds the maximum size Safari's storage backend supports for a single resource (~2 GiB).`
               );
-              if (actualHashHex !== hash.value) {
-                throw new DOMException(
-                  `The hash of the provided data does not match the declared hash.`,
-                  'DataError'
-                );
-              }
-              await storeViaBridge(hash, blob, {
-                'content-type': detectedMimeType,
-              });
-              mayRead = true;
-            },
-          });
-
-          // Convenience method for the write(data); close() pattern — WritableStream
-          // has no write() directly; callers use this instead of getWriter().
-          ws.write = async (data) => {
-            const writer = ws.getWriter();
-            await writer.write(data);
-            writer.releaseLock();
-          };
-
-          return ws;
-        },
-      });
+            }
+            // Hashed in 4 MiB slices, so peak memory stays O(chunk) rather
+            // than O(file).
+            const actualHashHex = await streamingHexDigest(hash.algorithm, blob);
+            if (actualHashHex !== hash.value) {
+              throw new DOMException(
+                `The hash of the provided data does not match the declared hash.`,
+                'DataError'
+              );
+            }
+            await storeViaBridge(hash, blob, { 'content-type': type });
+          },
+        })
+      );
     }
     return handles;
-  }
-
-  /**
-   * Validates an `options.origins` value per the COS explainer's
-   * CrossOriginStorageGetFileHandleOptions dictionary: optional
-   * (USVString or sequence<USVString>). '*' means global, an array
-   * means a restricted list, and omitting it entirely means
-   * same-site-only.
-   */
-  function _validateOrigins(origins, methodName) {
-    if (origins === undefined) return;
-    if (origins === '*') return;
-    if (Array.isArray(origins)) {
-      for (const o of origins) {
-        if (typeof o !== 'string') {
-          throw new TypeError(
-            `Failed to execute '${methodName}': 'origins' array must contain only strings.`
-          );
-        }
-      }
-      return;
-    }
-    throw new TypeError(
-      `Failed to execute '${methodName}': 'origins' must be '*', an array of origin strings, or omitted.`
-    );
   }
 
   async function requestFileHandlesWithOptionalPrompt(
@@ -446,26 +865,15 @@
     `Use getFileHandle() instead.`;
 
   function _validateHash(hash, methodName) {
-    if (!hash.value) {
-      throw new TypeError(
-        `Failed to execute '${methodName}': missing required 'hash.value'.`
-      );
-    }
-    if (!/^[0-9a-f]{64}$/.test(hash.value)) {
-      throw new TypeError(
-        `Failed to execute '${methodName}': 'hash.value' must be a valid lowercase hexadecimal string of length 64.`
-      );
-    }
-    if (!hash.algorithm) {
-      throw new TypeError(
-        `Failed to execute '${methodName}': missing required 'hash.algorithm'.`
-      );
-    }
-    if (!['SHA-1', 'SHA-256', 'SHA-384', 'SHA-512'].includes(hash.algorithm)) {
-      throw new TypeError(
-        `Failed to execute '${methodName}': 'hash.algorithm' must be a valid HashAlgorithmIdentifier (e.g. "SHA-256").`
-      );
-    }
+    return cosValidateRequest(hash, {}, methodName).hash;
+  }
+
+  function _validateOrigins(origins, methodName) {
+    return cosValidateRequest(
+      { algorithm: 'SHA-256', value: '0'.repeat(64) },
+      { origins },
+      methodName
+    ).origins;
   }
 
   async function _getFileHandle(hash, options = {}, methodName) {
@@ -474,13 +882,19 @@
         `Failed to execute '${methodName}': first argument 'hash' is required.`
       );
     }
-    _validateHash(hash, methodName);
-    const { create = false, origins } = options;
-    _validateOrigins(origins, methodName);
+    // The Permissions Policy check comes before validation.
+    const { allowed } = await talkToBridge('checkPermissionsPolicy', {});
+    if (!allowed) {
+      throw new DOMException(
+        'The cross-origin-storage feature is not allowed in this document.',
+        'NotAllowedError'
+      );
+    }
+    const request = cosValidateRequest(hash, options, methodName);
     const [handle] = await requestFileHandlesWithOptionalPrompt(
-      [hash],
-      create,
-      origins
+      [request.hash],
+      request.create,
+      request.origins
     );
     return handle;
   }
@@ -532,11 +946,7 @@
     },
   };
 
-  Object.defineProperty(navigator, 'crossOriginStorage', {
-    value: crossOriginStorage,
-    writable: false,
-    configurable: true,
-  });
+  cosInstallInterface(crossOriginStorage);
 
   // Single polyfill for both DedicatedWorker and SharedWorker contexts.
   // Injected verbatim into wrapper blobs via .toString() — must be completely
@@ -639,46 +1049,15 @@
       `Use getFileHandle() instead.`;
 
     function _validateHash(hash, methodName) {
-      if (!hash.value) {
-        throw new TypeError(
-          `Failed to execute '${methodName}': missing required 'hash.value'.`
-        );
-      }
-      if (!/^[0-9a-f]{64}$/.test(hash.value)) {
-        throw new TypeError(
-          `Failed to execute '${methodName}': 'hash.value' must be a valid lowercase hexadecimal string of length 64.`
-        );
-      }
-      if (!hash.algorithm) {
-        throw new TypeError(
-          `Failed to execute '${methodName}': missing required 'hash.algorithm'.`
-        );
-      }
-      if (
-        !['SHA-1', 'SHA-256', 'SHA-384', 'SHA-512'].includes(hash.algorithm)
-      ) {
-        throw new TypeError(
-          `Failed to execute '${methodName}': 'hash.algorithm' must be a valid HashAlgorithmIdentifier (e.g. "SHA-256").`
-        );
-      }
+      return cosValidateRequest(hash, {}, methodName).hash;
     }
 
     function _validateOrigins(origins, methodName) {
-      if (origins === undefined) return;
-      if (origins === '*') return;
-      if (Array.isArray(origins)) {
-        for (const o of origins) {
-          if (typeof o !== 'string') {
-            throw new TypeError(
-              `Failed to execute '${methodName}': 'origins' array must contain only strings.`
-            );
-          }
-        }
-        return;
-      }
-      throw new TypeError(
-        `Failed to execute '${methodName}': 'origins' must be '*', an array of origin strings, or omitted.`
-      );
+      return cosValidateRequest(
+        { algorithm: 'SHA-256', value: '0'.repeat(64) },
+        { origins },
+        methodName
+      ).origins;
     }
 
     async function _cosRequestFileHandles(hashes, create, origins) {
@@ -717,75 +1096,57 @@
         origins,
         origin: self.location.origin,
       });
-      return handleIds.map((handleId, i) => ({
-        getFile: async () => {
-          const result = await cosRelay('getFileData', { handleId });
-          return new File([result.data], 'file', {
-            type: result.mimeType,
-            lastModified: result.lastModified,
-          });
-        },
-        createWritable: async () => {
-          const _hash = hashes[i];
-          const chunks = [];
-          let detectedMimeType = 'application/octet-stream';
-
-          const ws = new WritableStream({
-            write(chunk) {
-              if (chunk instanceof Blob && chunk.type) {
-                detectedMimeType = chunk.type;
-              }
-              chunks.push(chunk);
-            },
-            async close() {
-              // Read in 4 MiB slices: Safari fails `arrayBuffer()` on a
-              // whole Blob of 128 MiB or more (see readBlobInSlices() in the
-              // page code, which this serialized function can't reach).
-              const whole = new Blob(chunks);
-              const bytes = new Uint8Array(whole.size);
-              for (let offset = 0; offset < whole.size; offset += 4194304) {
-                bytes.set(
-                  new Uint8Array(
-                    await whole.slice(offset, offset + 4194304).arrayBuffer()
-                  ),
-                  offset
-                );
-              }
-              const arrayBuffer = bytes.buffer;
-              const hashBuffer = await crypto.subtle.digest(
-                _hash.algorithm,
-                arrayBuffer
+      return handleIds.map((handleId, i) =>
+        cosMakeHandle({
+          hash: hashes[i],
+          create,
+          readFile: async () => {
+            const result = await cosRelay('getFileData', { handleId });
+            return new File([result.data], 'file', {
+              type: result.mimeType,
+              lastModified: result.lastModified,
+            });
+          },
+          store: async (blob, type) => {
+            const _hash = hashes[i];
+            // Read in 4 MiB slices: Safari fails `arrayBuffer()` on a whole
+            // Blob of 128 MiB or more (see readBlobInSlices() in the page
+            // code, which this serialized function can't reach).
+            const bytes = new Uint8Array(blob.size);
+            for (let offset = 0; offset < blob.size; offset += 4194304) {
+              bytes.set(
+                new Uint8Array(
+                  await blob.slice(offset, offset + 4194304).arrayBuffer()
+                ),
+                offset
               );
-              const actualHashHex = Array.from(new Uint8Array(hashBuffer))
-                .map((byte) => byte.toString(16).padStart(2, '0'))
-                .join('');
-              if (actualHashHex !== _hash.value) {
-                throw new DOMException(
-                  `The hash of the provided data does not match the declared hash.`,
-                  'DataError'
-                );
-              }
-              await cosRelay(
-                'storeFileData',
-                {
-                  handleId,
-                  arrayBuffer,
-                  mimeType: { 'content-type': detectedMimeType },
-                },
-                [arrayBuffer]
+            }
+            const arrayBuffer = bytes.buffer;
+            const hashBuffer = await crypto.subtle.digest(
+              _hash.algorithm,
+              arrayBuffer
+            );
+            const actualHashHex = Array.from(new Uint8Array(hashBuffer))
+              .map((byte) => byte.toString(16).padStart(2, '0'))
+              .join('');
+            if (actualHashHex !== _hash.value) {
+              throw new DOMException(
+                `The hash of the provided data does not match the declared hash.`,
+                'DataError'
               );
-            },
-          });
-
-          ws.write = async (data) => {
-            const writer = ws.getWriter();
-            await writer.write(data);
-            writer.releaseLock();
-          };
-
-          return ws;
-        },
-      }));
+            }
+            await cosRelay(
+              'storeFileData',
+              {
+                handleId,
+                arrayBuffer,
+                mimeType: { 'content-type': type },
+              },
+              [arrayBuffer]
+            );
+          },
+        })
+      );
     }
 
     async function _getFileHandle(hash, options = {}, methodName) {
@@ -794,10 +1155,21 @@
           `Failed to execute '${methodName}': first argument 'hash' is required.`
         );
       }
-      _validateHash(hash, methodName);
-      const { create = false, origins } = options;
-      _validateOrigins(origins, methodName);
-      const [handle] = await _cosRequestFileHandles([hash], create, origins);
+      // The Permissions Policy check comes before validation. A worker has
+      // its owning document's policy.
+      const { allowed } = await cosRelay('checkPermissionsPolicy', {});
+      if (!allowed) {
+        throw new DOMException(
+          'The cross-origin-storage feature is not allowed in this document.',
+          'NotAllowedError'
+        );
+      }
+      const request = cosValidateRequest(hash, options, methodName);
+      const [handle] = await _cosRequestFileHandles(
+        [request.hash],
+        request.create,
+        request.origins
+      );
       return handle;
     }
 
@@ -831,11 +1203,7 @@
       },
     };
 
-    Object.defineProperty(navigator, 'crossOriginStorage', {
-      value: workerCrossOriginStorage,
-      writable: false,
-      configurable: true,
-    });
+    cosInstallInterface(workerCrossOriginStorage);
 
     // Blob: workers have self.location pointing to the blob: URL, so relative
     // fetch/XHR/importScripts calls fail to parse (new URL('/path', 'blob:…')
@@ -871,27 +1239,7 @@
         return null;
       }
 
-      function _parseFetchCOS(value) {
-        if (typeof value === 'string') {
-          if (value === '') return undefined;
-          if (value === '*') return '*';
-          return [value];
-        }
-        if (Array.isArray(value)) {
-          for (const o of value) {
-            if (typeof o !== 'string') {
-              throw new TypeError(
-                `Failed to execute 'fetch': 'crossOriginStorage' array must contain only strings.`
-              );
-            }
-          }
-          return value;
-        }
-        throw new TypeError(
-          `Failed to execute 'fetch': 'crossOriginStorage' must be a string or an array of origin strings.`
-        );
-      }
-
+      if (fetchIntegrationEnabled) cosPatchRequest();
       self.fetch = function (input, init) {
         if (typeof input === 'string') {
           let base;
@@ -905,16 +1253,17 @@
           }
         }
 
-        if (
-          !fetchIntegrationEnabled ||
-          !init ||
-          !Object.prototype.hasOwnProperty.call(init, 'crossOriginStorage')
-        ) {
-          return _nativeFetch.call(self, input, init);
-        }
-
+        if (!fetchIntegrationEnabled) return _nativeFetch.call(self, input, init);
         const isRequest =
           typeof Request !== 'undefined' && input instanceof Request;
+        const declared =
+          init != null && init.crossOriginStorage !== undefined
+            ? init.crossOriginStorage
+            : isRequest
+              ? cosPatchRequest().get(input)
+              : undefined;
+        if (declared === undefined) return _nativeFetch.call(self, input, init);
+        init = init ?? {};
         const integrity = init.integrity ?? (isRequest ? input.integrity : '');
         const sriToken = integrity
           ? _firstSupportedIntegrityToken(integrity)
@@ -934,8 +1283,9 @@
         }
 
         let origins;
+        let contentType;
         try {
-          origins = _parseFetchCOS(init.crossOriginStorage);
+          ({ origins, contentType } = cosParseFetchOption(declared));
         } catch (err) {
           return Promise.reject(err);
         }
@@ -960,13 +1310,14 @@
         // origin. The main-thread relay fills in the document's origin.
         const resolved = cosRelay('resolveDeclarativeResource', {
           url,
-          integrity: sriToken,
+          // Every digest, so the entry is keyed by the one the bytes match.
+          integrity: String(integrity),
           origins,
           via: 'fetch',
         }).then(
           ({ dataChunks, mimeType }) => {
             if (!dataChunks) return _nativeFetch.call(self, input, init);
-            const type = mimeType || 'application/octet-stream';
+            const type = contentType || mimeType || 'application/octet-stream';
             const blob = new Blob(dataChunks, { type });
             return new Response(blob, {
               status: 200,
@@ -1014,6 +1365,50 @@
         return _open.call(this, method, url, ...rest);
       };
     }
+    // A wrapped worker runs from a blob: URL, so its own location would be
+    // that URL. Report the original script's, as the worker would see it
+    // unwrapped, so code that resolves URLs against `self.location` works.
+    // __cosWorkerBaseURL is declared by the loader after this polyfill, so it
+    // is read when location is, falling back to the native value before.
+    {
+      const nativeLocation =
+        typeof WorkerGlobalScope === 'function'
+          ? Object.getOwnPropertyDescriptor(WorkerGlobalScope.prototype, 'location')?.get
+          : undefined;
+      const locations = new Map();
+      const locationFor = (href) => {
+        if (!locations.has(href)) {
+          const url = new URL(href);
+          const location = {};
+          for (const name of ['href', 'origin', 'protocol', 'host', 'hostname', 'port', 'pathname', 'search', 'hash']) {
+            Object.defineProperty(location, name, { get: () => url[name], enumerable: true });
+          }
+          location.toString = () => url.href;
+          locations.set(href, location);
+        }
+        return locations.get(href);
+      };
+      if (nativeLocation) {
+        try {
+          Object.defineProperty(self, 'location', {
+            configurable: true,
+            enumerable: true,
+            get() {
+              let base;
+              try {
+                base = __cosWorkerBaseURL;
+              } catch (_) {}
+              return base && !/^blob:/.test(base)
+                ? locationFor(base)
+                : nativeLocation.call(self);
+            },
+          });
+        } catch (_) {
+          // Not definable here; the native location stays.
+        }
+      }
+    }
+
     if (typeof importScripts !== 'undefined') {
       const _importScripts = importScripts;
       self.importScripts = function (...urls) {
@@ -1047,6 +1442,18 @@
       // Self-referential: serialise this very function so each sub-worker blob
       // contains a fresh copy of the polyfill.
       const INNER_POLYFILL =
+        cosValidateRequest.toString() +
+        '\n' +
+        cosParseFetchOption.toString() +
+        '\n' +
+        cosPatchRequest.toString() +
+        '\n' +
+        cosInstallInterface.toString() +
+        '\n' +
+        cosMakeWritable.toString() +
+        '\n' +
+        cosMakeHandle.toString() +
+        '\n' +
         '(' +
         universalWorkerPolyfill.toString() +
         ')(' +
@@ -1071,6 +1478,13 @@
               const xhr = new XMLHttpRequest();
               xhr.open('GET', absURL, false);
               xhr.send();
+              // A synchronous request never reaches a service worker, so a
+              // script only the page's service worker serves comes back as an
+              // error page. Only a successful response is inlined; anything else
+              // falls back to loading from inside the worker, where it does.
+              if (xhr.status && (xhr.status < 200 || xhr.status >= 300)) {
+                throw new Error(`HTTP ${xhr.status}`);
+              }
               loader =
                 'const __cosWorkerBaseURL = ' +
                 JSON.stringify(absURL) +
@@ -1086,6 +1500,9 @@
               : 'try { importScripts(' +
                 JSON.stringify(absURL) +
                 '); } catch(e) { console.error(e); }';
+            // The worker's relative URLs resolve against its script.
+            loader =
+              'const __cosWorkerBaseURL = ' + JSON.stringify(absURL) + ';\n' + loader;
           }
 
           const blob = new Blob([INNER_POLYFILL + '\n' + loader], {
@@ -1166,6 +1583,18 @@
       if (typeof SharedWorker !== 'undefined') {
         const OriginalSharedWorker = SharedWorker;
         const SHARED_WORKER_POLYFILL =
+          cosValidateRequest.toString() +
+          '\n' +
+          cosParseFetchOption.toString() +
+          '\n' +
+          cosPatchRequest.toString() +
+          '\n' +
+          cosInstallInterface.toString() +
+          '\n' +
+          cosMakeWritable.toString() +
+          '\n' +
+          cosMakeHandle.toString() +
+          '\n' +
           '(' +
           universalWorkerPolyfill.toString() +
           ')(' +
@@ -1194,13 +1623,22 @@
             const xhr = new XMLHttpRequest();
             xhr.open('GET', absURL, /* async= */ false);
             xhr.send();
+            // A synchronous request never reaches a service worker, so a
+            // script only the page's service worker serves comes back as an
+            // error page. Only a successful response is inlined; anything else
+            // falls back to loading from inside the worker, where it does.
+            if (xhr.status && (xhr.status < 200 || xhr.status >= 300)) {
+              throw new Error(`HTTP ${xhr.status}`);
+            }
             loader = `const __cosWorkerBaseURL = ${JSON.stringify(absURL)};
 ${xhr.responseText}`;
           } catch (_) {
             // Cross-origin or revoked-blob URL — fall back to importScripts().
           }
           if (!loader) {
-            loader = `try { importScripts(${JSON.stringify(absURL)}); } catch (e) { console.error(e); }`;
+            // The worker's relative URLs resolve against its script.
+            loader = `const __cosWorkerBaseURL = ${JSON.stringify(absURL)};
+try { importScripts(${JSON.stringify(absURL)}); } catch (e) { console.error(e); }`;
           }
 
           const blobURL = URL.createObjectURL(
@@ -1279,6 +1717,8 @@ ${xhr.responseText}`;
                     })
                   );
                   result = { handleIds };
+                } else if (action === 'checkPermissionsPolicy') {
+                  result = await talkToBridge('checkPermissionsPolicy', {});
                 } else if (action === 'getFileData') {
                   const { handle } = workerHandles.get(data.handleId);
                   const file = await handle.getFile();
@@ -1300,6 +1740,11 @@ ${xhr.responseText}`;
                     new Blob([data.arrayBuffer]),
                     data.mimeType
                   );
+                  // The page's handle is now written through as well.
+                  const state = cosMakeHandle.states?.get(
+                    workerHandles.get(data.handleId).handle
+                  );
+                  if (state) state.mayRead = true;
                   result = {};
                 } else if (action === 'resolveDeclarativeResource') {
                   // Fetch integration, called from the worker's patched
@@ -1341,6 +1786,18 @@ ${xhr.responseText}`;
       if (typeof Worker !== 'undefined') {
         const OriginalWorker = Worker;
         const WORKER_POLYFILL =
+          cosValidateRequest.toString() +
+          '\n' +
+          cosParseFetchOption.toString() +
+          '\n' +
+          cosPatchRequest.toString() +
+          '\n' +
+          cosInstallInterface.toString() +
+          '\n' +
+          cosMakeWritable.toString() +
+          '\n' +
+          cosMakeHandle.toString() +
+          '\n' +
           '(' +
           universalWorkerPolyfill.toString() +
           ')(' +
@@ -1378,6 +1835,13 @@ ${xhr.responseText}`;
               const xhr = new XMLHttpRequest();
               xhr.open('GET', absURL, /* async= */ false);
               xhr.send();
+              // A synchronous request never reaches a service worker, so a
+              // script only the page's service worker serves comes back as an
+              // error page. Only a successful response is inlined; anything else
+              // falls back to loading from inside the worker, where it does.
+              if (xhr.status && (xhr.status < 200 || xhr.status >= 300)) {
+                throw new Error(`HTTP ${xhr.status}`);
+              }
               loader = `const __cosWorkerBaseURL = ${JSON.stringify(absURL)};
 const __cosOpaqueOrigin = ${JSON.stringify(isOpaqueOrigin)};
 ${xhr.responseText}`;
@@ -1405,6 +1869,10 @@ self.addEventListener('message', function __cosBufferFn(e) {
   } catch(e) { console.error(e); }
 })();`
               : `try { importScripts(${JSON.stringify(absURL)}); } catch(e) { console.error(e); }`;
+            // The worker's relative URLs resolve against its script.
+            loader = `const __cosWorkerBaseURL = ${JSON.stringify(absURL)};
+const __cosOpaqueOrigin = ${JSON.stringify(isOpaqueOrigin)};
+${loader}`;
           }
           const blobURL = URL.createObjectURL(
             new Blob([WORKER_POLYFILL + '\n' + loader], {
@@ -1492,6 +1960,8 @@ self.addEventListener('message', function __cosBufferFn(e) {
                       })
                     );
                     result = { handleIds };
+                  } else if (action === 'checkPermissionsPolicy') {
+                    result = await talkToBridge('checkPermissionsPolicy', {});
                   } else if (action === 'getFileData') {
                     const { handle } = workerHandles.get(data.handleId);
                     const file = await handle.getFile();
@@ -1515,6 +1985,11 @@ self.addEventListener('message', function __cosBufferFn(e) {
                       new Blob([data.arrayBuffer]),
                       data.mimeType
                     );
+                    // The page's handle is now written through as well.
+                    const state = cosMakeHandle.states?.get(
+                      workerHandles.get(data.handleId).handle
+                    );
+                    if (state) state.mayRead = true;
                     result = {};
                   } else if (action === 'resolveDeclarativeResource') {
                     // Fetch integration, called from the worker's patched
@@ -2149,39 +2624,6 @@ self.addEventListener('message', function __cosBufferFn(e) {
 
     const _nativeFetch = window.fetch;
 
-    // The fetch value space is deliberately NOT the HTML attribute's: the
-    // explainer specifies `(DOMString or sequence<DOMString>)`, matching the
-    // imperative `origins` option down to the IDL type, because a RequestInit
-    // member is an ordinary JavaScript value and an array is the idiomatic
-    // spelling for a list there. So this must not reuse
-    // parseCrossOriginStorageAttr(), whose whitespace split is the right
-    // grammar only for the attribute/import-attribute forms.
-    function parseFetchCrossOriginStorage(value) {
-      if (typeof value === 'string') {
-        // '' is same-site-only, spelled as an empty string rather than an
-        // omitted member because fetch() has no `create: true` to carry the
-        // opt-in separately -- the member's presence is the opt-in.
-        if (value === '') return undefined;
-        if (value === '*') return '*';
-        // A bare non-empty string is legal under the DOMString half of the
-        // union; treat it as a single-origin list.
-        return [value];
-      }
-      if (Array.isArray(value)) {
-        for (const o of value) {
-          if (typeof o !== 'string') {
-            throw new TypeError(
-              `Failed to execute 'fetch': 'crossOriginStorage' array must contain only strings.`
-            );
-          }
-        }
-        return value;
-      }
-      throw new TypeError(
-        `Failed to execute 'fetch': 'crossOriginStorage' must be a string or an array of origin strings.`
-      );
-    }
-
     // A COS entry stores bytes only, so a Response synthesized from a hit has
     // no status, headers, or MIME type of its own -- an open question in the
     // explainer, which lists three candidate answers. This takes the third:
@@ -2209,18 +2651,23 @@ self.addEventListener('message', function __cosBufferFn(e) {
       });
     }
 
+    const requestOptions = cosPatchRequest();
     window.fetch = function fetch(input, init) {
-      // Checked with hasOwnProperty, not truthiness: '' is a legal,
-      // meaningful value (same-site-only) and `!''` is true, so a truthiness
-      // check would wrongly treat the same-site form as "no COS opt-in".
-      if (
-        !init ||
-        !Object.prototype.hasOwnProperty.call(init, 'crossOriginStorage')
-      ) {
+      // Read like any RequestInit member: present unless undefined, whether
+      // it's an own property, inherited, or a getter. '' is a legal,
+      // meaningful value (same-site-only), so this is no truthiness check.
+      const isRequest = typeof Request !== 'undefined' && input instanceof Request;
+      const declared =
+        init != null && init.crossOriginStorage !== undefined
+          ? init.crossOriginStorage
+          : isRequest
+            ? requestOptions.get(input)
+            : undefined;
+      if (declared === undefined) {
         return _nativeFetch.call(this, input, init);
       }
+      init = init ?? {};
 
-      const isRequest = typeof Request !== 'undefined' && input instanceof Request;
       const integrity = init.integrity ?? (isRequest ? input.integrity : '');
       const sriToken = integrity ? firstSupportedIntegrityToken(integrity) : null;
 
@@ -2245,8 +2692,9 @@ self.addEventListener('message', function __cosBufferFn(e) {
       // Throws synchronously in the spec (an IDL conversion failure), but
       // fetch() returns a promise, so surface it as a rejection instead.
       let origins;
+      let contentType;
       try {
-        origins = parseFetchCrossOriginStorage(init.crossOriginStorage);
+        ({ origins, contentType } = cosParseFetchOption(declared));
       } catch (err) {
         return Promise.reject(err);
       }
@@ -2267,14 +2715,15 @@ self.addEventListener('message', function __cosBufferFn(e) {
 
       const resolved = talkToBridge('resolveDeclarativeResource', {
         url,
-        integrity: sriToken,
+        // Every digest, so the entry is keyed by the one the bytes match.
+        integrity: String(integrity),
         origins,
         origin: location.origin,
         via: 'fetch',
       }).then(
         ({ dataChunks, mimeType }) =>
           dataChunks
-            ? responseFromCOS(dataChunks, mimeType)
+            ? responseFromCOS(dataChunks, contentType || mimeType)
             : // A miss the bridge couldn't repair (network failure, or a hash
               // mismatch it refused to store) falls back to a real fetch, so
               // the browser's own integrity check produces the failure --
@@ -2371,4 +2820,7 @@ self.addEventListener('message', function __cosBufferFn(e) {
       URL.revokeObjectURL(blobUrl);
     }
   };
+  // Added after the interface was installed, so it goes on the instance.
+  navigator.crossOriginStorage.__non_standard__import =
+    crossOriginStorage.__non_standard__import;
 })();

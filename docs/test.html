@@ -1594,6 +1594,9 @@
           if (!RELAY_URL) { reject(new Error('Relay URL not set (extension not installed?)')); return; }
           if (!_relayIframe) {
             _relayIframe = document.createElement('iframe');
+            // Cross-origin frames need the feature delegated, as with the
+            // native API (its default allowlist is 'self').
+            _relayIframe.allow = 'cross-origin-storage';
             _relayIframe.src = RELAY_URL;
             _relayIframe.style.cssText =
               'position:fixed;width:1px;height:1px;top:-200px;left:-200px;border:none';
@@ -2189,6 +2192,9 @@
 
       async function createMophlIframe(origin) {
         const fr = document.createElement('iframe');
+        // Cross-origin frames need the feature delegated, as with the native
+        // API (its default allowlist is 'self').
+        fr.allow = 'cross-origin-storage';
         fr.src = `${origin}/test.html`;
         fr.style.cssText =
           'position:fixed;width:1px;height:1px;top:-200px;left:-200px;border:none';
