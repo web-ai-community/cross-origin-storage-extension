@@ -16,7 +16,8 @@
       "cross-mechanism interop: an entry written by the fetch() integration is served by HTML crossoriginstorage": "The extension leaves <script> to the browser's own loader, so an entry another integration wrote is never served to a <script> from COS."
     },
     "cross-origin-storage/css/cross-origin-storage-cross-origin.tentative.https.html": {
-      "(harness)": "cos-wpt environment: the origin pools include the test's own origin, and when the runner hosts the test on tomayac.github.io, whose service worker isn't at the origin root, a remote context there never loads."
+      "CSS, cross-origin: a same-site origin is always served a same-site-scoped @font-face from COS": "cos-wpt environment: every *.github.io origin is its own site, so there's no same-site, cross-origin pair to read from.",
+      "CSS, cross-origin: cross-origin-storage(\"origin\") is served to a listed cross-site origin the resource's header authorizes": "Not yet understood: the font is stored, but the second @font-face with a broken URL isn't served from COS."
     },
     "cross-origin-storage/css/cross-origin-storage-import.tentative.https.html": {
       "CSS: an @import with cross-origin-storage() is served from COS on a subsequent request": "The CSS integration rewrites url() sources in @font-face and style rules, and an @import is fetched by the browser itself.",
@@ -95,7 +96,8 @@
     },
     "cross-origin-storage/origins-scoping.tentative.https.html": {
       "same-site baseline: a same-site sibling origin is authorized, deterministically": "cos-wpt environment: every *.github.io origin is its own site, so there's no same-site, cross-origin pair to read from.",
-      "(harness)": "cos-wpt environment: the origin pools include the test's own origin, and when the runner hosts the test on tomayac.github.io, whose service worker isn't at the origin root, a remote context there never loads."
+      "list tier: an origin same site with a listed origin is authorized, deterministically": "cos-wpt environment: the pool's variants of one host collapse into a single origin on github.io, so the origins the test keeps apart are the same origin.",
+      "list tier: an origin absent from the explicit list is never authorized, deterministically": "cos-wpt environment: the pool's variants of one host collapse into a single origin on github.io, so the origins the test keeps apart are the same origin."
     },
     "cross-origin-storage/permissions-policy-workers.tentative.https.html": {
       "a service worker cannot use crossOriginStorage (empty owner set fails closed)": "cos-wpt environment: the test's service worker can't be registered, since its script request would bypass the worker that serves the virtual tree.",
@@ -104,8 +106,17 @@
     "cross-origin-storage/top-level-site-keying.tentative.https.html": {
       "an origins list written first-party admits the listed origins first-party and under the writer's top-level site": "cos-wpt environment: the runner frames every test, so a test hosted on a mirror isn't first-party, and its list grant is keyed to the runner's site."
     },
+    "cross-origin-storage/transfer.tentative.https.html": {
+      "a readable handle transferred to a same-origin worker stays readable": "The extension's handles are script objects that inherit from FileSystemFileHandle, so structured cloning copies their plain data and can't carry them as handles.",
+      "a readable handle transferred to a same-origin frame stays readable": "The extension's handles are script objects that inherit from FileSystemFileHandle, so structured cloning copies their plain data and can't carry them as handles.",
+      "a handle transferred cross-origin is not delivered": "The extension's handles are script objects that inherit from FileSystemFileHandle, so structured cloning copies their plain data and can't carry them as handles.",
+      "transferring a not-yet-written create handle does not make it readable": "The extension's handles are script objects that inherit from FileSystemFileHandle, so structured cloning copies their plain data and can't carry them as handles.",
+      "readability is captured at transfer time, not re-evaluated on arrival": "The extension's handles are script objects that inherit from FileSystemFileHandle, so structured cloning copies their plain data and can't carry them as handles.",
+      "a handle transferred to a same-site, cross-origin frame is not delivered": "The extension's handles are script objects that inherit from FileSystemFileHandle, so structured cloning copies their plain data and can't carry them as handles.",
+      "a create handle transferred after being written through stays readable": "The extension's handles are script objects that inherit from FileSystemFileHandle, so structured cloning copies their plain data and can't carry them as handles."
+    },
     "cross-origin-storage/visibility-upgrade-list-preserved.tentative.https.html": {
-      "(harness)": "cos-wpt environment: the origin pools include the test's own origin, and when the runner hosts the test on tomayac.github.io, whose service worker isn't at the origin root, a remote context there never loads."
+      "a \"*\" write preserves the same-site baseline of an entry first written same-site": "cos-wpt environment: every *.github.io origin is its own site, so there's no same-site, cross-origin pair to read from."
     }
   },
   "flaky": {
