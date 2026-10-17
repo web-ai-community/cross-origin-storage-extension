@@ -1,6 +1,6 @@
 ### Privacy Policy for Cross-Origin Storage
 
-**Effective Date:** October 6, 2026
+**Effective Date:** October 17, 2026
 
 #### 1. Introduction
 
@@ -22,8 +22,15 @@ visit.**
 All functionality of the Extension is performed locally on your computer. We do
 not have access to your browsing history, personal information, or any content
 you interact with. Apart from the anonymous usage statistics in section 3, the
-Extension contacts the network only to download public reference lists from
-GitHub (the Public Suffix List, and the Public Hash List when needed).
+Extension makes two kinds of network requests. It downloads public reference
+lists from GitHub (the Public Suffix List, and the Public Hash List when
+needed). It also makes requests to the website you are visiting, on that
+website's behalf: it downloads files the page asks to store in Cross-Origin
+Storage, and it may request the page's own address once to read the two
+response headers that decide how the page may share files
+(`Cross-Origin-Storage-Allow-Origin` and `Permissions-Policy`). These requests
+go only to servers the page already uses, and nothing about them is recorded or
+sent anywhere else.
 
 #### 3. Anonymous Usage Statistics
 
