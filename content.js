@@ -72,6 +72,22 @@ async function safariStoreFileData({ hash, blob: fileBlob, dataChunks, mimeType 
   return result;
 }
 
+// Stages bytes the page fetched for the background (see fetchResource() in
+// background.js) in bounded, base64-encoded pieces, and returns the ID they
+// are staged under.
+async function safariStagePageFetched(blob) {
+  const id = crypto.randomUUID();
+  const totalChunks = Math.max(1, Math.ceil(blob.size / SAFARI_CHUNK_SIZE));
+  for (let i = 0; i < totalChunks; i++) {
+    const slice = blob.slice(i * SAFARI_CHUNK_SIZE, (i + 1) * SAFARI_CHUNK_SIZE);
+    await sendRuntimeMessage({
+      action: 'stagePageFetchedChunk',
+      data: { id, chunkIndex: i, totalChunks, base64: arrayBufferToBase64(await slice.arrayBuffer()) },
+    });
+  }
+  return id;
+}
+
 // Pulls a cached resource's bytes from background.js by hash, in bounded,
 // base64-encoded pieces, decoding each into a real ArrayBuffer here (in this
 // realm) for the subsequent window.postMessage hop to the MAIN world.
@@ -522,6 +538,10 @@ window.addEventListener('message', async (event) => {
       if (chrome.runtime.getURL('').startsWith('chrome-extension://')) {
         out.blobURL = URL.createObjectURL(blob);
         pageBlobURLs.push(out.blobURL);
+      } else if (IS_SAFARI) {
+        // Safari doesn't carry a Blob through sendMessage (see the comment on
+        // IS_SAFARI), so the bytes are staged in the background in chunks.
+        out.stagedId = await safariStagePageFetched(blob);
       } else {
         out.data = blob;
       }

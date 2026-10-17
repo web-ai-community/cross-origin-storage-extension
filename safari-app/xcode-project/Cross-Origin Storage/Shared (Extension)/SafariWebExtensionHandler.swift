@@ -2,7 +2,7 @@
 //  SafariWebExtensionHandler.swift
 //  Shared (Extension)
 //
-//  Created by Thomas Steiner on 9/16/26.
+//  Created by Thomas Steiner on 10/17/26.
 //
 
 import SafariServices

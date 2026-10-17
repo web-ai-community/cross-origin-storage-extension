@@ -11,10 +11,13 @@
 # extension file *contents* are referenced from safari-app/safari-extension-src/
 # (regenerated fresh from the repo on every run), so editing background.js
 # etc. needs no project regeneration. Only the *file list* is baked into
-# the project at generation time -- if zip-extension.sh's file list
-# changes (a file added/removed), pass --regenerate once to resync it,
-# which will discard any manual Xcode customizations (icons, entitlements)
-# made since the project was last generated.
+# the project at generation time, so a file added to the extension isn't
+# built into the app until the project is regenerated. This script checks
+# for that on every run and regenerates the project when the extension has
+# a file it doesn't list: a missing module would stop the background from
+# loading at all. Regenerating discards manual Xcode customizations (icons,
+# entitlements) made since the project was last generated, so keep any in
+# apply_project_patches below.
 #
 # This script only builds and uploads. `npm run release:safari`
 # (publish-extension.mjs safari) wraps it: it picks the marketing version and
@@ -44,10 +47,16 @@
 #   --platform macos|ios|both    Which platform(s) to build and upload.
 #                                Default: both.
 #   --regenerate                 Regenerate the Xcode project from
-#                                scratch (needed after the extension's
-#                                file list changes; wipes manual Xcode
+#                                scratch (wipes manual Xcode
 #                                customizations made since it was last
-#                                generated).
+#                                generated). This happens on its own when
+#                                the extension has a file the project
+#                                doesn't list, since Safari would build
+#                                without it.
+#   --project-only               Stage the extension source and bring the
+#                                Xcode project up to date, then stop,
+#                                without archiving or uploading. Needs no
+#                                versions or API key; for a local build.
 #   --key-path PATH               Path to the App Store Connect API
 #                                private key (.p8). Overrides Keychain/.env.
 #   --store-key-in-keychain PATH  One-time setup: import a .p8 file into
@@ -95,6 +104,7 @@ MARKETING_VERSION=""
 BUILD_NUMBER=""
 PLATFORM="both"
 REGENERATE="false"
+PROJECT_ONLY="false"
 STORE_KEY_PATH=""
 
 print_help() {
@@ -112,6 +122,7 @@ while [ $# -gt 0 ]; do
     --build-number) BUILD_NUMBER="$2"; shift 2 ;;
     --platform) PLATFORM="$2"; shift 2 ;;
     --regenerate) REGENERATE="true"; shift ;;
+    --project-only) PROJECT_ONLY="true"; shift ;;
     --key-path) ASC_API_KEY_PATH="$2"; shift 2 ;;
     --store-key-in-keychain) STORE_KEY_PATH="$2"; shift 2 ;;
     -h|--help) print_help; exit 0 ;;
@@ -136,7 +147,7 @@ case "$PLATFORM" in
   *) echo "error: --platform must be macos, ios, or both." >&2; exit 1 ;;
 esac
 
-if ! [[ "$MARKETING_VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] || ! [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+if [ "$PROJECT_ONLY" = "false" ] && { ! [[ "$MARKETING_VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] || ! [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; }; then
   echo "error: pass --marketing-version X.Y[.Z] and --build-number N." >&2
   echo "To have both picked from App Store Connect, run: npm run release:safari" >&2
   exit 1
@@ -148,6 +159,8 @@ PBXPROJ="$XCODE_PROJECT_DIR/$APP_NAME/$APP_NAME.xcodeproj/project.pbxproj"
 LOG_DIR="$BUILD_DIR/logs"
 
 # --- Resolve the API key -----------------------------------------------
+
+if [ "$PROJECT_ONLY" = "false" ]; then
 
 KEY_TEMP_FILE=""
 cleanup() {
@@ -196,6 +209,7 @@ if [ -z "$ASC_API_KEY_PATH" ] || [ ! -f "$ASC_API_KEY_PATH" ]; then
 fi
 
 echo "==> Version $MARKETING_VERSION ($BUILD_NUMBER) for platform(s): $PLATFORM"
+fi
 
 # --- Build the extension and stage its source --------------------------
 
@@ -207,9 +221,31 @@ rm -rf "$BUILD_DIR/safari-extension-src"
 mkdir -p "$BUILD_DIR/safari-extension-src" "$LOG_DIR"
 unzip -q -o "$REPO_ROOT/cross-origin-storage-extension-safari.zip" -d "$BUILD_DIR/safari-extension-src"
 
+# Every file of the extension has to be listed in the project, or the app is
+# built without it. A module missing that way stops background.js from
+# loading, and the extension answers nothing in Safari.
+if [ "$REGENERATE" = "false" ] && [ -f "$PBXPROJ" ]; then
+  UNLISTED=""
+  while IFS= read -r file; do
+    case "$file" in */) continue ;; esac
+    grep -qF "/* $(basename "$file") */" "$PBXPROJ" || UNLISTED="$UNLISTED $file"
+  done < <(unzip -Z1 "$REPO_ROOT/cross-origin-storage-extension-safari.zip")
+  if [ -n "$UNLISTED" ]; then
+    echo "==> The Xcode project doesn't list:$UNLISTED"
+    REGENERATE="true"
+  fi
+fi
+
 # --- Generate the Xcode project, only if missing or --regenerate ------
 
 apply_project_patches() {
+  # Xcode only builds for macOS 12.0 and later, and the generated project
+  # asks for an older deployment target, which fails the build.
+  if grep -qE "MACOSX_DEPLOYMENT_TARGET = (10\.[0-9]+|11\.[0-9]+);" "$PBXPROJ"; then
+    sed -i '' -E 's/MACOSX_DEPLOYMENT_TARGET = (10\.[0-9]+|11\.[0-9]+);/MACOSX_DEPLOYMENT_TARGET = 12.0;/' "$PBXPROJ"
+    echo "Raised the macOS deployment target to 12.0."
+  fi
+
   # App Store Connect rejects the generated macOS App target at upload
   # time ("No App Category") without this key -- insert it once, right
   # after the display-name key in both Debug and Release configs.
@@ -245,10 +281,15 @@ if [ "$REGENERATE" = "true" ] || [ ! -f "$PBXPROJ" ]; then
     --no-open \
     --no-prompt \
     --force
-  apply_project_patches
   echo "==> New Xcode project generated at safari-app/xcode-project -- review and commit it."
 else
-  echo "==> Reusing existing Xcode project (pass --regenerate to resync its file list)"
+  echo "==> Reusing existing Xcode project"
+fi
+apply_project_patches
+
+if [ "$PROJECT_ONLY" = "true" ]; then
+  echo "==> Project ready at safari-app/xcode-project"
+  exit 0
 fi
 
 if [ "$PLATFORM" = "ios" ] || [ "$PLATFORM" = "both" ]; then

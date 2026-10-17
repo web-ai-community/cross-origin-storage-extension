@@ -394,6 +394,7 @@ async function fetchResource(url, pageFetched) {
   const fetched = pageFetched?.[url];
   if (!fetched) return null;
   let blob = fetched.data;
+  if (fetched.stagedId) blob = takeStagedPageFetched(fetched.stagedId);
   if (fetched.blobURL) {
     if (!String(fetched.blobURL).startsWith('blob:')) return null;
     blob = await fetch(fetched.blobURL).then((response) => response.blob());
@@ -405,6 +406,31 @@ async function fetchResource(url, pageFetched) {
     headers.set('cross-origin-storage-allow-origin', fetched.ceiling);
   }
   return new Response(blob, { headers });
+}
+
+// Bytes content.js staged for fetchResource() in Safari, which doesn't carry
+// a Blob through sendMessage, keyed by a random ID. Only content.js stages
+// them (pages can't reach the action), and anything not taken goes after a
+// minute.
+const stagedPageFetched = new Map();
+const STAGED_MAX_MS = 60_000;
+
+function stagePageFetchedChunk({ id, chunkIndex, totalChunks, base64 }) {
+  let staged = stagedPageFetched.get(id);
+  if (!staged) {
+    staged = { chunks: new Array(totalChunks), received: 0 };
+    stagedPageFetched.set(id, staged);
+    setTimeout(() => stagedPageFetched.delete(id), STAGED_MAX_MS);
+  }
+  if (!staged.chunks[chunkIndex]) staged.received++;
+  staged.chunks[chunkIndex] = base64ToUint8Array(base64);
+}
+
+function takeStagedPageFetched(id) {
+  const staged = stagedPageFetched.get(id);
+  stagedPageFetched.delete(id);
+  if (!staged || staged.received !== staged.chunks.length) return null;
+  return new Blob(staged.chunks);
 }
 
 // For a host integration, the ceiling comes from the fetched resource's own
@@ -900,6 +926,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           } else {
             responseData = { received: true };
           }
+          break;
+        }
+        // Safari: content.js staging bytes the page fetched (see
+        // takeStagedPageFetched()). Pages can't send it through the relay.
+        case 'stagePageFetchedChunk': {
+          stagePageFetchedChunk(data);
+          responseData = { staged: true };
           break;
         }
         case 'deleteResource': {
