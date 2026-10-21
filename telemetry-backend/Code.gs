@@ -154,14 +154,42 @@ function doPost(e) {
 
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
+  const skipped = [];
   try {
-    appendRows('Installs', installRows);
-    appendRows('Population', populationRows);
-    appendRows('Usage', usageRows);
+    // A report can arrive twice: the extension's request is `no-cors`, so
+    // it can't tell a failed delivery from one whose response just didn't
+    // make it back, and it sends the report again. Each install sends one
+    // snapshot per week and one usage report per day, so a second one for
+    // the same install ID and week, or day, is such a repeat.
+    if (installRows.length && hasRow('Installs', 2, snapshotWeek, report.id)) {
+      skipped.push('snapshot');
+    } else {
+      appendRows('Installs', installRows);
+      appendRows('Population', populationRows);
+    }
+    if (usageRows.length && hasRow('Usage', 1, received, report.id)) {
+      skipped.push('usage');
+    } else {
+      appendRows('Usage', usageRows);
+    }
   } finally {
     lock.releaseLock();
   }
-  return textOutput('ok');
+  return textOutput(
+    skipped.length ? `ok (repeated ${skipped.join(', ')} skipped)` : 'ok',
+  );
+}
+
+// Whether `sheetName` has a row whose column `column` (1-based) is `value`
+// and whose Install ID column, right after the Received and Week columns,
+// is `id`.
+function hasRow(sheetName, column, value, id) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  if (!sheet || sheet.getLastRow() < 2) return false;
+  const rows = sheet
+    .getRange(2, 1, sheet.getLastRow() - 1, 3)
+    .getDisplayValues();
+  return rows.some((row) => row[column - 1] === value && row[2] === id);
 }
 
 function parseReport(e) {
