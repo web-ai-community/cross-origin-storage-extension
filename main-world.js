@@ -411,6 +411,12 @@
           throw notAllowed('Only a handle from a create request can be written.');
         }
         return cosMakeWritable(async (blob, type) => {
+          if (!blob.size) {
+            throw new DOMException(
+              'Cross-Origin Storage does not store empty files.',
+              'DataError'
+            );
+          }
           await store(blob, type);
           state.mayRead = true;
         });

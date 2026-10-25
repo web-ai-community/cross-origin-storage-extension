@@ -246,6 +246,14 @@ function cosError(name, message) {
   return err;
 }
 
+// Empty files are never stored: there's nothing to share, and an empty
+// entry only clutters the resource list and the statistics.
+function assertNotEmpty(size) {
+  if (!size) {
+    throw cosError('DataError', 'Cross-Origin Storage does not store empty files.');
+  }
+}
+
 // Messages reach this background from any web page, through content.js's
 // relay, so nothing a message says about who sent it can be trusted: the
 // requesting origin is always the origin of the frame the content script
@@ -508,10 +516,13 @@ function rememberCreate(origin, partition, hashValue, requestedOrigins) {
 // Records the grants of a write whose bytes were just verified and stored:
 // a storing grant for the writer under its partition, and the `origins`
 // values it asked for. `requests` defaults to the pending create requests;
-// a write that skipped them gets the same-site default.
+// a write that skipped them gets the same-site default. A write that went
+// through getFileHandle() also records the writer's access, which that
+// request left until now (the CSS and script paths record their own).
 async function recordWrite(hashValue, origin, partition, requests) {
   if (!partition) return;
   const key = `${origin}|${partition}|${hashValue}`;
+  if (!requests) resourceManager.recordAccess(origin, hashValue);
   requests ??= pendingCreates.get(key) ?? [];
   pendingCreates.delete(key);
   const firstParty = (await getSchemefulSite(origin)) === partition;
@@ -527,6 +538,46 @@ async function recordWrite(hashValue, origin, partition, requests) {
   await resourceManager.saveManagerToStorage();
 }
 
+// Removes what earlier versions could leave behind: records of a hash whose
+// create request was never written (they recorded the access before any
+// bytes arrived), and empty entries. Only hashes without a recorded size can
+// lack bytes, since the size is recorded after the bytes are stored.
+async function dropRecordsWithoutBytes() {
+  const cosCache = await caches.open('cos-storage');
+  const unsized = resourceManager
+    .getAllHashes()
+    .filter((hash) => !resourceManager.getSizeByHash(hash));
+  if (!unsized.length) return;
+  const keysByHash = async () => {
+    const map = new Map();
+    for (const request of await cosCache.keys()) {
+      const hash = new URL(request.url).pathname.split('_').pop();
+      map.set(hash, [...(map.get(hash) ?? []), request]);
+    }
+    return map;
+  };
+  const before = await keysByHash();
+  let dropped = [];
+  for (const hash of unsized) {
+    const keys = before.get(hash) ?? [];
+    if (resourceManager.getSizeByHash(hash) === 0) {
+      for (const key of keys) await cosCache.delete(key);
+    } else if (keys.length) {
+      continue;
+    }
+    dropped.push(hash);
+  }
+  // A page may have stored one of them while this ran.
+  const after = await keysByHash();
+  dropped = dropped.filter(
+    (hash) => !after.has(hash) && !resourceManager.getSizeByHash(hash)
+  );
+  if (dropped.length) {
+    console.info(`[COS] Removed ${dropped.length} records without stored bytes.`);
+    await resourceManager.deleteResourcesByHash(dropped);
+  }
+}
+
 // Create the offscreen document for Blob operations.
 // Exposed as a module-level promise so getFileData can await it before sending
 // getBlobURL — the offscreen doc must exist before it can receive messages.
@@ -536,6 +587,9 @@ const offscreenSetupPromise = (async () => {
   }
   // Load the initial state when the extension starts.
   await resourceManager.ready();
+  await dropRecordsWithoutBytes().catch((err) =>
+    console.warn('[COS] Could not check records against storage:', err)
+  );
 })();
 
 // Open the cache once when the service worker starts.
@@ -724,10 +778,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               // with no bytes read back an entry another site stored.
               // requestedOrigins is undefined when the page omitted
               // `origins` entirely (same-site).
+              // The access is recorded by recordWrite() once the bytes are
+              // stored, so a create that's never written leaves no record.
               rememberCreate(origin, partition, hash.value, requestedOrigins);
-            }
-            resourceManager.recordAccess(origin, hash.value);
-            if (!create) {
+            } else {
+              resourceManager.recordAccess(origin, hash.value);
               resourceManager.recordHit(hash.value);
               countForTelemetry('hit', hash.value, origin, 'getFileHandle');
               if (tabId) {
@@ -856,6 +911,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           let entry = pendingSafariWrites.get(transferId);
           if (!entry) {
             assertValidHash(hash);
+            assertNotEmpty(totalSize);
             await checkStorageQuota(totalSize);
             const { readable, writable } = new TransformStream();
             const putPromise = cache
@@ -887,6 +943,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           entry.bytesWritten += bytes.length;
           if (chunkIndex === totalChunks - 1) {
             pendingSafariWrites.delete(transferId);
+            if (!entry.bytesWritten) {
+              const err = cosError(
+                'DataError',
+                'Cross-Origin Storage does not store empty files.'
+              );
+              await entry.writer.abort(err).catch(() => {});
+              await entry.putPromise.catch(() => {});
+              throw err;
+            }
             if (entry.sha && entry.sha.hexDigest() !== entry.hash.value) {
               // Aborting the stream makes the put fail, so nothing is stored.
               const err = cosError('DataError', 'The data does not match the declared hash.');
@@ -1517,6 +1582,7 @@ async function computeHashHex(algorithm, blob) {
 }
 
 async function storeFileData(hash, blob, mimeType) {
+  assertNotEmpty(blob.size);
   const key = generateCacheKey(hash);
   await checkStorageQuota(blob.size);
   try {

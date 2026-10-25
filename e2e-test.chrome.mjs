@@ -501,6 +501,79 @@ async function main() {
     await page.close();
   }
 
+  // ── No records without bytes ──────────────────────────────────────────────
+
+  // A create request that's never written, or one written with no bytes,
+  // must leave neither a cache entry nor a record. Earlier versions recorded
+  // the access at create time, which showed up as empty resources.
+  console.log('\nChecking that unwritten and empty files leave nothing behind…');
+  const emptyResults = [];
+  {
+    const unwritten = `never written ${Date.now()}`;
+    const EMPTY_HASH = sha256Hex('');
+    const page = await context.newPage();
+    try {
+      await page.goto(`http://a.test:${PORT}/test-legacy.html`, { waitUntil: 'load' });
+      const emptyError = await page.evaluate(async ({ unwritten, emptyHash }) => {
+        const hashOf = async (text) =>
+          [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))]
+            .map((b) => b.toString(16).padStart(2, '0'))
+            .join('');
+        await navigator.crossOriginStorage.getFileHandle(
+          { algorithm: 'SHA-256', value: await hashOf(unwritten) },
+          { create: true }
+        );
+        const handle = await navigator.crossOriginStorage.getFileHandle(
+          { algorithm: 'SHA-256', value: emptyHash },
+          { create: true }
+        );
+        const writable = await handle.createWritable();
+        try {
+          await writable.close();
+          return null;
+        } catch (err) {
+          return err.name;
+        }
+      }, { unwritten, emptyHash: EMPTY_HASH });
+      await new Promise((r) => setTimeout(r, 1000));
+      const { records, cached } = await sw.evaluate(async (hashes) => {
+        const cache = await caches.open('cos-storage');
+        const cached = [];
+        for (const hash of hashes) {
+          if (await cache.match(`https://cos.example.com/SHA-256_${hash}`)) cached.push(hash);
+        }
+        return {
+          records: (await chrome.storage.local.get('resourceManagerData')).resourceManagerData,
+          cached,
+        };
+      }, [sha256Hex(unwritten), EMPTY_HASH]);
+      const recorded = (hash) =>
+        !!(records.hashToOrigins?.[hash] || hash in (records.hashToSize ?? {}));
+      for (const [label, hash, extra] of [
+        ['A create request without a write leaves no record', sha256Hex(unwritten), null],
+        [
+          'An empty file is rejected with a DataError and leaves no record',
+          EMPTY_HASH,
+          emptyError === 'DataError' ? null : `close() gave ${emptyError ?? 'no error'}`,
+        ],
+      ]) {
+        const problems = [
+          extra,
+          recorded(hash) && 'a record exists',
+          cached.includes(hash) && 'a cache entry exists',
+        ].filter(Boolean);
+        emptyResults.push({
+          label: `[Empty] ${label}`,
+          status: problems.length ? 'fail' : 'pass',
+          detail: problems.length ? problems.join(', ') : 'nothing stored or recorded',
+        });
+      }
+    } catch (err) {
+      emptyResults.push({ label: '[Empty] setup', status: 'fail', detail: err.message.split('\n')[0] });
+    }
+    await page.close();
+  }
+
   // ── Grants keyed to the top-level site ─────────────────────────────────────
 
   // A storing grant, and a list grant, only count under the top-level site
@@ -627,7 +700,7 @@ async function main() {
 
   console.log('\n── Test Results ──────────────────────────────────────');
   let passed = 0, failed = 0;
-  for (const r of [...results, ...legacyResults, ...popupResults, ...concurrencyResults, ...keyingResults]) {
+  for (const r of [...results, ...legacyResults, ...popupResults, ...concurrencyResults, ...emptyResults, ...keyingResults]) {
     if (r.status === 'n/a') continue;
     const icon = r.status === 'pass' ? '✅' : '❌';
     console.log(`${icon} [${r.status}] ${r.label}`);
