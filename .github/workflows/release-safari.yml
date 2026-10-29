@@ -1,0 +1,63 @@
+# Copyright 2026 Google LLC.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Builds the Safari app on a GitHub-hosted Mac, uploads it to App Store
+# Connect, and submits it for review, the same as `npm run release:safari`
+# does locally. The runner image comes with iOS Simulator runtimes, which the
+# iOS archive step needs for asset catalog compilation.
+#
+# Needs the repository secret ASC_API_KEY: the contents of the App Store
+# Connect API key file (AuthKey_<KEY_ID>.p8). The key ID, issuer ID, and team
+# ID default to this project's values in the scripts.
+
+name: Release Safari app
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform to release
+        type: choice
+        options: [ios, macos, both]
+        default: ios
+      release_notes:
+        description: What's New text
+        type: string
+        required: true
+      marketing_version:
+        description: App Store version, e.g. 2.3 (empty picks it from App Store Connect)
+        type: string
+        required: false
+      build_number:
+        description: Build number (empty picks one higher than any uploaded)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    # Xcode 27, which the committed Xcode project needs.
+    runs-on: xcode-27
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Release
+        env:
+          ASC_API_KEY: ${{ secrets.ASC_API_KEY }}
+          PLATFORM: ${{ inputs.platform }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+          MARKETING_VERSION: ${{ inputs.marketing_version }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+        run: |
+          xcodebuild -version
+          args=(safari --platform "$PLATFORM" --release-notes "$RELEASE_NOTES")
+          [ -n "$MARKETING_VERSION" ] && args+=(--marketing-version "$MARKETING_VERSION")
+          [ -n "$BUILD_NUMBER" ] && args+=(--build-number "$BUILD_NUMBER")
+          node publish-extension.mjs "${args[@]}"
