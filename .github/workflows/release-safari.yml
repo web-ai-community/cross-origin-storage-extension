@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Builds the Safari app on a GitHub-hosted Mac, uploads it to App Store
-# Connect, and submits it for review, the same as `npm run release:safari`
-# does locally. The runner image comes with iOS Simulator runtimes, which the
-# iOS archive step needs for asset catalog compilation.
+# Connect, and submits it for review. `npm run release:safari` starts this
+# workflow and follows it; `npm run release:safari -- --local` does the same
+# on your own Mac. The runner image comes with iOS Simulator runtimes, which
+# the iOS archive step needs for asset catalog compilation.
 #
 # Needs the repository secret ASC_API_KEY: the contents of the App Store
 # Connect API key file (AuthKey_<KEY_ID>.p8). The key ID, issuer ID, and team
@@ -32,6 +33,14 @@ on:
         description: Build number (empty picks one higher than any uploaded)
         type: string
         required: false
+      cancel_review:
+        description: Take the version now in review out of review first
+        type: boolean
+        default: false
+      regenerate:
+        description: Rebuild the Xcode wrapper project first (not committed back)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -55,9 +64,14 @@ jobs:
           RELEASE_NOTES: ${{ inputs.release_notes }}
           MARKETING_VERSION: ${{ inputs.marketing_version }}
           BUILD_NUMBER: ${{ inputs.build_number }}
+          CANCEL_REVIEW: ${{ inputs.cancel_review }}
+          REGENERATE: ${{ inputs.regenerate }}
         run: |
           xcodebuild -version
-          args=(safari --platform "$PLATFORM" --release-notes "$RELEASE_NOTES")
+          # --local: build on this runner instead of starting this workflow.
+          args=(safari --local --platform "$PLATFORM" --release-notes "$RELEASE_NOTES")
           [ -n "$MARKETING_VERSION" ] && args+=(--marketing-version "$MARKETING_VERSION")
           [ -n "$BUILD_NUMBER" ] && args+=(--build-number "$BUILD_NUMBER")
+          [ "$CANCEL_REVIEW" = true ] && args+=(--cancel-review)
+          [ "$REGENERATE" = true ] && args+=(--regenerate)
           node publish-extension.mjs "${args[@]}"

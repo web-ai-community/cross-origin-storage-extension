@@ -47,10 +47,21 @@
 //   --skip-build            Don't build and upload; submit the newest build
 //                           already uploaded for the marketing version (or
 //                           the one --build-number names).
+//   --local                 Build on this Mac instead of on GitHub Actions.
+//                           Needs Xcode, and an iOS Simulator runtime for
+//                           iOS builds.
 //
 // A Safari release uploads the builds with upload-safari-build.sh, waits for
 // App Store Connect to process them, attaches each to its App Store version
 // with the release notes, and submits it for review.
+//
+// By default, a Safari release that builds runs on a GitHub-hosted Mac: the
+// script starts .github/workflows/release-safari.yml on the current branch
+// with the GitHub CLI (gh) and follows the run until it finishes. The runner
+// builds what is pushed, so the branch has to match its remote. --status,
+// --dry-run, and --skip-build need no Mac and always run here. A project
+// that --regenerate rebuilds in the cloud isn't committed back; regenerate
+// with --local to keep it.
 //
 // Credentials are read from the environment or the gitignored .env file.
 // See .env.example for the variables, and the "Publishing" section of
@@ -110,6 +121,7 @@ function parseArgs(argv) {
     skipBuild: false,
     cancelReview: false,
     regenerate: false,
+    local: false,
   };
   const takeValue = (flag, i) => {
     const value = argv[i + 1];
@@ -143,6 +155,9 @@ function parseArgs(argv) {
         break;
       case '--regenerate':
         options.regenerate = true;
+        break;
+      case '--local':
+        options.local = true;
         break;
       case '--status':
         options.status = true;
@@ -192,6 +207,7 @@ function parseArgs(argv) {
     ['--skip-build', options.skipBuild],
     ['--cancel-review', options.cancelReview],
     ['--regenerate', options.regenerate],
+    ['--local', options.local],
   ].filter(([, value]) => value);
   if (options.browser !== 'safari' && safariOnly.length) {
     throw new UsageError(`${safariOnly.map(([flag]) => flag).join(', ')}: Safari only.`);
@@ -1110,6 +1126,119 @@ async function publishSafari(options) {
   }
 }
 
+// ── Safari in the cloud ─────────────────────────────────────────────────────
+
+// Building the iOS app needs an iOS Simulator runtime (an 8 GB download), so
+// by default a Safari release that builds runs on a GitHub-hosted Mac through
+// .github/workflows/release-safari.yml, which runs this script with --local.
+const SAFARI_WORKFLOW = 'release-safari.yml';
+const WORKFLOW_RUN_POLL_MS = 3_000;
+const WORKFLOW_RUN_TIMEOUT_MS = 60_000;
+
+function runsInCloud(options) {
+  return (
+    options.browser === 'safari' &&
+    !options.local &&
+    !options.status &&
+    !options.dryRun &&
+    // --skip-build only talks to App Store Connect, which needs no Mac.
+    !options.skipBuild &&
+    process.env.GITHUB_ACTIONS !== 'true'
+  );
+}
+
+function git(...args) {
+  return execFileSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
+}
+
+function gh(args, stdio = 'pipe') {
+  return execFileSync('gh', args, { cwd: REPO_ROOT, encoding: 'utf8', stdio });
+}
+
+// The runner checks out the pushed branch, so anything not pushed would
+// silently be left out of the release.
+function pushedBranch() {
+  const branch = git('rev-parse', '--abbrev-ref', 'HEAD');
+  if (branch === 'HEAD') {
+    throw new UsageError('HEAD is detached. Check out the branch to release, or pass --local.');
+  }
+  git('fetch', '--quiet', 'origin', branch);
+  if (git('rev-parse', 'HEAD') !== git('rev-parse', `origin/${branch}`)) {
+    throw new UsageError(
+      `${branch} differs from origin/${branch}, and the cloud build uses what is pushed. ` +
+        'Push or pull first, or pass --local.'
+    );
+  }
+  return branch;
+}
+
+async function publishSafariInCloud(options) {
+  if (!options.releaseNotes) {
+    throw new UsageError("--release-notes is required for Safari; it becomes the version's What's New text.");
+  }
+  try {
+    gh(['--version']);
+  } catch {
+    throw new UsageError('The cloud build needs the GitHub CLI (gh). Install it, or pass --local.');
+  }
+  const branch = pushedBranch();
+
+  const fields = {
+    platform: options.platform,
+    release_notes: options.releaseNotes,
+    marketing_version: options.marketingVersion ?? '',
+    build_number: options.buildNumber === null ? '' : String(options.buildNumber),
+    cancel_review: String(options.cancelReview),
+    regenerate: String(options.regenerate),
+  };
+  console.log(`==> Starting ${SAFARI_WORKFLOW} on ${branch} (pass --local to build here instead)`);
+  // Run times only have second precision.
+  const startedAt = Date.now() - 5_000;
+  gh([
+    'workflow',
+    'run',
+    SAFARI_WORKFLOW,
+    '--ref',
+    branch,
+    ...Object.entries(fields).flatMap(([key, value]) => ['-f', `${key}=${value}`]),
+  ]);
+
+  // `gh workflow run` doesn't say which run it started, so find the newest
+  // dispatch of this workflow on the branch since then.
+  let run;
+  for (const deadline = Date.now() + WORKFLOW_RUN_TIMEOUT_MS; !run && Date.now() < deadline; ) {
+    await sleep(WORKFLOW_RUN_POLL_MS);
+    const runs = JSON.parse(
+      gh([
+        'run',
+        'list',
+        '--workflow',
+        SAFARI_WORKFLOW,
+        '--branch',
+        branch,
+        '--event',
+        'workflow_dispatch',
+        '--limit',
+        '5',
+        '--json',
+        'databaseId,createdAt,url',
+      ])
+    );
+    run = runs.find((candidate) => Date.parse(candidate.createdAt) >= startedAt);
+  }
+  if (!run) {
+    throw new Error(`The workflow run didn't show up. Look for it with: gh run list --workflow ${SAFARI_WORKFLOW}`);
+  }
+
+  console.log(`==> Following ${run.url}`);
+  try {
+    gh(['run', 'watch', String(run.databaseId), '--exit-status', '--interval', '30'], 'inherit');
+  } catch {
+    throw new Error(`The workflow run failed. See its log with: gh run view ${run.databaseId} --log-failed`);
+  }
+  console.log('✅ The workflow run finished; its log has what was submitted.');
+}
+
 // ── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -1119,12 +1248,18 @@ async function main() {
     return;
   }
   loadEnv();
+  const cloud = runsInCloud(options);
+  if (cloud && options.allowDirty) {
+    throw new UsageError('The cloud build uses the pushed branch, so --allow-dirty needs --local.');
+  }
   // --skip-build publishes builds that are already uploaded, so the working
   // tree doesn't matter.
   const building = !options.status && !options.dryRun && !options.skipBuild;
   if (building && !options.allowDirty) assertCleanTree();
 
-  if (options.browser === 'chrome') {
+  if (cloud) {
+    await publishSafariInCloud(options);
+  } else if (options.browser === 'chrome') {
     await publishChrome(options);
   } else if (options.browser === 'firefox') {
     await publishFirefox(options);

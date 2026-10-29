@@ -738,6 +738,21 @@ minor version of the released one (2.0 to 2.1). `--marketing-version` and
 already uploaded. It uses the same App Store Connect API key as
 `upload-safari-build.sh`.
 
+A Safari release that builds runs on a GitHub-hosted Mac by default, since
+building the iOS app needs an iOS Simulator runtime (an 8 GB download). The
+script starts the `Release Safari app` workflow
+(`.github/workflows/release-safari.yml`) on the current branch with the
+[GitHub CLI](https://cli.github.com/) and follows the run until it finishes.
+The runner builds what is pushed, so the branch has to match its remote. Pass
+`--local` to build on your own Mac instead. `--status`, `--dry-run`, and
+`--skip-build` need no Mac and always run locally. The workflow reads the API
+key from the `ASC_API_KEY` repository secret, which holds the contents of the
+`.p8` file:
+
+```sh
+node --env-file=.env -e 'process.stdout.write(process.env.ASC_API_KEY)' | gh secret set ASC_API_KEY
+```
+
 ### One-time setup: Chrome Web Store
 
 The script uses the
