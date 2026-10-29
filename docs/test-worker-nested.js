@@ -18,7 +18,17 @@ self.onmessage = ({ data }) => {
       ? __cosWorkerBaseURL
       : self.location.href;
 
-  const inner = new Worker(new URL('./test-worker-classic.js', baseURL).href);
+  // `?inner=module` spawns test-worker-module.js as a module worker. A module
+  // worker loads asynchronously, so the 'run' message posted below arrives
+  // before the inner script has set its onmessage, as Emscripten's pthread
+  // pool does with its first message. The extension has to buffer it.
+  const innerModule =
+    new URL(baseURL).searchParams.get('inner') === 'module';
+  const inner = innerModule
+    ? new Worker(new URL('./test-worker-module.js', baseURL).href, {
+        type: 'module',
+      })
+    : new Worker(new URL('./test-worker-classic.js', baseURL).href);
   inner.onmessage = ({ data: result }) => {
     if (result.type !== 'result') return;
     inner.terminate();

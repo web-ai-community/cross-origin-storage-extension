@@ -1499,10 +1499,28 @@
             } catch (_) {}
           }
           if (!loader) {
+            // Like the top-level module loader, buffer messages until the
+            // async import() resolves and replay them once the script has set
+            // its onmessage. Spawners such as Emscripten's pthread pool post
+            // to a new worker right away, and a dropped message hangs it.
             loader = isModule
-              ? '(async()=>{ try { await import(' +
-                JSON.stringify(absURL) +
-                '); } catch(e) { console.error(e); } })();'
+              ? `const __cosBuffer = [];
+let __cosBuffering = true;
+self.addEventListener('message', function __cosBufferFn(e) {
+  if (!__cosBuffering) { self.removeEventListener('message', __cosBufferFn); return; }
+  if (e.data && e.data.source === 'cos-setup') return;
+  e.stopImmediatePropagation();
+  __cosBuffer.push({ data: e.data, ports: [...(e.ports || [])] });
+});
+(async () => {
+  try {
+    await import(${JSON.stringify(absURL)});
+    __cosBuffering = false;
+    for (const m of __cosBuffer.splice(0)) {
+      self.dispatchEvent(new MessageEvent('message', { data: m.data, ports: m.ports }));
+    }
+  } catch(e) { console.error(e); }
+})();`
               : 'try { importScripts(' +
                 JSON.stringify(absURL) +
                 '); } catch(e) { console.error(e); }';

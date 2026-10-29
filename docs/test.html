@@ -1218,6 +1218,16 @@
             return new Worker('./test-worker-nested.js');
           },
         },
+        {
+          id: 'nested-worker-module',
+          label: 'Nested module worker, messaged right after creation',
+          create() {
+            // Same as above, but the inner worker is a module worker that
+            // the outer one messages before its script has loaded. The
+            // message must be buffered and replayed, not dropped.
+            return new Worker('./test-worker-nested.js?inner=module');
+          },
+        },
       ];
 
       const variantTbody = document.getElementById('variant-results');
