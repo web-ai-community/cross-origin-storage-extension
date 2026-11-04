@@ -186,14 +186,37 @@ function queueKey(hash, event, relation, api) {
   return [hash, event, relation, api].join('|');
 }
 
-function addToQueue(queue, counts) {
-  for (const [key, count] of Object.entries(counts)) {
+// A queue entry is `{ count, bytes, mimeType }`, with the bytes and MIME type
+// taken when each event happened, so a file deleted before the next report
+// is still described correctly. Entries queued by earlier versions are a bare
+// count, and get both from the stored records when the report is built.
+function asEntry(value) {
+  return typeof value === 'number' ? { count: value } : value;
+}
+
+function mergeEntries(a, b) {
+  if (!a) return b;
+  return {
+    count: a.count + b.count,
+    bytes:
+      a.bytes === undefined || b.bytes === undefined
+        ? undefined
+        : a.bytes + b.bytes,
+    mimeType: a.mimeType === b.mimeType ? a.mimeType : undefined,
+  };
+}
+
+function addToQueue(queue, entries) {
+  for (const [key, value] of Object.entries(entries)) {
     let target = key;
     if (!(key in queue) && Object.keys(queue).length >= MAX_QUEUE_KEYS) {
       const [, ...rest] = key.split('|');
       target = [OTHER, ...rest].join('|');
     }
-    queue[target] = (queue[target] || 0) + count;
+    queue[target] = mergeEntries(
+      queue[target] && asEntry(queue[target]),
+      asEntry(value),
+    );
   }
   return queue;
 }
@@ -211,16 +234,27 @@ function addToQueue(queue, counts) {
  * @param {() => Promise<'same'|'cross'|'unknown'>} [event.relation] For hits:
  *   resolves how the requesting origin relates to the resource's storer.
  *   Only called when telemetry is enabled.
+ * @param {() => {size?: number, mimeType?: string}} [event.describe] The
+ *   resource's size and MIME type. Called after the caller's current task,
+ *   so a store's size and MIME type, recorded right after the event is
+ *   counted, are already known.
  */
-function recordTelemetryEvent({ hash, event, api, origin, relation }) {
+function recordTelemetryEvent({ hash, event, api, origin, relation, describe }) {
   if (isDevelopmentOrigin(origin)) return Promise.resolve();
   return (async () => {
     if (!(await isTelemetryEnabled())) return;
     const resolved = relation ? await relation() : '';
+    const { size, mimeType } = describe?.() ?? {};
+    const entry = {
+      count: 1,
+      // Bytes served (hits) or written (stores), as in the popup's stats.
+      bytes: event === 'miss' ? 0 : size,
+      mimeType,
+    };
     await withQueue(async () => {
       const { [KEY_QUEUE]: queue = {} } =
         await chrome.storage.local.get(KEY_QUEUE);
-      addToQueue(queue, { [queueKey(hash, event, resolved, api)]: 1 });
+      addToQueue(queue, { [queueKey(hash, event, resolved, api)]: entry });
       await chrome.storage.local.set({ [KEY_QUEUE]: queue });
     });
   })().catch((error) => {
@@ -298,22 +332,29 @@ function buildReport({
   isListed,
 }) {
   const usageRows = new Map();
-  for (const [key, count] of Object.entries(queue)) {
+  for (const [key, value] of Object.entries(queue)) {
     const [hash, event, relation, api] = key.split('|');
     const listed = isListed(hash);
-    const { size, mimeType } = describe(hash);
+    const entry = asEntry(value);
+    // Only entries without their own bytes or MIME type need the records.
+    const known =
+      entry.bytes === undefined || entry.mimeType === undefined
+        ? describe(hash)
+        : {};
     const row = {
       hash: listed ? hash : OTHER,
-      mimeType: reportedMimeType(mimeType, listed),
+      mimeType: reportedMimeType(entry.mimeType ?? known.mimeType, listed),
       event,
       relation,
       api,
     };
     const rowKey = Object.values(row).join('|');
     const existing = usageRows.get(rowKey) ?? { ...row, count: 0, bytes: 0 };
-    existing.count += count;
+    existing.count += entry.count;
     // Bytes served (hits) or written (stores), as in the popup's stats.
-    if (event !== 'miss') existing.bytes += count * (size ?? 0);
+    if (event !== 'miss') {
+      existing.bytes += entry.bytes ?? entry.count * (known.size ?? 0);
+    }
     usageRows.set(rowKey, existing);
   }
   const usage = [...usageRows.values()].map((row) =>

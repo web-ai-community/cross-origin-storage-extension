@@ -230,6 +230,11 @@ function countForTelemetry(event, hashValue, origin, api) {
     origin,
     relation:
       event === 'hit' ? () => siteRelation(hashValue, origin) : undefined,
+
+    describe: () => ({
+      size: resourceManager.getSizeByHash(hashValue),
+      mimeType: resourceManager.getMimeTypeByHash(hashValue),
+    }),
   });
 }
 
