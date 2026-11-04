@@ -66,6 +66,15 @@ async function main() {
   try {
     let [sw] = context.serviceWorkers();
     sw ??= await context.waitForEvent('serviceworker', { timeout: 30_000 });
+    // The extension writes its defaults, these three off, when it's
+    // installed. Settings written before that are overwritten.
+    await sw.evaluate(async () => {
+      for (let i = 0; i < 100; i++) {
+        const { workerPatchEnabled } = await chrome.storage.local.get('workerPatchEnabled');
+        if (workerPatchEnabled !== undefined) return;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    });
     await sw.evaluate(() =>
       chrome.storage.local.set({
         publicHashListEnabled: true,
