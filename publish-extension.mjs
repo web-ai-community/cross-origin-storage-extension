@@ -703,16 +703,33 @@ function ascAuthHeader() {
   return `Bearer ${header}.${claims}.${signature}`;
 }
 
+// A GET whose connection fails is tried again: after the minutes an upload
+// takes, the first request can go out on a pooled connection the server has
+// closed, and fetch() then fails with nothing but "fetch failed".
+const ASC_GET_ATTEMPTS = 4;
+
 async function ascRequest(method, pathOrUrl, what, body) {
   const url = pathOrUrl.startsWith('https://') ? pathOrUrl : `${ASC_API}${pathOrUrl}`;
-  const response = await fetch(url, {
-    method,
-    headers: {
-      Authorization: ascAuthHeader(),
-      ...(body && { 'Content-Type': 'application/json' }),
-    },
-    body: body && JSON.stringify(body),
-  });
+  let response;
+  for (let attempt = 1; !response; attempt++) {
+    try {
+      response = await fetch(url, {
+        method,
+        headers: {
+          Authorization: ascAuthHeader(),
+          ...(body && { 'Content-Type': 'application/json' }),
+        },
+        body: body && JSON.stringify(body),
+      });
+    } catch (error) {
+      const cause = error.cause?.code || error.cause?.message || error.message;
+      if (method !== 'GET' || attempt === ASC_GET_ATTEMPTS) {
+        throw new Error(`${what} failed: ${error.message} (${cause})`);
+      }
+      console.warn(`    ${what}: ${cause}, trying again`);
+      await sleep(2 ** attempt * 1000);
+    }
+  }
   try {
     return await readJsonResponse(response, what);
   } catch (error) {
