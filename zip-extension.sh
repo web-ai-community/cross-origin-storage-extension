@@ -54,20 +54,17 @@ COMMON_FILES=(
   "migration.js"
 )
 
-if [ "$BROWSER" = "chrome" ]; then
-  EXTRA_FILES=("offscreen.js" "offscreen.html")
-else
+FILES_TO_ZIP=("${COMMON_FILES[@]}")
+if [ "$BROWSER" != "chrome" ]; then
   # Firefox and Safari both run the background code as a non-persistent
   # background page rather than a service worker, so they share this file.
-  EXTRA_FILES=("background.html")
+  FILES_TO_ZIP+=("background.html")
 fi
-
-FILES_TO_ZIP=("${COMMON_FILES[@]}" "${EXTRA_FILES[@]}")
 
 # Always clean up, including on an early exit, so a failed run can't leave a
 # partial build/ behind for the next one to pick up. That matters when
-# switching browsers: stale offscreen.* from a chrome build would otherwise be
-# swept into a firefox archive.
+# switching browsers: a stale background.html from a firefox build would
+# otherwise be swept into a chrome archive.
 cleanup() { rm -rf "$BUILD_DIR"; }
 trap cleanup EXIT
 

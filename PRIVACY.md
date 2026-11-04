@@ -103,16 +103,6 @@ privacy.
   - **Privacy Assurance:** Alarms only wake the Extension at a set time. They
     give the Extension no access to any data.
 
-- **`offscreen`**:
-  - **Purpose:** This permission allows the Extension to create an offscreen
-    document to perform tasks that are not possible in a background service
-    worker. This is used for technical implementation details of the
-    Cross-Origin Storage API.
-  - **Privacy Assurance:** The offscreen document runs locally and does not have
-    access to your personal data. It is a sandboxed environment used solely for
-    the technical operation of the Extension. No data from this process is
-    collected or transmitted.
-
 - **Content Scripts on `https://*/*`**:
   - **Purpose:** The Extension uses content scripts to inject the necessary
     JavaScript code into web pages. This is how it provides the Cross-Origin

@@ -8,8 +8,6 @@ import { initTelemetry, recordTelemetryEvent } from './telemetry.js';
 import { initNativeMigration, handleMigrationMessage } from './native-migration.js';
 import { createSha256, incrementalHexDigest, streamingHexDigest } from './sha256.js';
 
-let creating; // A global promise to avoid concurrency issues
-
 // Proactively checks (via the standard Storage API, supported in Chrome,
 // Firefox, and Safari) whether there's plausibly enough room for a resource
 // of the given size before attempting to write it, so a doomed multi-GiB
@@ -55,8 +53,7 @@ function asQuotaError(err) {
 // as a sequence of small base64-encoded chunks (getFileDataMeta/
 // getFileDataChunk/storeFileDataChunk) rather than as one message carrying
 // the whole payload -- this bounds the size of any single message
-// regardless of file size. Chrome and Firefox are unaffected and keep using
-// the original blobURL/raw-Blob path below.
+// regardless of file size. Chrome and Firefox send the Blob itself.
 const SAFARI_CHUNK_SIZE = 4 * 1024 * 1024; // 4 MiB pre-encode (~5.3 MiB as base64)
 
 // transferId -> { writer, hash, mimeType, putPromise, bytesWritten }. Chunks
@@ -160,32 +157,6 @@ async function mayRead(hashValue, origin, partition) {
   if (grant === 'grant') return true;
   if (grant !== 'global') return false;
   return !(await isBlockedByPublicHashList(hashValue));
-}
-
-async function setupOffscreenDocument(path) {
-  // Check all windows controlled by the service worker to see if one
-  // of them is the offscreen document with the given path
-  const offscreenUrl = chrome.runtime.getURL(path);
-  const existingContexts = await chrome.runtime.getContexts({
-    contextTypes: ['OFFSCREEN_DOCUMENT'],
-    documentUrls: [offscreenUrl],
-  });
-
-  if (existingContexts.length > 0) {
-    return;
-  }
-
-  if (creating) {
-    await creating;
-  } else {
-    creating = chrome.offscreen.createDocument({
-      url: 'offscreen.html',
-      reasons: ['BLOBS'],
-      justification: 'Create Blob URLs',
-    });
-    await creating;
-    creating = null;
-  }
 }
 
 const resourceManager = new ResourceManager();
@@ -390,10 +361,6 @@ async function fetchResource(url, pageFetched) {
   if (!fetched) return null;
   let blob = fetched.data;
   if (fetched.stagedId) blob = takeStagedPageFetched(fetched.stagedId);
-  if (fetched.blobURL) {
-    if (!String(fetched.blobURL).startsWith('blob:')) return null;
-    blob = await fetch(fetched.blobURL).then((response) => response.blob());
-  }
   if (!(blob instanceof Blob)) return null;
   const headers = new Headers();
   if (fetched.contentType) headers.set('content-type', fetched.contentType);
@@ -565,14 +532,8 @@ async function dropRecordsWithoutBytes() {
   }
 }
 
-// Create the offscreen document for Blob operations.
-// Exposed as a module-level promise so getFileData can await it before sending
-// getBlobURL — the offscreen doc must exist before it can receive messages.
-const offscreenSetupPromise = (async () => {
-  if (chrome.offscreen) {
-    await setupOffscreenDocument('offscreen.html');
-  }
-  // Load the initial state when the extension starts.
+// Load the initial state when the extension starts.
+(async () => {
   await resourceManager.ready();
   await dropRecordsWithoutBytes().catch((err) =>
     console.warn('[COS] Could not check records against storage:', err)
@@ -645,9 +606,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     cache = await cachePromise;
     let responseData;
     const { action, data, target } = message;
+    // Cache operations for the popup. The target is the name of the
+    // offscreen document Chrome once handled them in.
     if (target && target === 'offscreen-doc') {
-      if (chrome.offscreen) return; // Chrome: offscreen document handles it
-      // Firefox: no offscreen document — handle cache operations directly.
       const cosCache = await caches.open('cos-storage');
       switch (action) {
         case 'getResourceMetadata': {
@@ -669,12 +630,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'deleteAllResources': {
           for (const key of await cosCache.keys()) await cosCache.delete(key);
           sendResponse({ data: { success: true } });
-          break;
-        }
-        case 'getBlobURL': {
-          const r = await cosCache.match(data.key);
-          const blobURL = URL.createObjectURL(await r.blob());
-          sendResponse({ data: { blobURL } });
           break;
         }
       }
@@ -803,12 +758,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const fileResult = await getFileData(hash);
           const size = resourceManager.getSizeByHash(hash.value);
           const mimeType = resourceManager.getMimeTypeByHash(hash.value);
-          // Safari's content.js ignores this data/blobURL field and instead
-          // pulls the bytes via the getFileDataMeta/getFileDataChunk actions
+          // Safari's content.js ignores this data field and instead pulls
+          // the bytes via the getFileDataMeta/getFileDataChunk actions
           // below -- see the comment on those for why.
-          responseData = fileResult instanceof Blob
-            ? { hash, data: fileResult, size, mimeType }
-            : { hash, blobURL: fileResult, size, mimeType };
+          responseData = { hash, data: fileResult, size, mimeType };
           break;
         }
         case 'getFileDataMeta': {
@@ -858,9 +811,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'storeFileData': {
           let { hash, blobURL, mimeType } = data;
           assertValidHash(hash);
-          // Only the blob: URL content.js or an extension page made for the
-          // file, never an arbitrary URL for this worker to fetch.
-          if (blobURL && !String(blobURL).startsWith('blob:')) {
+          // Only the blob: URL the popup made for a file it adds, never an
+          // arbitrary URL for this worker to fetch.
+          if (
+            blobURL &&
+            (!fromExtensionPage(sender) || !String(blobURL).startsWith('blob:'))
+          ) {
             throw cosError('NotAllowedError', 'Invalid file URL.');
           }
           const blob = blobURL
@@ -1002,27 +958,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           ) {
             throw cosError('NotAllowedError', 'Only an origin that stored this file may delete it.');
           }
-          let deleteSuccess;
-          if (chrome.offscreen) {
-            const offscreenResp = await new Promise((resolve) => {
-              chrome.runtime.sendMessage(
-                {
-                  action: 'deleteResource',
-                  target: 'offscreen-doc',
-                  data: { hash: hash.value },
-                },
-                resolve
-              );
-            });
-            deleteSuccess = !!offscreenResp?.data?.success;
-          } else {
-            await cache.delete(`https://cos.example.com/SHA-256_${hash.value}`);
-            deleteSuccess = true;
-          }
-          if (deleteSuccess) {
-            await resourceManager.deleteResourcesByHash(hash.value);
-          }
-          responseData = { success: deleteSuccess };
+          await cache.delete(`https://cos.example.com/SHA-256_${hash.value}`);
+          await resourceManager.deleteResourcesByHash(hash.value);
+          responseData = { success: true };
           break;
         }
         // Changes from extension pages. The popup keeps its own read-only
@@ -1223,12 +1161,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               const placeholder = `__COS_FONT_${fontIdx++}__`;
               rewritten = rewritten.replace(fm.full, `url("${placeholder}")`);
               fonts.push(
-                // hash is included alongside blob/blobURL so Safari's
-                // content.js can pull the bytes via getFileDataMeta/
-                // getFileDataChunk instead (see the comment on those).
-                fileResult instanceof Blob
-                  ? { placeholder, blob: fileResult, hash }
-                  : { placeholder, blobURL: fileResult, hash }
+                // hash is included alongside blob so Safari's content.js
+                // can pull the bytes via getFileDataMeta/getFileDataChunk
+                // instead (see the comment on those).
+                { placeholder, blob: fileResult, hash }
               );
               resourceManager.recordAccess(origin, hash.value);
             } else {
@@ -1383,9 +1319,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // doesn't pull the bytes it has no use for.
             responseData = seedOnly
               ? { seeded: true }
-              : fileResult instanceof Blob
-                ? { hash, data: fileResult, mimeType }
-                : { hash, blobURL: fileResult, mimeType };
+              : { hash, data: fileResult, mimeType };
           } else {
             responseData = { hash, data: null };
           }
@@ -1579,30 +1513,9 @@ async function getFileData(hash) {
   if (!match) {
     return false;
   }
-  if (!chrome.offscreen) {
-    // Background page context: return the Blob directly.
-    // blob:moz-extension:// URLs cannot be fetched by content scripts in Firefox.
-    return match.blob();
-  }
-  // Wait for the offscreen document to be ready. When the service worker
-  // restarts after inactivity, setupOffscreenDocument runs asynchronously;
-  // sending getBlobURL before it completes would get no listener and hang.
-  await offscreenSetupPromise;
-  return new Promise((resolve) => {
-    // Data comes as Blob out of Cache, but send as Blob URL.
-    chrome.runtime.sendMessage(
-      {
-        action: 'getBlobURL',
-        target: 'offscreen-doc',
-        data: {
-          key,
-        },
-      },
-      (response) => {
-        resolve(response?.data?.blobURL ?? false);
-      }
-    );
-  });
+  // A Blob goes through runtime messaging as itself: Chrome and Firefox
+  // clone it, and Safari's content.js pulls the bytes in chunks.
+  return match.blob();
 }
 
 async function getFileHandle(hash, create) {

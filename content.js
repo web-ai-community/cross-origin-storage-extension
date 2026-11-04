@@ -12,9 +12,8 @@
 // boundary isn't part of the DOM spec (isolated worlds are a
 // WebExtensions-only construct) and isn't reliably supported by every
 // engine, so anything crossing that boundary goes as a transferred
-// ArrayBuffer instead. Chrome's offscreen-doc blobURL needs fetching and
-// chunking here first; Firefox sends a raw Blob directly from the
-// background page and that's chunked directly.
+// ArrayBuffer instead. Chrome and Firefox send the background's Blob
+// directly, and it's chunked here.
 const TRANSFER_CHUNK_SIZE = 4 * 1024 * 1024; // 4 MiB
 
 // Safari doesn't reliably preserve Blob or ArrayBuffer across
@@ -89,26 +88,14 @@ async function safariFetchDataChunksByHash(hash) {
   return { dataChunks, mimeType };
 }
 
-// Accepts either a blob: URL (Chrome's offscreen doc) or a real Blob
-// (Firefox's background page) and returns the file as `dataChunks` for the
-// MAIN world. That's normally the Blob itself, which shares the file's data
-// (from a blob: URL, the fetched Blob still points at the cached file):
+// Returns a Blob the background sent as `dataChunks` for the MAIN world.
+// That's normally the Blob itself, which shares the file's data:
 // ArrayBuffer chunks hold a whole copy in this script's memory, and the page
 // then copies them again into a Blob of its own. main-world.js builds a
 // Blob from `dataChunks` either way, so it takes both. `asChunks` asks for
 // transferable ArrayBuffer chunks, sized for the window.postMessage hop,
 // which main-world.js requests if a Blob ever fails to reach it intact.
-async function toPageChunks(source, asChunks) {
-  let blob = source;
-  if (typeof source === 'string') {
-    blob = await fetch(source).then((r) => r.blob());
-    // The offscreen document's URL keeps the file referenced until revoked.
-    chrome.runtime.sendMessage({
-      action: 'revokeBlobURL',
-      target: 'offscreen-doc',
-      data: { url: source },
-    });
-  }
+async function toPageChunks(blob, asChunks) {
   if (!asChunks) return { chunks: [blob], mimeType: blob.type };
   const chunks = [];
   for (let offset = 0; offset < blob.size; offset += TRANSFER_CHUNK_SIZE) {
@@ -119,21 +106,14 @@ async function toPageChunks(source, asChunks) {
   return { chunks, mimeType: blob.type };
 }
 
-// getFileData responses carry either an offscreen-doc blob URL (Chrome) or a
-// Blob sent directly by the background page (Firefox); normalize both to
-// transferable ArrayBuffer chunks before crossing into the MAIN world.
+// getFileData responses carry the Blob the background sent (Chrome and
+// Firefox), or `false` when it found no cached resource for the hash.
 // (Safari never reaches here — see finalizeResponseData below.)
 async function normalizeFileDataForMainWorld(payload, asChunks) {
-  // blobURL is `false` (not absent) when background.js found no cached
-  // resource for the hash — a falsy check, not a nullish one, is required
-  // to treat that "not found" sentinel as "nothing to normalize".
-  const source =
-    payload?.blobURL || (payload?.data instanceof Blob ? payload.data : undefined);
-  if (!source) return;
-  const { chunks } = await toPageChunks(source, asChunks);
+  if (!(payload?.data instanceof Blob)) return;
+  const { chunks } = await toPageChunks(payload.data, asChunks);
   payload.dataChunks = chunks;
   delete payload.data;
-  delete payload.blobURL;
 }
 
 function collectTransferables(payload) {
@@ -149,21 +129,18 @@ function collectTransferables(payload) {
   return transferables;
 }
 
-// For each font in a rewriteStylesheet response, resolves the offscreen-doc
-// blob URL (Chrome) or the Blob sent directly by the background page
-// (Firefox) into transferable ArrayBuffer chunks. (Safari never reaches
-// here — see finalizeResponseData below.)
+// For each font in a rewriteStylesheet response, turns the Blob the
+// background sent (Chrome and Firefox) into `dataChunks`. (Safari never
+// reaches here — see finalizeResponseData below.)
 async function resolveFontBlobs(responseData, asChunks) {
   const fonts = responseData?.fonts;
   if (!fonts?.length) return;
   await Promise.all(
     fonts.map(async (font) => {
-      const source = font.blobURL ?? font.blob;
-      if (source == null) return;
-      const { chunks, mimeType } = await toPageChunks(source, asChunks);
+      if (!(font.blob instanceof Blob)) return;
+      const { chunks, mimeType } = await toPageChunks(font.blob, asChunks);
       font.dataChunks = chunks;
       font.mimeType = mimeType;
-      delete font.blobURL;
       delete font.blob;
     })
   );
@@ -189,7 +166,6 @@ async function finalizeResponseData(action, payload, asChunks) {
       payload.mimeType = payload.mimeType ?? result.mimeType;
     }
     delete payload.data;
-    delete payload.blobURL;
   }
   if (payload?.fonts?.length) {
     await Promise.all(
@@ -201,7 +177,6 @@ async function finalizeResponseData(action, payload, asChunks) {
           font.mimeType = result.mimeType;
         }
         delete font.blob;
-        delete font.blobURL;
         delete font.hash;
       })
     );
@@ -501,7 +476,6 @@ window.addEventListener('message', async (event) => {
   // Resources the page fetched itself because the background couldn't (see
   // fetchResource() in background.js): each Blob is rebuilt in this realm and
   // handed over the way a store's file is, below.
-  const pageBlobURLs = [];
   if (data?.pageFetched && typeof data.pageFetched === 'object') {
     const converted = {};
     for (const [url, entry] of Object.entries(data.pageFetched)) {
@@ -518,10 +492,7 @@ window.addEventListener('message', async (event) => {
         contentType: typeof entry.contentType === 'string' ? entry.contentType : null,
         ceiling: typeof entry.ceiling === 'string' ? entry.ceiling : null,
       };
-      if (chrome.runtime.getURL('').startsWith('chrome-extension://')) {
-        out.blobURL = URL.createObjectURL(blob);
-        pageBlobURLs.push(out.blobURL);
-      } else if (IS_SAFARI) {
+      if (IS_SAFARI) {
         // Safari doesn't carry a Blob through sendMessage (see the comment on
         // IS_SAFARI), so the bytes are staged in the background in chunks.
         out.stagedId = await safariStagePageFetched(blob);
@@ -600,26 +571,13 @@ window.addEventListener('message', async (event) => {
       : new Blob(data.dataChunks, { type: mimeType });
     delete data.blob;
     delete data.dataChunks;
-    if (!chrome.runtime.getURL('').startsWith('chrome-extension://')) {
-      // Firefox: blob URLs created in content scripts carry the page's
-      // origin (blob:http://...) which the moz-extension:// background page
-      // cannot fetch. Send the Blob directly via structured clone instead.
-      data.data = blob;
-    } else {
-      data.blobURL = URL.createObjectURL(blob);
-    }
+    data.data = blob;
   }
 
   // Answers the page. A failure must reach it as `{ error, errorName }`, so
   // the page's promise rejects: resolving with no data looks like success,
   // and a failed store would then pass for a stored file.
   const reply = async (response) => {
-    // The blob: URL keeps a whole copy of the file alive in Chrome's blob
-    // storage until the page unloads. That storage is small (2 GiB of memory
-    // when the disk is nearly full), so a store that leaves it behind can
-    // make the next large store fail.
-    if (data?.blobURL) URL.revokeObjectURL(data.blobURL);
-    for (const url of pageBlobURLs) URL.revokeObjectURL(url);
     if (!response) {
       window.postMessage(
         {
