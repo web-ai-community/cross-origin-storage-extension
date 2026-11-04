@@ -650,7 +650,7 @@
   const NATIVE_DIGEST_MAX_SIZE = 1.5 * 1024 * 1024 * 1024; // 1.5 GiB
   // Reads a whole Blob into one buffer, 4 MiB at a time. Safari (27.0, in
   // Technology Preview) fails `blob.arrayBuffer()` with NotReadableError for
-  // a Blob of 128 MiB or more, while reading the same Blob in slices works.
+  // a Blob of more than 100 MiB, while reading the same Blob in slices works.
   async function readBlobInSlices(blob) {
     const SLICE = 4 * 1024 * 1024;
     const bytes = new Uint8Array(blob.size);
@@ -1116,7 +1116,7 @@
           store: async (blob, type) => {
             const _hash = hashes[i];
             // Read in 4 MiB slices: Safari fails `arrayBuffer()` on a whole
-            // Blob of 128 MiB or more (see readBlobInSlices() in the page
+            // Blob of more than 100 MiB (see readBlobInSlices() in the page
             // code, which this serialized function can't reach).
             const bytes = new Uint8Array(blob.size);
             for (let offset = 0; offset < blob.size; offset += 4194304) {

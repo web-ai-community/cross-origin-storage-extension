@@ -34,23 +34,6 @@ function sendRuntimeMessage(message) {
   return new Promise((resolve) => chrome.runtime.sendMessage(message, resolve));
 }
 
-function arrayBufferToBase64(buffer) {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  const SUBCHUNK = 0x8000; // String.fromCharCode.apply's practical arg limit
-  for (let i = 0; i < bytes.length; i += SUBCHUNK) {
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + SUBCHUNK));
-  }
-  return btoa(binary);
-}
-
-function base64ToArrayBuffer(base64) {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes.buffer;
-}
-
 // Pushes dataChunks (real ArrayBuffers, already chunked for the
 // window.postMessage hop from the MAIN world) to background.js in bounded,
 // base64-encoded pieces.
@@ -61,7 +44,7 @@ async function safariStoreFileData({ hash, blob: fileBlob, dataChunks, mimeType 
   let result;
   for (let i = 0; i < totalChunks; i++) {
     const slice = blob.slice(i * SAFARI_CHUNK_SIZE, (i + 1) * SAFARI_CHUNK_SIZE);
-    const base64 = arrayBufferToBase64(await slice.arrayBuffer());
+    const base64 = new Uint8Array(await slice.arrayBuffer()).toBase64();
     const resp = await sendRuntimeMessage({
       action: 'storeFileDataChunk',
       data: { transferId, hash, mimeType, chunkIndex: i, totalChunks, base64, totalSize: blob.size },
@@ -82,7 +65,7 @@ async function safariStagePageFetched(blob) {
     const slice = blob.slice(i * SAFARI_CHUNK_SIZE, (i + 1) * SAFARI_CHUNK_SIZE);
     await sendRuntimeMessage({
       action: 'stagePageFetchedChunk',
-      data: { id, chunkIndex: i, totalChunks, base64: arrayBufferToBase64(await slice.arrayBuffer()) },
+      data: { id, chunkIndex: i, totalChunks, base64: new Uint8Array(await slice.arrayBuffer()).toBase64() },
     });
   }
   return id;
@@ -101,7 +84,7 @@ async function safariFetchDataChunksByHash(hash) {
       action: 'getFileDataChunk',
       data: { hash, chunkIndex: i },
     });
-    dataChunks.push(base64ToArrayBuffer(resp.data.base64));
+    dataChunks.push(Uint8Array.fromBase64(resp.data.base64).buffer);
   }
   return { dataChunks, mimeType };
 }

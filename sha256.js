@@ -128,7 +128,7 @@ export function createSha256() {
 
 // Reads a whole Blob into one buffer, 4 MiB at a time. Safari (27.0, in
 // Technology Preview) fails `blob.arrayBuffer()` with NotReadableError for a
-// Blob of 128 MiB or more, while reading the same Blob in slices works.
+// Blob of more than 100 MiB, while reading the same Blob in slices works.
 async function readBlobInSlices(blob) {
   const bytes = new Uint8Array(blob.size);
   for (let offset = 0; offset < blob.size; offset += CHUNK) {

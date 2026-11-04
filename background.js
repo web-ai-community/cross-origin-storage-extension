@@ -59,23 +59,6 @@ function asQuotaError(err) {
 // the original blobURL/raw-Blob path below.
 const SAFARI_CHUNK_SIZE = 4 * 1024 * 1024; // 4 MiB pre-encode (~5.3 MiB as base64)
 
-function arrayBufferToBase64(buffer) {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  const SUBCHUNK = 0x8000; // String.fromCharCode.apply's practical arg limit
-  for (let i = 0; i < bytes.length; i += SUBCHUNK) {
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + SUBCHUNK));
-  }
-  return btoa(binary);
-}
-
-function base64ToUint8Array(base64) {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-
 // transferId -> { writer, hash, mimeType, putPromise, bytesWritten }. Chunks
 // are streamed straight into cache.put() via a TransformStream as they
 // arrive, rather than buffered into one in-memory array first -- for a
@@ -230,7 +213,6 @@ function countForTelemetry(event, hashValue, origin, api) {
     origin,
     relation:
       event === 'hit' ? () => siteRelation(hashValue, origin) : undefined,
-
     describe: () => ({
       size: resourceManager.getSizeByHash(hashValue),
       mimeType: resourceManager.getMimeTypeByHash(hashValue),
@@ -436,7 +418,7 @@ function stagePageFetchedChunk({ id, chunkIndex, totalChunks, base64 }) {
     setTimeout(() => stagedPageFetched.delete(id), STAGED_MAX_MS);
   }
   if (!staged.chunks[chunkIndex]) staged.received++;
-  staged.chunks[chunkIndex] = base64ToUint8Array(base64);
+  staged.chunks[chunkIndex] = Uint8Array.fromBase64(base64);
 }
 
 function takeStagedPageFetched(id) {
@@ -869,7 +851,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             pendingSafariReads.delete(hash.value);
           }
           responseData = {
-            base64: arrayBufferToBase64(await slice.arrayBuffer()),
+            base64: new Uint8Array(await slice.arrayBuffer()).toBase64(),
           };
           break;
         }
@@ -942,7 +924,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             };
             pendingSafariWrites.set(transferId, entry);
           }
-          const bytes = base64ToUint8Array(base64);
+          const bytes = Uint8Array.fromBase64(base64);
           entry.sha?.update(bytes);
           await entry.writer.write(bytes); // awaits cache-storage backpressure
           entry.bytesWritten += bytes.length;
@@ -1450,18 +1432,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             };
           } else {
             const ab = await match.arrayBuffer();
-            const bytes = new Uint8Array(ab);
-            const CHUNK = 0x8000;
-            let binary = '';
-            for (let i = 0; i < bytes.length; i += CHUNK) {
-              binary += String.fromCharCode.apply(
-                null,
-                bytes.subarray(i, i + CHUNK)
-              );
-            }
             responseData = {
               mimeType,
-              dataURL: `data:${mimeType};base64,${btoa(binary)}`,
+              dataURL: `data:${mimeType};base64,${new Uint8Array(ab).toBase64()}`,
               size: size ?? ab.byteLength,
               origins,
               accessHistory,
@@ -1572,11 +1545,7 @@ function sriToHashObj(sriHash) {
   const algorithm =
     { sha256: 'SHA-256', sha384: 'SHA-384', sha512: 'SHA-512' }[algo] ||
     'SHA-256';
-  const binary = atob(b64);
-  let hex = '';
-  for (let i = 0; i < binary.length; i++)
-    hex += binary.charCodeAt(i).toString(16).padStart(2, '0');
-  return { algorithm, value: hex };
+  return { algorithm, value: Uint8Array.fromBase64(b64).toHex() };
 }
 
 async function computeHashHex(algorithm, blob) {
