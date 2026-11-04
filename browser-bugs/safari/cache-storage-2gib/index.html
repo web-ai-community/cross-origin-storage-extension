@@ -1,0 +1,117 @@
+<!doctype html>
+<!--
+  Copyright 2026 Google LLC.
+  SPDX-License-Identifier: Apache-2.0
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Cache Storage entry size limit</title>
+  </head>
+  <body>
+    <h1>Cache Storage: <code>cache.put()</code> of a 2 GiB entry</h1>
+    <p>
+      Stores one generated entry of each size with <code>cache.put()</code>,
+      reads its size back, and deletes it. Each run writes up to ~2 GiB to disk,
+      one entry at a time.
+    </p>
+    <p>
+      Query parameters: <code>mode=stream</code> (default, a
+      <code>ReadableStream</code> body), <code>mode=blob</code> (a
+      <code>Blob</code> built from 64 MiB parts), or
+      <code>mode=network</code> (the <code>Response</code> of a
+      <code>fetch()</code> of <code>/bytes/&lt;size&gt;</code> from
+      <code>serve.mjs</code>); <code>sizes=</code> a comma-separated list of
+      byte counts; <code>autorun</code>. Safari reloads a tab whose web process
+      crashed, which reruns <code>autorun</code>, so leave it off for sizes that
+      crash.
+    </p>
+    <button id="run">Run</button>
+    <pre id="log"></pre>
+    <script type="module">
+      const MiB = 1024 * 1024;
+      const params = new URLSearchParams(location.search);
+      const mode = params.get('mode') || 'stream';
+      const sizes = params.has('sizes')
+        ? params.get('sizes').split(',').map(Number)
+        : [1024 * MiB, 2 ** 31 - 1, 2 ** 31, 2 ** 31 + MiB];
+      const logEl = document.getElementById('log');
+      const log = (line) => {
+        logEl.textContent += line + '\n';
+        console.log(line);
+      };
+      window.results = [];
+
+      // Yields `size` bytes in 4 MiB chunks without holding them all.
+      function makeStream(size) {
+        let sent = 0;
+        return new ReadableStream({
+          pull(controller) {
+            const n = Math.min(4 * MiB, size - sent);
+            if (n <= 0) return controller.close();
+            controller.enqueue(new Uint8Array(n).fill(sent & 0xff));
+            sent += n;
+          },
+        });
+      }
+
+      function makeBlob(size) {
+        const part = new Uint8Array(64 * MiB).fill(0x61);
+        const parts = [];
+        for (let left = size; left > 0; left -= part.length) {
+          parts.push(left >= part.length ? part : part.subarray(0, left));
+        }
+        return new Blob(parts);
+      }
+
+      async function tryPut(cache, size) {
+        const url = `/entry-${mode}-${size}`;
+        const started = performance.now();
+        const result = { size, mode };
+        try {
+          const response =
+            mode === 'network'
+              ? await fetch(`/bytes/${size}`, { cache: 'no-store' })
+              : new Response(
+                  mode === 'blob' ? makeBlob(size) : makeStream(size),
+                  { headers: { 'content-type': 'application/octet-stream' } },
+                );
+          await cache.put(url, response);
+          const stored = await cache.match(url);
+          result.ok = true;
+          result.storedSize = (await stored.blob()).size;
+        } catch (err) {
+          result.ok = false;
+          result.error = `${err.name}: ${err.message}`;
+        } finally {
+          await cache.delete(url).catch(() => {});
+        }
+        result.seconds = +((performance.now() - started) / 1000).toFixed(1);
+        window.results.push(result);
+        log(
+          `${String(size).padStart(11)} bytes (${(size / MiB).toFixed(1)} MiB): ` +
+            (result.ok
+              ? `stored, reads back as ${result.storedSize} bytes`
+              : `FAILED, ${result.error}`) +
+            ` [${result.seconds} s]`,
+        );
+      }
+
+      async function run() {
+        document.getElementById('run').disabled = true;
+        log(navigator.userAgent);
+        const { quota, usage } = await navigator.storage.estimate();
+        log(`quota ${quota}, usage ${usage}, mode ${mode}`);
+        await caches.delete('repro-2gib');
+        const cache = await caches.open('repro-2gib');
+        for (const size of sizes) await tryPut(cache, size);
+        await caches.delete('repro-2gib');
+        log('done');
+        document.documentElement.dataset.done = 'true';
+      }
+
+      document.getElementById('run').onclick = run;
+      if (params.has('autorun')) run();
+    </script>
+  </body>
+</html>

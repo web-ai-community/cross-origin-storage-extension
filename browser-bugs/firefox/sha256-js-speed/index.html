@@ -1,0 +1,88 @@
+<!doctype html>
+<!--
+  Copyright 2026 Google LLC.
+  SPDX-License-Identifier: Apache-2.0
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>SHA-256 in JavaScript</title>
+  </head>
+  <body>
+    <h1>Throughput of a SHA-256 written in JavaScript</h1>
+    <p>
+      Hashes the same in-memory bytes, 4 MiB at a time, with
+      <code>createSha256()</code> (Int32Array state, a 64-entry message
+      schedule, and <code>&gt;&gt;&gt;</code>/<code>|</code> rotations), and
+      with <code>crypto.subtle.digest()</code> on one buffer as a baseline. No
+      I/O is involved. Both hashes must agree.
+    </p>
+    <p>
+      Query parameters: <code>sizes=</code> MiB, comma-separated (default
+      <code>64,256,512</code>); <code>autorun</code>.
+    </p>
+    <button id="run">Run</button>
+    <pre id="log"></pre>
+    <script type="module">
+      import { createSha256 } from './sha256.js';
+
+      const MiB = 1024 * 1024;
+      const CHUNK = 4 * MiB;
+      const params = new URLSearchParams(location.search);
+      const sizes = (params.get('sizes') || '64,256,512')
+        .split(',')
+        .map(Number);
+      const logEl = document.getElementById('log');
+      const log = (line) => {
+        logEl.textContent += line + '\n';
+        console.log(line);
+      };
+      window.results = [];
+
+      const hex = (buffer) => new Uint8Array(buffer).toHex();
+      const nextFrame = () => new Promise((resolve) => setTimeout(resolve));
+
+      async function run() {
+        document.getElementById('run').disabled = true;
+        log(navigator.userAgent);
+        for (const mib of sizes) {
+          const data = new Uint8Array(mib * MiB);
+          for (let i = 0; i < data.length; i += 4096) data[i] = i & 0xff;
+
+          let started = performance.now();
+          const sha = createSha256();
+          for (let offset = 0; offset < data.length; offset += CHUNK) {
+            sha.update(data.subarray(offset, offset + CHUNK));
+          }
+          const jsHex = sha.hexDigest();
+          const jsSeconds = (performance.now() - started) / 1000;
+          await nextFrame();
+
+          started = performance.now();
+          const nativeHex = hex(await crypto.subtle.digest('SHA-256', data));
+          const nativeSeconds = (performance.now() - started) / 1000;
+
+          const result = {
+            mib,
+            jsMiBps: +(mib / jsSeconds).toFixed(1),
+            jsSeconds: +jsSeconds.toFixed(2),
+            nativeMiBps: +(mib / nativeSeconds).toFixed(1),
+            match: jsHex === nativeHex,
+          };
+          window.results.push(result);
+          log(
+            `${String(mib).padStart(4)} MiB  JS ${result.jsMiBps} MiB/s ` +
+              `(${result.jsSeconds} s)  native ${result.nativeMiBps} MiB/s  ` +
+              (result.match ? 'hashes match' : 'HASH MISMATCH'),
+          );
+          await nextFrame();
+        }
+        log('done');
+        document.documentElement.dataset.done = 'true';
+      }
+
+      document.getElementById('run').onclick = run;
+      if (params.has('autorun')) run();
+    </script>
+  </body>
+</html>

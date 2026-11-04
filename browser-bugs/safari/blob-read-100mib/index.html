@@ -1,0 +1,123 @@
+<!doctype html>
+<!--
+  Copyright 2026 Google LLC.
+  SPDX-License-Identifier: Apache-2.0
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Blob.arrayBuffer() size limit</title>
+  </head>
+  <body>
+    <h1>Reading a Blob of more than 100 MiB whole</h1>
+    <p>
+      Builds Blobs of several sizes from several sources and reads each one
+      whole with several APIs. Slicing the same Blob into 4 MiB pieces and
+      reading those is the control.
+    </p>
+    <p>
+      Query parameters: <code>sizes=</code> MiB, comma-separated;
+      <code>sources=</code> any of <code>memory,network,cache,response</code>;
+      <code>autorun</code>. The <code>network</code> source needs
+      <code>serve.mjs</code>, which serves <code>/bytes/&lt;n&gt;</code>.
+    </p>
+    <button id="run">Run</button>
+    <pre id="log"></pre>
+    <script type="module">
+      const MiB = 1024 * 1024;
+      const params = new URLSearchParams(location.search);
+      const sizes = (params.get('sizes') || '64,127,128,256')
+        .split(',')
+        .map((n) => Number(n) * MiB);
+      const sources = (
+        params.get('sources') || 'memory,network,cache,response'
+      ).split(',');
+      const logEl = document.getElementById('log');
+      const log = (line) => {
+        logEl.textContent += line + '\n';
+        console.log(line);
+      };
+      window.results = [];
+
+      const makeBlob = {
+        memory: async (size) => new Blob([new Uint8Array(size).fill(0x61)]),
+        network: async (size) =>
+          (await fetch(`/bytes/${size}`, { cache: 'no-store' })).blob(),
+        cache: async (size) => {
+          const cache = await caches.open('repro-100mib');
+          await cache.put('/entry', new Response(new Uint8Array(size)));
+          return (await cache.match('/entry')).blob();
+        },
+        response: async (size) => new Response(new Uint8Array(size)).blob(),
+      };
+
+      const readers = {
+        'blob.arrayBuffer()': (blob) => blob.arrayBuffer(),
+        'blob.bytes()': (blob) =>
+          blob.bytes ? blob.bytes() : Promise.reject(new Error('n/a')),
+        'new Response(blob).arrayBuffer()': (blob) =>
+          new Response(blob).arrayBuffer(),
+        'FileReader.readAsArrayBuffer()': (blob) =>
+          new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(reader.error);
+            reader.readAsArrayBuffer(blob);
+          }),
+        'control: 4 MiB slices': async (blob) => {
+          const bytes = new Uint8Array(blob.size);
+          for (let offset = 0; offset < blob.size; offset += 4 * MiB) {
+            bytes.set(
+              new Uint8Array(
+                await blob.slice(offset, offset + 4 * MiB).arrayBuffer(),
+              ),
+              offset,
+            );
+          }
+          return bytes.buffer;
+        },
+      };
+
+      async function run() {
+        document.getElementById('run').disabled = true;
+        log(navigator.userAgent);
+        for (const source of sources) {
+          for (const size of sizes) {
+            let blob;
+            try {
+              blob = await makeBlob[source](size);
+            } catch (err) {
+              log(
+                `${source} ${size / MiB} MiB: could not build the Blob, ${err}`,
+              );
+              continue;
+            }
+            for (const [name, read] of Object.entries(readers)) {
+              const result = { source, mib: size / MiB, reader: name };
+              try {
+                const buffer = await read(blob);
+                result.ok = buffer.byteLength === size;
+                if (!result.ok) result.error = `got ${buffer.byteLength} bytes`;
+              } catch (err) {
+                result.ok = false;
+                result.error = `${err.name}: ${err.message}`;
+              }
+              window.results.push(result);
+              log(
+                `${source.padEnd(8)} ${String(size / MiB).padStart(4)} MiB  ` +
+                  `${name.padEnd(34)} ${result.ok ? 'ok' : 'FAILED, ' + result.error}`,
+              );
+            }
+            blob = null;
+          }
+        }
+        await caches.delete('repro-100mib');
+        log('done');
+        document.documentElement.dataset.done = 'true';
+      }
+
+      document.getElementById('run').onclick = run;
+      if (params.has('autorun')) run();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Repro: binary sendMessage (service worker)",
+  "version": "1.0",
+  "description": "Checks which binary values survive runtime.sendMessage.",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://localhost/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

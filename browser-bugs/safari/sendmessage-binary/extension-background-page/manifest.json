@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Repro: binary sendMessage (background page)",
+  "version": "1.0",
+  "description": "Checks which binary values survive runtime.sendMessage.",
+  "background": {
+    "page": "background.html",
+    "persistent": false
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://localhost/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

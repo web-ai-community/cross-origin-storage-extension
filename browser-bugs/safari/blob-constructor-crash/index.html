@@ -1,0 +1,60 @@
+<!doctype html>
+<!--
+  Copyright 2026 Google LLC.
+  SPDX-License-Identifier: Apache-2.0
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Large Blob constructor crash</title>
+  </head>
+  <body>
+    <h1><code>new Blob()</code> of more than ~1.4 GiB</h1>
+    <p>
+      Each button builds one Blob and prints its size. The ones marked "crashes"
+      take down the web content process in Safari Technology Preview 27.0, in
+      <code>WebCore::BlobBuilder::append()</code>. Use a fresh tab for each:
+      Safari reloads a crashed tab, and a Blob built earlier in the same tab is
+      still in memory.
+    </p>
+    <ul>
+      <li>
+        <button data-parts="22">22 parts of 64 MiB (1,408 MiB)</button> works
+      </li>
+      <li>
+        <button data-parts="23">23 parts of 64 MiB (1,472 MiB)</button> crashes
+      </li>
+      <li><button data-single="1536">1 part of 1,536 MiB</button> works</li>
+      <li><button data-single="2049">1 part of 2,049 MiB</button> crashes</li>
+    </ul>
+    <pre id="log"></pre>
+    <script>
+      const MiB = 1024 * 1024;
+      const log = (line) => {
+        document.getElementById('log').textContent += line + '\n';
+      };
+      log(navigator.userAgent);
+      for (const button of document.querySelectorAll('button')) {
+        button.onclick = () => {
+          let parts;
+          if (button.dataset.parts) {
+            // The same 64 MiB buffer, appended repeatedly.
+            const part = new Uint8Array(64 * MiB);
+            parts = Array.from(
+              { length: Number(button.dataset.parts) },
+              () => part,
+            );
+          } else {
+            parts = [new Uint8Array(Number(button.dataset.single) * MiB)];
+          }
+          log(`${button.textContent}: building...`);
+          // Lets the line above paint before a possible crash.
+          setTimeout(() => {
+            const blob = new Blob(parts);
+            log(`${button.textContent}: Blob of ${blob.size} bytes`);
+          }, 50);
+        };
+      }
+    </script>
+  </body>
+</html>
