@@ -6,6 +6,9 @@
 // document (a classic, non-module script re-executed in an existing global
 // throws "Can't create duplicate variable" on a repeated top-level const —
 // confirmed happening in Safari).
+// TODO: Unwrap once Safari stops running content scripts again in a world
+// they already ran in (https://webkit.org/b/330105, fixed by
+// https://github.com/WebKit/WebKit/pull/79008).
 (() => {
 
 // Blob structured-clone across the MAIN-world/isolated-world content script
@@ -16,21 +19,46 @@
 // directly, and it's chunked here.
 const TRANSFER_CHUNK_SIZE = 4 * 1024 * 1024; // 4 MiB
 
-// Safari doesn't reliably preserve Blob or ArrayBuffer across
-// chrome.runtime.sendMessage between the background page and this content
-// script — only JSON-safe values survive that specific channel intact
-// (confirmed by background.js's pre-existing getResourceForViewer dataURL
-// path, which has always worked). So, for Safari only, file bytes are
-// pushed/pulled via background.js's storeFileDataChunk/getFileDataMeta/
-// getFileDataChunk actions as a sequence of small base64-encoded chunks,
-// rather than relying on a single message carrying the whole (potentially
-// multi-GiB) payload. Chrome and Firefox are unaffected and keep using the
-// path above unchanged.
+// Safari serializes runtime messages as JSON, so a Blob or ArrayBuffer sent
+// between the background page and this content script arrives as `{}`.
+// There, file bytes are pushed/pulled via background.js's
+// storeFileDataChunk/getFileDataMeta/getFileDataChunk actions as a sequence
+// of small base64-encoded chunks, rather than relying on a single message
+// carrying the whole (potentially multi-GiB) payload. Chrome (with
+// "message_serialization": "structured_clone") and Firefox send the Blob
+// itself.
 const IS_SAFARI = chrome.runtime.getURL('').startsWith('safari-web-extension://');
 const SAFARI_CHUNK_SIZE = 4 * 1024 * 1024; // 4 MiB pre-encode -- must match background.js
 
 function sendRuntimeMessage(message) {
   return new Promise((resolve) => chrome.runtime.sendMessage(message, resolve));
+}
+
+// Whether a Blob survives runtime messaging in both directions. The Safari
+// manifest asks for "message_serialization": "structured_clone" too, so the
+// chunked transfers stop as soon as a Safari version honors it.
+// TODO: Remove this probe, and the chunked transfers, once every supported
+// Safari version honors the key (https://webkit.org/b/330104, implemented by
+// https://github.com/WebKit/WebKit/pull/79659).
+let blobMessagingPromise = null;
+function blobsCrossRuntimeMessaging() {
+  blobMessagingPromise ??= (async () => {
+    if (!IS_SAFARI) return true;
+    try {
+      const reply = await sendRuntimeMessage({
+        action: 'probeBlobMessaging',
+        data: { blob: new Blob(['ping']) },
+      });
+      return (
+        reply?.data?.received === true &&
+        reply.data.blob instanceof Blob &&
+        (await reply.data.blob.text()) === 'pong'
+      );
+    } catch {
+      return false;
+    }
+  })();
+  return blobMessagingPromise;
 }
 
 // Pushes dataChunks (real ArrayBuffers, already chunked for the
@@ -146,12 +174,12 @@ async function resolveFontBlobs(responseData, asChunks) {
   );
 }
 
-// Dispatches to the Safari chunked-pull path or the Chrome/Firefox
-// single-message path, depending on the browser, for a getFileData or
+// Dispatches to the single-message path or, where Blobs don't survive
+// runtime messaging, the chunked-pull path, for a getFileData or
 // resolveDeclarativeResource response, or a rewriteStylesheet response's
 // fonts.
 async function finalizeResponseData(action, payload, asChunks) {
-  if (!IS_SAFARI) {
+  if (await blobsCrossRuntimeMessaging()) {
     await normalizeFileDataForMainWorld(payload, asChunks);
     await resolveFontBlobs(payload, asChunks);
     return;
@@ -492,12 +520,12 @@ window.addEventListener('message', async (event) => {
         contentType: typeof entry.contentType === 'string' ? entry.contentType : null,
         ceiling: typeof entry.ceiling === 'string' ? entry.ceiling : null,
       };
-      if (IS_SAFARI) {
-        // Safari doesn't carry a Blob through sendMessage (see the comment on
+      if (await blobsCrossRuntimeMessaging()) {
+        out.data = blob;
+      } else {
+        // The Blob wouldn't survive sendMessage (see the comment on
         // IS_SAFARI), so the bytes are staged in the background in chunks.
         out.stagedId = await safariStagePageFetched(blob);
-      } else {
-        out.data = blob;
       }
       converted[String(url)] = out;
     }
@@ -549,7 +577,11 @@ window.addEventListener('message', async (event) => {
     data.blob = blob;
   }
 
-  if (IS_SAFARI && action === 'storeFileData' && (data?.blob || data?.dataChunks)) {
+  if (
+    action === 'storeFileData' &&
+    (data?.blob || data?.dataChunks) &&
+    !(await blobsCrossRuntimeMessaging())
+  ) {
     // Bypass the generic single-message path entirely: push the file to
     // background.js via storeFileDataChunk instead (see the comment on
     // IS_SAFARI above for why).

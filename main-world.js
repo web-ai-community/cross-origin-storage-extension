@@ -1,6 +1,11 @@
 // Copyright 2025 Google LLC.
 // SPDX-License-Identifier: Apache-2.0
 
+// Wrapped in an IIFE so a second run in the same world returns early here
+// without its top-level declarations colliding with the first run's: Safari
+// runs MAIN world content scripts again when an extension is turned off and
+// on. TODO: Unwrap once that's fixed (https://webkit.org/b/330105, fixed by
+// https://github.com/WebKit/WebKit/pull/79008).
 (() => {
   if (navigator.crossOriginStorage) {
     return;
@@ -505,7 +510,10 @@
   // file system" error), strongly suggesting an internal 32-bit signed
   // integer overflow in WebKit. Checking this before hashing lets a
   // known-too-large write fail fast instead of spending potentially minutes
-  // computing a hash for a file that can't be stored regardless.
+  // computing a hash for a file that can't be stored regardless. Newer
+  // versions crash the page at that size instead.
+  // TODO: Remove, along with IS_LIKELY_SAFARI, once every supported Safari
+  // version stores larger files (https://webkit.org/b/330101).
   const SAFARI_MAX_RESOURCE_SIZE = 2 ** 31 - 1;
 
   // Listen for responses from the bridge content script.
@@ -648,10 +656,21 @@
   // loop is a poor fit for at least one JS engine's GC behavior at scale:
   // observed 500 MiB taking over a minute in Safari).
   const NATIVE_DIGEST_MAX_SIZE = 1.5 * 1024 * 1024 * 1024; // 1.5 GiB
-  // Reads a whole Blob into one buffer, 4 MiB at a time. Safari (27.0, in
-  // Technology Preview) fails `blob.arrayBuffer()` with NotReadableError for
-  // a Blob of more than 100 MiB, while reading the same Blob in slices works.
-  async function readBlobInSlices(blob) {
+  // Reads a whole Blob into one buffer. Safari (27.0, in Technology Preview)
+  // fails `blob.arrayBuffer()` with NotReadableError for a Blob of more than
+  // 100 MiB, while reading the same Blob 4 MiB at a time works, so that's the
+  // fallback, and once needed it's used from then on.
+  // TODO: Remove the fallback once https://webkit.org/b/330103 is fixed.
+  let wholeBlobReadsFail = false;
+  async function readWholeBlob(blob) {
+    if (!wholeBlobReadsFail) {
+      try {
+        return await blob.arrayBuffer();
+      } catch (err) {
+        if (err.name !== 'NotReadableError') throw err;
+        wholeBlobReadsFail = true;
+      }
+    }
     const SLICE = 4 * 1024 * 1024;
     const bytes = new Uint8Array(blob.size);
     for (let offset = 0; offset < blob.size; offset += SLICE) {
@@ -665,7 +684,7 @@
 
   async function streamingHexDigest(algorithm, blob) {
     if (algorithm !== 'SHA-256' || blob.size <= NATIVE_DIGEST_MAX_SIZE) {
-      const buf = await readBlobInSlices(blob);
+      const buf = await readWholeBlob(blob);
       return Array.from(
         new Uint8Array(await crypto.subtle.digest(algorithm, buf))
       )
@@ -813,6 +832,9 @@
             const { dataChunks, mimeType } = await talkToBridge('getFileData', {
               hash,
             });
+            // Where Blobs don't survive runtime messaging, `dataChunks` is many
+            // 4 MiB ArrayBuffers, and Safari crashes building a File of more
+            // than ~1.4 GiB from parts (https://webkit.org/b/330102).
             return new File(dataChunks, 'file', {
               type: mimeType,
               lastModified: Date.now(),
@@ -1115,19 +1137,27 @@
           },
           store: async (blob, type) => {
             const _hash = hashes[i];
-            // Read in 4 MiB slices: Safari fails `arrayBuffer()` on a whole
-            // Blob of more than 100 MiB (see readBlobInSlices() in the page
-            // code, which this serialized function can't reach).
-            const bytes = new Uint8Array(blob.size);
-            for (let offset = 0; offset < blob.size; offset += 4194304) {
-              bytes.set(
-                new Uint8Array(
-                  await blob.slice(offset, offset + 4194304).arrayBuffer()
-                ),
-                offset
-              );
+            // Falls back to 4 MiB slices: Safari fails `arrayBuffer()` on a
+            // whole Blob of more than 100 MiB (see readWholeBlob() in the
+            // page code, which this serialized function can't reach).
+            // TODO: Remove the fallback once https://webkit.org/b/330103 is
+            // fixed.
+            let arrayBuffer;
+            try {
+              arrayBuffer = await blob.arrayBuffer();
+            } catch (err) {
+              if (err.name !== 'NotReadableError') throw err;
+              const bytes = new Uint8Array(blob.size);
+              for (let offset = 0; offset < blob.size; offset += 4194304) {
+                bytes.set(
+                  new Uint8Array(
+                    await blob.slice(offset, offset + 4194304).arrayBuffer()
+                  ),
+                  offset
+                );
+              }
+              arrayBuffer = bytes.buffer;
             }
-            const arrayBuffer = bytes.buffer;
             const hashBuffer = await crypto.subtle.digest(
               _hash.algorithm,
               arrayBuffer

@@ -126,10 +126,21 @@ export function createSha256() {
   };
 }
 
-// Reads a whole Blob into one buffer, 4 MiB at a time. Safari (27.0, in
-// Technology Preview) fails `blob.arrayBuffer()` with NotReadableError for a
-// Blob of more than 100 MiB, while reading the same Blob in slices works.
-async function readBlobInSlices(blob) {
+// Reads a whole Blob into one buffer. Safari (27.0, in Technology Preview)
+// fails `blob.arrayBuffer()` with NotReadableError for a Blob of more than
+// 100 MiB, while reading the same Blob 4 MiB at a time works, so that's the
+// fallback, and once needed it's used from then on.
+// TODO: Remove the fallback once https://webkit.org/b/330103 is fixed.
+let wholeBlobReadsFail = false;
+async function readWholeBlob(blob) {
+  if (!wholeBlobReadsFail) {
+    try {
+      return await blob.arrayBuffer();
+    } catch (err) {
+      if (err.name !== 'NotReadableError') throw err;
+      wholeBlobReadsFail = true;
+    }
+  }
   const bytes = new Uint8Array(blob.size);
   for (let offset = 0; offset < blob.size; offset += CHUNK) {
     bytes.set(
@@ -142,7 +153,7 @@ async function readBlobInSlices(blob) {
 
 export async function streamingHexDigest(algorithm, blob) {
   if (algorithm !== 'SHA-256' || blob.size <= NATIVE_DIGEST_MAX_SIZE) {
-    const buf = await readBlobInSlices(blob);
+    const buf = await readWholeBlob(blob);
     return Array.from(
       new Uint8Array(await crypto.subtle.digest(algorithm, buf))
     )

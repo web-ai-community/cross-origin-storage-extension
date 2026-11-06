@@ -34,7 +34,8 @@ async function checkStorageQuota(estimatedBytes) {
 // an undocumented ~2 GiB per-entry ceiling -- writes fail there with a
 // generic "Failed writing data to the file system" TypeError, exactly at
 // the 2^31-byte boundary, strongly suggesting an internal 32-bit integer
-// overflow in WebKit rather than a real quota check) as the standard
+// overflow in WebKit rather than a real quota check, and newer versions crash
+// the page instead: https://webkit.org/b/330101) as the standard
 // "storage limit exceeded" exception, since from the caller's perspective a
 // write that fails at this layer is a storage-capacity problem regardless
 // of the underlying engine-specific cause.
@@ -45,11 +46,10 @@ function asQuotaError(err) {
   return quotaError;
 }
 
-// Safari doesn't reliably preserve Blob or ArrayBuffer across
-// chrome.runtime.sendMessage between this background page and a content
-// script -- only JSON-safe values survive that channel intact (confirmed by
-// getResourceForViewer's pre-existing dataURL/base64 path below, which has
-// always worked). So, for Safari specifically, file bytes are pushed/pulled
+// Safari serializes runtime messages as JSON, so a Blob or ArrayBuffer sent
+// between this background page and a content script arrives as `{}`
+// (https://webkit.org/b/330104). So, where content.js finds that Blobs don't
+// survive messaging (blobsCrossRuntimeMessaging()), file bytes are pushed/pulled
 // as a sequence of small base64-encoded chunks (getFileDataMeta/
 // getFileDataChunk/storeFileDataChunk) rather than as one message carrying
 // the whole payload -- this bounds the size of any single message
@@ -246,7 +246,10 @@ function assertValidHash(hash) {
 // Above this size, stored files are hashed 4 MiB at a time, so a multi-GiB
 // file never sits in this worker's memory whole. Below it, the native digest
 // on one buffer is used: the hand-rolled one runs at about 270 MiB/s in V8,
-// but only about 33 MiB/s in Firefox.
+// but only about 33 MiB/s in Firefox. That's about 90 s for a 3 GiB file,
+// and Firefox suspends the background page 30 s after its last event even
+// while a reply is pending, so such a store fails there
+// (https://bugzil.la/2088964).
 const NATIVE_VERIFY_MAX_SIZE = 1024 * 1024 * 1024; // 1 GiB
 
 // Stored bytes must match the hash they're stored under. A page can post a
@@ -934,6 +937,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           } else {
             responseData = { received: true };
           }
+          break;
+        }
+        // content.js asking whether a Blob survives runtime messaging in
+        // both directions (see blobsCrossRuntimeMessaging() there).
+        case 'probeBlobMessaging': {
+          responseData = {
+            received: data?.blob instanceof Blob && (await data.blob.text()) === 'ping',
+            blob: new Blob(['pong']),
+          };
           break;
         }
         // Safari: content.js staging bytes the page fetched (see
