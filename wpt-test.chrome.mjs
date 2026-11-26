@@ -7,7 +7,8 @@
 // from the pull request.
 //
 // Launches Chrome with the unpacked extension, turns on the Public Hash List
-// gate and the Worker and fetch() patches, opens the runner with ?autorun, and
+// gate and the Worker and fetch() patches, raises the lookup and write budgets
+// (see privacy-mitigations.js), opens the runner with ?autorun, clicks it, and
 // waits for its cos-wpt:done event. Every subtest result is then compared with
 // wpt-expectations.json, which lists the subtests the extension is known to
 // fail (`failures`) and those whose result depends on timing (`flaky`), each
@@ -75,11 +76,20 @@ async function main() {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
     });
+    // The suite makes far more cross-site lookups and writes from one
+    // top-level site than the default budgets allow, so it runs with room in
+    // both. GREASE'ing stays on, since the tests allow for it.
     await sw.evaluate(() =>
       chrome.storage.local.set({
         publicHashListEnabled: true,
         workerPatchEnabled: true,
         fetchPatchEnabled: true,
+        mitigationLimits: {
+          lookupBudget: 1e9,
+          writeFiles: 1e9,
+          writeBytes: 1e15,
+          siteBytes: 1e15,
+        },
       })
     );
 
@@ -96,6 +106,9 @@ async function main() {
     if (filter) url.searchParams.set('filter', filter);
     console.log(`Opening ${url.href} …`);
     await page.goto(url.href, { waitUntil: 'load' });
+    // The tests run in frames of this page, so one interaction with it lets
+    // their "*" writes reach other sites, as a user's would.
+    await page.mouse.click(1, 1);
 
     // Progress, since a full run takes the better part of an hour.
     const progress = setInterval(async () => {

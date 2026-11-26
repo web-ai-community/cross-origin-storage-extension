@@ -54,6 +54,26 @@ publicHashListCheckbox.addEventListener('change', () => {
   );
 });
 
+// The privacy mitigations, each on unless switched off.
+const mitigationCheckboxes = document.querySelectorAll('[data-mitigation]');
+chrome.storage.local.get('mitigations', ({ mitigations = {} }) => {
+  for (const checkbox of mitigationCheckboxes) {
+    checkbox.checked = mitigations[checkbox.dataset.mitigation] !== false;
+  }
+});
+for (const checkbox of mitigationCheckboxes) {
+  checkbox.addEventListener('change', async () => {
+    const { mitigations = {} } = await chrome.storage.local.get('mitigations');
+    mitigations[checkbox.dataset.mitigation] = checkbox.checked;
+    await chrome.storage.local.set({ mitigations });
+    showToast();
+  });
+}
+document.getElementById('reset-budgets').addEventListener('click', async () => {
+  await chrome.runtime.sendMessage({ action: 'resetMitigationBudgets' });
+  showToast();
+});
+
 bindTelemetrySwitch(document.getElementById('telemetry'), showToast);
 
 // Moving files into the browser's own Cross-Origin Storage (see

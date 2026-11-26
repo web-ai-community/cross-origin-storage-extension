@@ -69,11 +69,19 @@ const IMPORT_ATTR_XORIGIN_GLOBAL_CONTENT = 'export default "js-xorigin-global-va
 const FETCH_XORIGIN_GLOBAL_CONTENT = 'fetch-xorigin-global-value';
 
 // Only the globalAllowed/declarative-global hashes go into the mock PHL.
+// Public Hash List resources for the [Mitigations] checks, each stored once
+// with origins: '*' and read by other sites. The large one is over the
+// GREASE'ing size limit those checks set.
+const MITIGATION_PHL_CONTENT = Array.from({ length: 12 }, (_, i) => `phl-e2e-mitigation-${i}`);
+const MITIGATION_PHL_LARGE = `phl-e2e-mitigation-large ${'x'.repeat(4096)}`;
+
 const MOCK_PHL_HASHES = [
   sha256Hex(MOPHL_CONTENT.globalAllowed),
   sha256Hex(DECL_XORIGIN_GLOBAL_CSS),
   sha256Hex(IMPORT_ATTR_XORIGIN_GLOBAL_CONTENT),
   sha256Hex(FETCH_XORIGIN_GLOBAL_CONTENT),
+  ...MITIGATION_PHL_CONTENT.map(sha256Hex),
+  sha256Hex(MITIGATION_PHL_LARGE),
 ];
 
 // Mock PSL: 'test' as the sole extra TLD so a.test and b.test are separate
@@ -128,9 +136,18 @@ function startServer() {
 
 // ── PHL + PSL storage seeder ────────────────────────────────────────────────
 
+// See seedStorage().
+const E2E_LIMITS = {
+  lookupBudget: 1e9,
+  greaseRate: 0,
+  writeFiles: 1e9,
+  writeBytes: 1e15,
+  siteBytes: 1e15,
+};
+
 async function seedStorage(sw) {
   await sw.evaluate(
-    async ([phlHashes, pslExact]) => {
+    async ([phlHashes, pslExact, E2E_LIMITS]) => {
       await chrome.storage.local.set({
         phlHashSet:            phlHashes,
         phlFetchedAt:          Date.now(),
@@ -138,13 +155,18 @@ async function seedStorage(sw) {
         publicHashListEnabled: true,
         workerPatchEnabled:    true,
         fetchPatchEnabled:     true,
+        // The suite makes hundreds of cross-site lookups and writes from one
+        // top-level site, and asserts global-scope reads outright, so it runs
+        // with room in both budgets and no GREASE'ing. The [Mitigations]
+        // checks at the end tighten these to test each mitigation.
+        mitigationLimits:      E2E_LIMITS,
         pslExact,
         pslWildcard:           [],
         pslException:          [],
         pslFetchedAt:          Date.now(),
       });
     },
-    [MOCK_PHL_HASHES, MOCK_PSL_EXACT]
+    [MOCK_PHL_HASHES, MOCK_PSL_EXACT, E2E_LIMITS]
   );
 }
 
@@ -286,6 +308,22 @@ async function main() {
     process.exit(1);
   }
   const sw = serviceWorkers[0];
+
+  // A fresh install gates the global scope with the Public Hash List, which
+  // the seeding below then sets again either way.
+  const installDefaults = await sw.evaluate(async () => {
+    for (let i = 0; i < 100; i++) {
+      const s = await chrome.storage.local.get(['workerPatchEnabled', 'publicHashListEnabled']);
+      if (s.workerPatchEnabled !== undefined) return s;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return {};
+  });
+  const installResults = [{
+    label: '[Mitigations] A fresh install turns the Public Hash List gate on',
+    status: installDefaults.publicHashListEnabled === true ? 'pass' : 'fail',
+    detail: `publicHashListEnabled: ${installDefaults.publicHashListEnabled}`,
+  }];
 
   // Seed PHL + PSL before any page loads so the in-memory init() picks up
   // the mock data rather than hitting the network.
@@ -445,6 +483,8 @@ async function main() {
     const page = await context.newPage();
     try {
       await page.goto(`http://a.test:${PORT}/test-legacy.html`, { waitUntil: 'load' });
+      // origins: '*' only reaches other sites once the user interacted.
+      await page.mouse.click(5, 5);
       await page.evaluate(async ({ bodies, reads }) => {
         const hashOf = async (text) =>
           [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))]
@@ -695,12 +735,209 @@ async function main() {
     keyingResults.push({ label: '[Keying] setup', status: 'fail', detail: err.message.split('\n')[0] });
   }
   for (const p of contexts) await p.close();
+  contexts.length = 0;
+
+  // ── Privacy mitigations ────────────────────────────────────────────────────
+
+  // The cross-site lookup budget, GREASE'ing, user interaction before global
+  // visibility, the write budget and storage cap, and developer guidance in
+  // the page's console. Each check sets the limits it needs (on top of
+  // E2E_LIMITS) and starts from empty budgets.
+  console.log('\nChecking the privacy mitigations…');
+  const mitigationResults = [];
+  const limits = async (overrides) => {
+    await sw.evaluate(async (value) => {
+      await chrome.storage.local.set({ mitigationLimits: value });
+      // The worker applies a change when storage reports it; this applies it
+      // before the next request instead.
+      globalThis.cosMitigations._applyLimits(value);
+      await globalThis.cosMitigations.resetBudgets();
+    }, { ...E2E_LIMITS, ...overrides });
+  };
+  // Like write(), but resolves to null or to the name of the error it threw.
+  const tryWrite = (frame, text, options = {}) =>
+    write(frame, text, options).then(() => null, (err) => {
+      const name = /(\w+Error)/.exec(err.message)?.[1];
+      return name ?? err.message.split('\n')[0];
+    });
+  const record = (label, ok, detail) =>
+    mitigationResults.push({ label: `[Mitigations] ${label}`, status: ok ? 'pass' : 'fail', detail });
+  const expectRead = async (label, frame, text, want) => {
+    const got = await read(frame, text);
+    const expected = want ? text : 'NotFoundError';
+    record(label, got === expected,
+      `expected ${want ? 'the stored bytes' : 'NotFoundError'}, got ${JSON.stringify(got)}`);
+  };
+  const missing = (label) => `never stored ${label} ${Date.now()} ${Math.random()}`;
+  // Clicks a page the way a user would interact with it. blank.html's body
+  // has no height, so this clicks a point of the viewport.
+  const interact = async (page) => {
+    await page.mouse.click(5, 5);
+    // The interaction reaches the extension's worker asynchronously.
+    await new Promise((r) => setTimeout(r, 300));
+  };
+  const openActivated = async (host, options) => {
+    const frame = await open(host, options);
+    await interact(frame.page());
+    return frame;
+  };
+  const phl = [...MITIGATION_PHL_CONTENT];
+
+  const section = async (name, fn) => {
+    try {
+      await fn();
+    } catch (err) {
+      record(`${name}: setup`, false, err.message.split('\n')[0]);
+    }
+    for (const p of contexts) await p.close();
+    contexts.length = 0;
+  };
+
+  await section('Lookup budget', async () => {
+    await limits({ lookupBudget: 3 });
+    const shared = phl.shift();
+    const writer = await openActivated('a.test');
+    await write(writer, shared, { origins: '*' });
+    const own = `c.test's own ${Date.now()}`;
+    const topC = await open('c.test');
+    await write(topC, own);
+    for (let i = 0; i < 3; i++) {
+      await expectRead(`lookup ${i + 1} of 3 of a missing file reads as a miss`, topC, missing(i), false);
+    }
+    await expectRead('a listed "*" file reads as a miss once the budget is spent', topC, shared, false);
+    let ownReads = 0;
+    for (let i = 0; i < 5; i++) if ((await read(topC, own)) === own) ownReads++;
+    record('reads of a site\'s own file stay free once the budget is spent', ownReads === 5,
+      `${ownReads} of 5 reads disclosed`);
+    const topB = await open('b.test');
+    await expectRead('another top-level site has a budget of its own', topB, shared, true);
+    const frameOnC = await open('c.test', { frameB: true });
+    await expectRead('a b.test frame on c.test draws from c.test\'s spent budget', frameOnC, shared, false);
+    await topC.page().reload({ waitUntil: 'load' });
+    await topC.waitForFunction(() => !!navigator.crossOriginStorage);
+    await expectRead('a reload does not reset the budget', topC, shared, false);
+
+    // A fetch() lookup counts like getFileHandle().
+    await limits({ lookupBudget: 1 });
+    const fetched = await topC.evaluate(async (text) => {
+      const bytes = new TextEncoder().encode(`${text}`);
+      const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+      try {
+        await fetch(`/missing-${Math.random()}.txt`, {
+          integrity: `sha256-${digest.toBase64()}`,
+          crossOriginStorage: '*',
+        });
+        return 'resolved';
+      } catch (err) {
+        return err.name;
+      }
+    }, missing('fetch'));
+    await expectRead(`a fetch() lookup (${fetched}) spends the budget getFileHandle() draws from`, topC, shared, false);
+    await limits({ lookupBudget: 1 });
+    await expectRead('a reset budget discloses the file again', topC, shared, true);
+  });
+
+  await section('GREASE', async () => {
+    await limits({ greaseRate: 1, greaseMaxBytes: 1024 });
+    const small = phl.shift();
+    const writer = await openActivated('a.test');
+    await write(writer, small, { origins: '*' });
+    await write(writer, MITIGATION_PHL_LARGE, { origins: '*' });
+    const listed = `GREASE listed ${Date.now()}`;
+    await write(writer, listed, { origins: [B] });
+    const topB = await open('b.test');
+    await expectRead('a small "*" file read through the global scope can be GREASE\'d', topB, small, false);
+    await expectRead('a file over the size limit is never GREASE\'d', topB, MITIGATION_PHL_LARGE, true);
+    await expectRead('an origin on the explicit list is never GREASE\'d', topB, listed, true);
+    await expectRead('the storing origin is never GREASE\'d', writer, small, true);
+    await limits({ greaseRate: 0 });
+    await expectRead('with GREASE\'ing off, the small file is disclosed', topB, small, true);
+  });
+
+  await section('User interaction', async () => {
+    await limits({});
+    const [before, after, reloaded, synthetic, inFrame] = phl.splice(0, 5);
+    const writer = await open('a.test');
+    await write(writer, before, { origins: '*' });
+    const topB = await open('b.test');
+    await expectRead('a "*" file is invisible to other sites before the user interacts', topB, before, false);
+    await expectRead('the storing page reads it right away', writer, before, true);
+    await writer.evaluate(() => {
+      for (const type of ['mousedown', 'pointerdown', 'keydown']) {
+        document.body.dispatchEvent(new Event(type, { bubbles: true }));
+      }
+    });
+    await write(writer, synthetic, { origins: '*' });
+    await expectRead('a synthetic event is no interaction', topB, synthetic, false);
+    await interact(writer.page());
+    await expectRead('a "*" file written before the interaction becomes visible after it', topB, before, true);
+    await write(writer, after, { origins: '*' });
+    await expectRead('a "*" file written after the interaction is visible at once', topB, after, true);
+
+    const reloading = await open('a.test');
+    await write(reloading, reloaded, { origins: '*' });
+    await reloading.page().reload({ waitUntil: 'load' });
+    await interact(reloading.page());
+    await expectRead('an interaction after a reload does not release a write from before it', topB, reloaded, false);
+
+    const framed = await open('c.test', { frameB: true });
+    await write(framed, inFrame, { origins: '*' });
+    // A click inside the frame, which the frame's own content.js reports.
+    const box = await (await framed.frameElement()).boundingBox();
+    await framed.page().mouse.click(box.x + 5, box.y + 5);
+    await new Promise((r) => setTimeout(r, 300));
+    const topA = await open('a.test');
+    await expectRead('an interaction with a frame counts for the page', topA, inFrame, true);
+  });
+
+  await section('Write limits', async () => {
+    await limits({ writeFiles: 2 });
+    const topC = await open('c.test');
+    const stamp = Date.now();
+    const results = [];
+    for (let i = 0; i < 3; i++) results.push(await tryWrite(topC, `write budget ${stamp} ${i}`));
+    record('a site may store as many new files as its budget allows', results[0] === null && results[1] === null,
+      JSON.stringify(results));
+    record('the next new file fails with a QuotaExceededError', results[2] === 'QuotaExceededError',
+      `got ${JSON.stringify(results[2])}`);
+    await expectRead('a file refused for the budget is not stored', topC, `write budget ${stamp} 2`, false);
+    record('writing a file the site already stored costs nothing',
+      (await tryWrite(topC, `write budget ${stamp} 0`)) === null, '');
+    const subC = await open('sub.b.test');
+    record('another site has a write budget of its own',
+      (await tryWrite(subC, `write budget other site ${stamp}`)) === null, '');
+
+    await limits({ writeBytes: 100 });
+    record('a file over the byte budget fails with a QuotaExceededError',
+      (await tryWrite(topC, `big ${'y'.repeat(200)} ${stamp}`)) === 'QuotaExceededError', '');
+    await limits({ siteBytes: 1 });
+    record('a site over its storage cap gets a QuotaExceededError',
+      (await tryWrite(topC, `capped ${stamp}`)) === 'QuotaExceededError', '');
+  });
+
+  await section('Developer guidance', async () => {
+    await limits({ writeFiles: 1 });
+    const writer = await openActivated('a.test');
+    const messages = [];
+    writer.page().on('console', (msg) => {
+      if (msg.type() === 'warning') messages.push(msg.text());
+    });
+    await write(writer, `not on the PHL ${Date.now()}`, { origins: '*' });
+    const quota = await tryWrite(writer, `over the write budget ${Date.now()}`);
+    await new Promise((r) => setTimeout(r, 300));
+    record('a "*" write of a file off the Public Hash List warns in the console',
+      messages.some((m) => m.includes('not on the Public Hash List')), JSON.stringify(messages));
+    record('a write refused for the budget warns in the console',
+      quota === 'QuotaExceededError' && messages.some((m) => m.includes('new files in Cross-Origin Storage')),
+      JSON.stringify(messages));
+  });
+  await limits({});
 
   // ── Collect + report all results ──────────────────────────────────────────
 
   console.log('\n── Test Results ──────────────────────────────────────');
   let passed = 0, failed = 0;
-  for (const r of [...results, ...legacyResults, ...popupResults, ...concurrencyResults, ...emptyResults, ...keyingResults]) {
+  for (const r of [...installResults, ...results, ...legacyResults, ...popupResults, ...concurrencyResults, ...emptyResults, ...keyingResults, ...mitigationResults]) {
     if (r.status === 'n/a') continue;
     const icon = r.status === 'pass' ? '✅' : '❌';
     console.log(`${icon} [${r.status}] ${r.label}`);

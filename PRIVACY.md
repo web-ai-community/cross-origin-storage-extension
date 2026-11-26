@@ -32,6 +32,12 @@ response headers that decide how the page may share files
 go only to servers the page already uses, and nothing about them is recorded or
 sent anywhere else.
 
+To limit what one website can learn about the files other websites stored,
+the Extension keeps a few counts on your device: how many lookups and writes
+each website made in the current week or day, and, until you leave a page,
+whether you interacted with it. They stay on your device and are never sent
+anywhere.
+
 #### 3. Anonymous Usage Statistics
 
 To guide the development of the Cross-Origin Storage API, the Extension sends

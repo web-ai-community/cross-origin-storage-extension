@@ -591,28 +591,73 @@ network fetch. Write it exactly as shown [above](#fetch-integration) and it
 degrades on its own. The same is true of the extension with the option
 switched off, which is its default state.
 
-## Privacy: Public Hash List gating
+## Privacy mitigations
 
-`getFileHandle()` lets any origin ask whether a given hash is already
-cached, which can turn cache presence into a cross-site probing oracle for
-rare files. This extension has an opt-in setting (off by default, in
-`options.html`) that closes that hole for globally-shared (`origins: '*'`)
-resources: when enabled, a hash is only revealed as available if it's also
-on the [Public Hash List](https://github.com/WICG/cross-origin-storage/tree/main/public-hash-list/implementation)
-(PHL) — a vendor-neutral, openly licensed allowlist of resource hashes so
-widely deployed that confirming their presence reveals nothing about an
-individual user. See the
-[PHL design explainer](https://github.com/WICG/cross-origin-storage/blob/main/public-hash-list/phl-explainer.md)
-for the full rationale, data format, and proposed governance model.
+A cache shared across sites lets one site learn about the files other sites
+left in it. The extension applies the mitigations Chrome plans to ship with
+the API (see the spec's
+[availability gating](https://wicg.github.io/cross-origin-storage/#availability-gating)),
+in `privacy-mitigations.js` and `background.js`. Each one turns some cache hits
+into misses, and a miss costs the page one regular download, the same request
+it would have made without COS. Every mitigation is on by default, and
+`options.html` can switch each one off.
 
-Every other grant is keyed to the top-level site, as the spec requires: an
-origin reads back what it stored, and an `origins` list admits the origins it
-names, only under the top-level site the write ran under. A list written
-first-party also admits its origins wherever they run first-party (as a
-top-level page, or in a frame same-site with it). So
-a frame embedded on two sites can't read back on one what it wrote on the other.
-The extension takes the top-level site from the tab's URL, which the browser
-reports, and records the grants only once the written bytes match the hash.
+- **Same-site by default.** A file is readable by the origins same-site with
+  the one that stored it, unless the write asks for more. An `origins` list
+  holds at most six origins, and only those the writer's
+  `Cross-Origin-Storage-Allow-Origin` header names.
+- **The Public Hash List gates every origin.** A file stored with
+  `origins: '*'` is only revealed to other sites if its hash is on the
+  [Public Hash List](https://github.com/WICG/cross-origin-storage/tree/main/public-hash-list/implementation)
+  (PHL), a vendor-neutral list of resource hashes so widely deployed that
+  confirming their presence reveals little about a user. See the
+  [PHL design explainer](https://github.com/WICG/cross-origin-storage/blob/main/public-hash-list/phl-explainer.md).
+  This gate used to be opt-in. New installs have it on, and the update that
+  introduced these mitigations switches it on once.
+- **Sharing keyed to the top-level site.** An origin reads back what it
+  stored, and an `origins` list admits the origins it names, only under the
+  top-level site the write ran under. A list written first-party also admits
+  its origins wherever they run first-party (as a top-level page, or in a
+  frame same-site with it). So a frame embedded on two sites can't read back on
+  one what it wrote on the other. The extension takes the top-level site from
+  the tab's URL, which the browser reports, and records the grants only once
+  the written bytes match the hash.
+- **A budget for cross-site lookups.** Every lookup that could reveal what
+  another site stored counts against a budget of 16 lookups per week for the
+  top-level site in the address bar, hit or miss. Lookups of a site's own
+  files, and lookups an `origins` list written under the same top-level site
+  answers, are free. Every frame on the page shares the budget, it survives
+  reloads and new tabs, and it counts lookups from all of the integrations:
+  `getFileHandle()`, CSS, HTML, `fetch()`, and the import attribute. A lookup
+  over budget reads as a miss.
+- **GREASE'ing.** One in ten lookups of a file that only the global scope
+  discloses reports it as missing, so a miss never proves that a file is
+  absent. Files over 10 MiB are always answered exactly, since a spurious
+  re-download of a large model would cost the user far more. Every repeated
+  lookup is charged to the budget again.
+- **User interaction before global visibility.** A file stored with
+  `origins: '*'` only becomes visible to other sites once the user clicks,
+  taps, or types on the page that stored it (in any of its frames). The page
+  can use the file right away. A page loaded in a hidden popup or a reload
+  chain therefore shares nothing, and a navigation or reload forgets both the
+  interaction and the writes still waiting for one. `content.js` reports
+  trusted input events only, which a page can't synthesize.
+- **Limits on writes and storage.** Each site may store 64 new files and
+  16 GiB a day, and hold 32 GiB in total. A write over a limit fails with a
+  `QuotaExceededError`. Writing a file the site already stored costs nothing.
+- **Refusals look like misses.** Every refusal is a `NotFoundError`, and a
+  refused lookup still queries the cache, for a key that's never there, so it
+  takes as long as a genuine miss.
+- **Developer guidance.** The page's console says when a write of
+  `origins: '*'` names a file off the Public Hash List, when the file waits for
+  a user interaction, when a `Cross-Origin-Storage-Allow-Origin` header trims
+  an `origins` list (for every integration), and when a write budget refuses a
+  write.
+
+`options.html` also resets both budgets. The limits themselves can be
+overridden with a `mitigationLimits` object in `chrome.storage.local` (the
+test suites use this for more room); the defaults are in `DEFAULT_LIMITS` in
+`privacy-mitigations.js`.
 
 The popup marks every stored resource as "On PHL" or "Not on PHL", whether or
 not the setting is enabled, so you can see which globally-shared resources the
@@ -699,6 +744,17 @@ against the extension in Chrome, through the
 straight from the pull request. `-- --filter <text>` runs only the tests whose
 name contains `<text>`, `WPT_DEBUG=1` prints the console of every frame and
 worker, and a run takes the better part of an hour.
+
+The run raises the lookup and write budgets, since the suite makes hundreds of
+lookups and writes from one top-level site, and clicks the runner page once, so
+that `origins: '*'` writes reach other sites. GREASE'ing stays on, since the
+tests allow for it.
+
+`npm run test:wpt:local -- --wpt <checkout>` runs the same tests from a local
+web-platform-tests checkout served by `./wpt serve`, for when the cos-wpt
+mirrors can't be reached, or to try changes to the tests before they're pushed.
+Each test file runs as its own top-level page there. The header of
+`wpt-local-test.chrome.mjs` has the setup.
 
 Every subtest result is compared with
 [`wpt-expectations.json`](wpt-expectations.json). Its `failures` are subtests
