@@ -40,7 +40,8 @@
 //                           higher than the last.
 //   --cancel-review         Take the version now in review out of review
 //                           first, so this release replaces it. It loses its
-//                           place in the queue.
+//                           place in the queue. Works for Chrome too, where
+//                           it cancels the pending submission.
 //   --regenerate            Rebuild the Xcode wrapper project before
 //                           building, needed when the extension's file list
 //                           changes. Discards manual Xcode customizations.
@@ -205,7 +206,7 @@ function parseArgs(argv) {
     ['--marketing-version', options.marketingVersion],
     ['--build-number', options.buildNumber],
     ['--skip-build', options.skipBuild],
-    ['--cancel-review', options.cancelReview],
+    ['--cancel-review', options.browser !== 'chrome' && options.cancelReview],
     ['--regenerate', options.regenerate],
     ['--local', options.local],
   ].filter(([, value]) => value);
@@ -453,14 +454,28 @@ async function publishChrome(options) {
       `The archive is version ${version}, but the store already has ${storeVersion}. Bump the version in all manifests first.`
     );
   }
-  if (status.submittedItemRevisionStatus?.state === 'PENDING_REVIEW') {
+  const pending = status.submittedItemRevisionStatus?.state === 'PENDING_REVIEW';
+  if (pending && !options.cancelReview) {
     throw new UsageError(
-      'A submission is already pending review. Cancel it in the Developer Dashboard (or wait for the review) before uploading a new version.'
+      'A submission is already pending review. Pass --cancel-review to replace it, or wait for the review, before uploading a new version.'
     );
   }
   if (options.dryRun) {
-    console.log(`Dry run: would upload version ${version} (${bytes.length} bytes) and publish it.`);
+    console.log(
+      `Dry run: would ${pending ? 'cancel the pending submission, ' : ''}upload version ${version} (${bytes.length} bytes) and publish it.`
+    );
     return;
+  }
+  if (pending) {
+    const pendingVersion = (status.submittedItemRevisionStatus.distributionChannels || [])
+      .map((channel) => channel.crxVersion)
+      .filter(Boolean)
+      .join(', ');
+    console.log(`==> Cancelling the submission pending review${pendingVersion ? ` (${pendingVersion})` : ''}`);
+    await chromeRequest(token, 'POST', `${CWS_API}/v2/${name}:cancelSubmission`, 'Cancelling the submission', {
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
   }
 
   console.log(`==> Uploading version ${version}`);
