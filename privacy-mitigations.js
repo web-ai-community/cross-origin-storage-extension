@@ -8,7 +8,7 @@
 //   - a budget of cross-site lookups per top-level site and time window,
 //   - GREASE'ing of small entries read through the global scope,
 //   - user interaction before a "*" write becomes visible to other sites,
-//   - a write budget on files and bytes per writing site, and a cap on the
+//   - a write budget on files and bytes per top-level site, and a cap on the
 //     bytes a site holds in COS.
 //
 // See https://wicg.github.io/cross-origin-storage/#availability-gating,
@@ -55,6 +55,7 @@ const DISCLOSURES_MAX = 2000;
 const LOOKUP_KEY = 'cosLookupBudgets';
 const WRITE_KEY = 'cosWriteBudgets';
 const SESSION_KEY = 'cosMitigationSession';
+const PENDING_KEY = 'cosPendingGlobal';
 
 // Answers and stores everything the mitigations keep. Only background.js has
 // an instance; every handler there runs in the same worker, so the in-memory
@@ -67,14 +68,17 @@ export class PrivacyMitigations {
     this.limits = { ...DEFAULT_LIMITS };
     // top-level site -> { start, used }
     this.lookups = {};
-    // writing site -> { start, files, bytes }
+    // top-level site -> { start, files, bytes }
     this.writes = {};
+    // top-level site -> [hash], "*" writes waiting for the user to interact
+    // with a page of that site. Kept in local storage, since a later visit
+    // releases them too.
+    this.pendingGlobal = {};
     // Kept in session storage, so a worker restart keeps them and a browser
     // restart drops them:
     //   activatedTabs: tabId -> true once the user interacted with its page.
-    //   pendingGlobal: tabId -> [hash], "*" writes waiting for that.
     //   disclosures: `${origin}|${partition}|${hash}` -> expiry.
-    this.session = { activatedTabs: {}, pendingGlobal: {}, disclosures: {} };
+    this.session = { activatedTabs: {}, disclosures: {} };
     this._ready = null;
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== 'local') return;
@@ -93,13 +97,17 @@ export class PrivacyMitigations {
         'mitigationLimits',
         LOOKUP_KEY,
         WRITE_KEY,
+        PENDING_KEY,
       ]);
       this._applySwitches(local.mitigations);
       this._applyLimits(local.mitigationLimits);
       this.lookups = local[LOOKUP_KEY] || {};
       this.writes = local[WRITE_KEY] || {};
+      this.pendingGlobal = local[PENDING_KEY] || {};
       const session = (await chrome.storage.session?.get(SESSION_KEY))?.[SESSION_KEY];
       if (session) this.session = { ...this.session, ...session };
+      // Versions that kept waiting writes per tab, in the session.
+      delete this.session.pendingGlobal;
     })();
     return this._ready;
   }
@@ -177,47 +185,54 @@ export class PrivacyMitigations {
   // ── User interaction before global visibility ─────────────────────────────
 
   /**
-   * Whether a "*" write from `tabId` may make its entry globally disclosable
-   * now. When it may not, the hash waits in `pendingGlobal` until the user
-   * interacts with that tab's page (see `activate()`), or is dropped when the
-   * page goes away.
+   * Whether a "*" write from `tabId`, under the top-level site `partition`,
+   * may make its entry globally disclosable now: only once the user has
+   * interacted with that tab's page. When it may not, the hash waits in
+   * `pendingGlobal` under `partition` until the user interacts with any page
+   * of that site, in this visit or a later one (see `activate()`).
    */
-  async admitGlobalWrite(tabId, hash) {
+  async admitGlobalWrite(tabId, partition, hash) {
     await this.ready();
     if (!this.switches.activationGate) return true;
-    if (tabId == null) return false;
-    if (this.session.activatedTabs[tabId]) return true;
-    const pending = (this.session.pendingGlobal[tabId] ??= []);
-    if (!pending.includes(hash)) pending.push(hash);
-    await this._saveSession();
+    if (tabId != null && this.session.activatedTabs[tabId]) return true;
+    if (!partition) return false;
+    const pending = (this.pendingGlobal[partition] ??= []);
+    if (!pending.includes(hash)) {
+      pending.push(hash);
+      await chrome.storage.local.set({ [PENDING_KEY]: this.pendingGlobal });
+    }
     return false;
   }
 
   /**
-   * Records a user interaction with the page in `tabId`, and returns the
-   * hashes that were waiting for it.
+   * Records a user interaction with the page in `tabId`, whose top-level site
+   * is `partition`, and returns the hashes that were waiting for one on that
+   * site.
    */
-  async activate(tabId) {
+  async activate(tabId, partition) {
     await this.ready();
-    if (tabId == null) return [];
-    const released = this.session.pendingGlobal[tabId] ?? [];
-    if (this.session.activatedTabs[tabId] && !released.length) return [];
-    this.session.activatedTabs[tabId] = true;
-    delete this.session.pendingGlobal[tabId];
-    await this._saveSession();
+    if (tabId != null && !this.session.activatedTabs[tabId]) {
+      this.session.activatedTabs[tabId] = true;
+      await this._saveSession();
+    }
+    const released = (partition && this.pendingGlobal[partition]) || [];
+    if (released.length) {
+      delete this.pendingGlobal[partition];
+      await chrome.storage.local.set({ [PENDING_KEY]: this.pendingGlobal });
+    }
     return released;
   }
 
   /**
-   * Forgets a tab's interaction and its waiting writes, when its page is
-   * replaced (a navigation or a reload) or closed. A reload chain or a popup
-   * therefore never inherits an interaction.
+   * Forgets a tab's interaction when its page is replaced (a navigation or a
+   * reload) or closed, the way a new document starts without user activation.
+   * A reload chain or a popup therefore never inherits an interaction. Writes
+   * waiting on the tab's site stay waiting, for the next interaction there.
    */
   async resetTab(tabId) {
     await this.ready();
-    if (!this.session.activatedTabs[tabId] && !this.session.pendingGlobal[tabId]) return;
+    if (!this.session.activatedTabs[tabId]) return;
     delete this.session.activatedTabs[tabId];
-    delete this.session.pendingGlobal[tabId];
     await this._saveSession();
   }
 
@@ -253,24 +268,27 @@ export class PrivacyMitigations {
 
   /**
    * Throws a QuotaExceededError when storing `size` bytes as a new file for
-   * `origin` would exceed its site's write budget or its total cap.
-   * `heldBytes` is what that site already holds in COS. A write that adds no
-   * new grant (`isNew` false) costs nothing, since entries are
-   * content-addressable and repeated writes of the same bytes take no space.
+   * `origin` under the top-level site `partition` would exceed that top-level
+   * site's write budget, or the total cap of the writer's site. The write
+   * budget belongs to the top-level site, so every origin and frame on its
+   * pages draws from one budget. `heldBytes` is what the writer's site already
+   * holds in COS. A write that adds no new storing grant (`isNew` false) costs
+   * nothing: the origin already stored these bytes under this top-level site.
    */
-  async checkWrite(origin, { size, isNew, heldBytes }) {
+  async checkWrite(origin, { size, isNew, partition, heldBytes }) {
     await this.ready();
     if (!this.switches.writeLimits || !isNew) return;
-    const site = (await this.siteOf(origin)) || origin;
-    const entry = this._writeEntry(site);
+    const writerSite = (await this.siteOf(origin)) || origin;
+    const budgetKey = partition || writerSite;
+    const entry = this._writeEntry(budgetKey);
     const { writeFiles, writeBytes, siteBytes, writeWindowMs } = this.limits;
     let reason = null;
     if (entry.files + 1 > writeFiles) {
-      reason = `${site} has already stored ${entry.files} new files in Cross-Origin Storage in this ${formatWindow(writeWindowMs)}, its maximum.`;
+      reason = `Pages on ${budgetKey} have already stored ${entry.files} new files in Cross-Origin Storage in this ${formatWindow(writeWindowMs)}, its maximum.`;
     } else if (entry.bytes + size > writeBytes) {
-      reason = `${site} has already stored ${formatBytes(entry.bytes)} in Cross-Origin Storage in this ${formatWindow(writeWindowMs)}, and this file of ${formatBytes(size)} would exceed its ${formatBytes(writeBytes)}.`;
+      reason = `Pages on ${budgetKey} have already stored ${formatBytes(entry.bytes)} in Cross-Origin Storage in this ${formatWindow(writeWindowMs)}, and this file of ${formatBytes(size)} would exceed their ${formatBytes(writeBytes)}.`;
     } else if (heldBytes + size > siteBytes) {
-      reason = `${site} holds ${formatBytes(heldBytes)} in Cross-Origin Storage, and this file of ${formatBytes(size)} would exceed its maximum of ${formatBytes(siteBytes)}.`;
+      reason = `${writerSite} holds ${formatBytes(heldBytes)} in Cross-Origin Storage, and this file of ${formatBytes(size)} would exceed its maximum of ${formatBytes(siteBytes)}.`;
     }
     if (reason) {
       console.warn(`[COS] ${reason}`);
@@ -281,21 +299,21 @@ export class PrivacyMitigations {
   }
 
   /** Counts a write that `checkWrite()` let through, once its bytes are stored. */
-  async commitWrite(origin, { size, isNew }) {
+  async commitWrite(origin, { size, isNew, partition }) {
     await this.ready();
     if (!this.switches.writeLimits || !isNew) return;
-    const site = (await this.siteOf(origin)) || origin;
-    const entry = this._writeEntry(site);
+    const budgetKey = partition || (await this.siteOf(origin)) || origin;
+    const entry = this._writeEntry(budgetKey);
     entry.files++;
     entry.bytes += size;
-    this.writes[site] = entry;
+    this.writes[budgetKey] = entry;
     this._pruneWindows(this.writes, this.limits.writeWindowMs, Date.now());
     await chrome.storage.local.set({ [WRITE_KEY]: this.writes });
   }
 
-  _writeEntry(site) {
+  _writeEntry(key) {
     const now = Date.now();
-    const entry = this.writes[site];
+    const entry = this.writes[key];
     if (!entry || now - entry.start >= this.limits.writeWindowMs) {
       return { start: now, files: 0, bytes: 0 };
     }

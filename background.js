@@ -261,6 +261,7 @@ async function checkWriteBudget(hashValue, origin, partition, size) {
   const write = {
     size,
     isNew: !resourceManager.isStoringOrigin(hashValue, origin, partition),
+    partition,
   };
   if (write.isNew) {
     await mitigations.checkWrite(origin, { ...write, heldBytes: await bytesHeldBySite(origin) });
@@ -608,9 +609,9 @@ function rememberCreate(origin, partition, hashValue, requestedOrigins) {
 // request left until now (the CSS and script paths record their own).
 //
 // A "*" request only makes the entry globally disclosable once the user has
-// interacted with the page in `tabId` (see activatePage()). Until then it
-// waits, while the writer and its site read the entry through the storing
-// grant as usual. Returns developer warnings for the page's console.
+// interacted with the page in `tabId`. Until then it waits for an interaction
+// with any page of the top-level site `partition` (see activatePage()), while
+// the writer and its site read the entry through the storing grant as usual. Returns developer warnings for the page's console.
 async function recordWrite(hashValue, origin, partition, requests, tabId) {
   if (!partition) return [];
   const key = `${origin}|${partition}|${hashValue}`;
@@ -625,7 +626,7 @@ async function recordWrite(hashValue, origin, partition, requests, tabId) {
       warnings.push(...(await globalWriteWarnings(hashValue)));
       if (
         !resourceManager.isGloballyDisclosable(hashValue) &&
-        !(await mitigations.admitGlobalWrite(tabId, hashValue))
+        !(await mitigations.admitGlobalWrite(tabId, partition, hashValue))
       ) {
         warnings.push(
           `${hashValue} was stored with origins: '*'. Other sites can read it ` +
@@ -645,11 +646,17 @@ async function recordWrite(hashValue, origin, partition, requests, tabId) {
   return [...new Set(warnings)];
 }
 
-// A user interaction with the page in `tabId`, reported by content.js from
-// any of its frames: the "*" writes that were waiting for one become globally
-// disclosable.
-async function activatePage(tabId) {
-  const released = await mitigations.activate(tabId);
+// A user interaction with the page in `tab`, reported by content.js from any
+// of its frames: the "*" writes that were waiting for one on the page's
+// top-level site become globally disclosable.
+async function activatePage(tab) {
+  let partition = null;
+  try {
+    partition = tab?.url ? await getSchemefulSite(new URL(tab.url).origin) : null;
+  } catch {
+    // An opaque or unparsable URL has no site to release writes for.
+  }
+  const released = await mitigations.activate(tab?.id, partition);
   let changed = false;
   for (const hash of released) {
     // Unless it was deleted in the meantime.
@@ -660,8 +667,8 @@ async function activatePage(tabId) {
   if (changed) await resourceManager.saveManagerToStorage();
 }
 
-// A navigation or a reload replaces the page, so its interaction and the
-// writes still waiting for one go.
+// A navigation or a reload replaces the page, so its interaction goes. Writes
+// waiting for one stay, for the next interaction with a page of their site.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === 'loading') mitigations.resetTab(tabId);
 });
@@ -1144,7 +1151,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // content.js reporting a user interaction with a frame of the page
         // (pages can't send it through the relay).
         case 'userActivation': {
-          await activatePage(sender.tab?.id);
+          await activatePage(sender.tab);
           responseData = { activated: true };
           break;
         }

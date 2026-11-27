@@ -19,14 +19,19 @@
 //   node wpt-local-test.chrome.mjs --wpt <checkout> --limits default # real budgets
 //
 // Each test file is loaded as its own top-level page, so each runs under its
-// own top-level site the way wptrunner runs it. The page is clicked as soon as
-// it loads, the way a user would interact with it, so that "*" writes become
-// visible to other sites (see the user-interaction mitigation in
-// privacy-mitigations.js). The suite makes far more cross-site lookups and
+// own top-level site the way wptrunner runs it. The tests give a page user
+// activation with test_driver.bless() where they need it, and this runner
+// answers its clicks through a Playwright binding in place of WebDriver. Pages
+// are also clicked as soon as they load, the way a user would interact with
+// them, so that "*" writes from tests that don't call bless() become visible
+// to other sites (see the user-interaction mitigation in
+// privacy-mitigations.js), except for the user-activation-gate tests, which
+// check what happens before any interaction. The suite makes far more cross-site lookups and
 // writes from one site than the default budgets allow, as Chrome's own WPT
 // runs would, so it raises them unless `--limits default` is passed. GREASE'ing
 // stays on: the tests allow for it. The Public Hash List is a mock that lists
-// the one resource the tests rely on, resources/phl-listed-resource.js.
+// the two resources the tests rely on, resources/phl-listed-resource.js and
+// resources/phl-listed-gate-resource.js.
 //
 // Results are compared with wpt-expectations.json like wpt-test.chrome.mjs
 // does, except that results the expectations list as a cos-wpt limitation
@@ -53,8 +58,24 @@ const proxy = process.env.HTTPS_PROXY || process.env.https_proxy;
 // A file that never reports finishes as a timeout after this long.
 const TEST_TIMEOUT_MS = 180_000;
 
-// The digest of resources/phl-listed-resource.js (jQuery 3.7.1, minified).
-const PHL_LISTED = 'fc9a93dd241f6b045cbff0481cf4e1901becd0e12fb45166a8f17f95823f0b1a';
+// The digests of resources/phl-listed-resource.js (jQuery 3.7.1, minified) and
+// resources/phl-listed-gate-resource.js (js-cookie 3.0.8, minified).
+const PHL_LISTED = [
+  'fc9a93dd241f6b045cbff0481cf4e1901becd0e12fb45166a8f17f95823f0b1a',
+  '506834dde81524c74ba93c40c73ac0316fb8d4f860f816353a5562b2f8118c12',
+];
+
+// Tests that must start without user activation, so the runner doesn't click
+// their pages on load.
+const NO_CLICK = /user-activation-gate/;
+
+// Appended to testdriver-vendor.js: test_driver.click(), and with it
+// test_driver.bless(), clicks through the runner, which wptrunner would do
+// through WebDriver. Only the top-level document's clicks are supported.
+const VENDOR = `
+window.test_driver_internal.click = (element, coords) =>
+  window.cosWptClick(coords.x, coords.y);
+`;
 
 const SUITE_LIMITS = {
   lookupBudget: 1e9,
@@ -63,16 +84,22 @@ const SUITE_LIMITS = {
   siteBytes: 1e15,
 };
 
-// Collected by the report script appended to testharnessreport.js.
+// Collected by the report script appended to testharnessreport.js, and
+// handed to the runner through a binding. Polling the page with evaluate()
+// would give it user activation, since Playwright evaluates with a user
+// gesture, and the user-activation-gate tests check what happens before any.
 const REPORTER = `
 add_completion_callback((tests, status) => {
-  window.__cosWptResults = {
+  window.cosWptReport({
     status: status.status,
     message: status.message,
     tests: tests.map((t) => ({ name: t.name, status: t.status, message: t.message })),
-  };
+  });
 });
 `;
+
+// Resolvers for the pages waiting on their results.
+const reports = new Map();
 const TEST_STATUS = ['PASS', 'FAIL', 'TIMEOUT', 'NOTRUN', 'PRECONDITION_FAILED'];
 const HARNESS_STATUS = ['pass', 'error', 'timeout', 'precondition_failed'];
 
@@ -121,13 +148,19 @@ async function runTest(context, path) {
   const page = await context.newPage();
   try {
     const url = new URL(`/${path}`, origin).href;
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-    await page.mouse.click(1, 1).catch(() => {});
-    const handle = await page.waitForFunction(() => window.__cosWptResults, null, {
-      timeout: TEST_TIMEOUT_MS,
-      polling: 500,
+    // Registered before the page loads, since a quick test reports at once.
+    let timer;
+    const report = new Promise((resolve, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`no results after ${TEST_TIMEOUT_MS / 1000} s`)),
+        TEST_TIMEOUT_MS,
+      );
+      reports.set(page, resolve);
     });
-    const raw = await handle.jsonValue();
+    report.catch(() => {});
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    if (!NO_CLICK.test(path)) await page.mouse.click(1, 1).catch(() => {});
+    const raw = await report.finally(() => clearTimeout(timer));
     return {
       test: path,
       status:
@@ -146,6 +179,7 @@ async function runTest(context, path) {
   } catch (err) {
     return { test: path, status: 'timeout', message: err.message.split('\n')[0], subtests: [] };
   } finally {
+    reports.delete(page);
     // Popups the test opened go with it.
     for (const p of context.pages()) await p.close().catch(() => {});
   }
@@ -178,7 +212,7 @@ async function main() {
   });
 
   // A mock Public Hash List, so the run doesn't download the real one.
-  const phlBody = `// VERSION: wpt-local\n// ===BEGIN SHA-256===\n${PHL_LISTED}\n// ===END SHA-256===\n`;
+  const phlBody = `// VERSION: wpt-local\n// ===BEGIN SHA-256===\n${PHL_LISTED.join('\n')}\n// ===END SHA-256===\n`;
   await context.route(
     'https://media.githubusercontent.com/media/WICG/cross-origin-storage/**',
     (route) => route.fulfill({ status: 200, contentType: 'text/plain', body: phlBody }),
@@ -188,6 +222,14 @@ async function main() {
   await context.route('**/resources/testharnessreport.js', (route) =>
     route.fulfill({ contentType: 'text/javascript', body: `${harnessReport}\n${REPORTER}` }),
   );
+  const vendor = await readFile(join(wptDir, 'resources', 'testdriver-vendor.js'), 'utf8');
+  await context.route('**/resources/testdriver-vendor.js', (route) =>
+    route.fulfill({ contentType: 'text/javascript', body: `${vendor}\n${VENDOR}` }),
+  );
+  await context.exposeBinding('cosWptReport', ({ page }, raw) => reports.get(page)?.(raw));
+  await context.exposeBinding('cosWptClick', async ({ page }, x, y) => {
+    await page.mouse.click(x, y);
+  });
 
   try {
     let [sw] = context.serviceWorkers();
@@ -202,7 +244,7 @@ async function main() {
     await sw.evaluate(
       async ([hash, limits]) => {
         await chrome.storage.local.set({
-          phlHashSet: [hash],
+          phlHashSet: hash,
           phlFetchedAt: Date.now(),
           phlVersion: 'wpt-local',
           publicHashListEnabled: true,

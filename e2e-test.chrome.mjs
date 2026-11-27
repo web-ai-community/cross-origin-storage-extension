@@ -877,8 +877,10 @@ async function main() {
     const reloading = await open('a.test');
     await write(reloading, reloaded, { origins: '*' });
     await reloading.page().reload({ waitUntil: 'load' });
+    await reloading.waitForFunction(() => !!navigator.crossOriginStorage);
+    await expectRead('a reload without an interaction does not release a waiting write', topB, reloaded, false);
     await interact(reloading.page());
-    await expectRead('an interaction after a reload does not release a write from before it', topB, reloaded, false);
+    await expectRead('an interaction with a later page of the site releases a write from before it', topB, reloaded, true);
 
     const framed = await open('c.test', { frameB: true });
     await write(framed, inFrame, { origins: '*' });
@@ -906,6 +908,9 @@ async function main() {
     const subC = await open('sub.b.test');
     record('another site has a write budget of its own',
       (await tryWrite(subC, `write budget other site ${stamp}`)) === null, '');
+    const framedInC = await open('c.test', { frameB: true });
+    record('a frame of another site draws from the top-level site\'s budget',
+      (await tryWrite(framedInC, `write budget framed ${stamp}`)) === 'QuotaExceededError', '');
 
     await limits({ writeBytes: 100 });
     record('a file over the byte budget fails with a QuotaExceededError',

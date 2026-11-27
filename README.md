@@ -637,14 +637,18 @@ it would have made without COS. Every mitigation is on by default, and
   lookup is charged to the budget again.
 - **User interaction before global visibility.** A file stored with
   `origins: '*'` only becomes visible to other sites once the user clicks,
-  taps, or types on the page that stored it (in any of its frames). The page
-  can use the file right away. A page loaded in a hidden popup or a reload
-  chain therefore shares nothing, and a navigation or reload forgets both the
-  interaction and the writes still waiting for one. `content.js` reports
-  trusted input events only, which a page can't synthesize.
-- **Limits on writes and storage.** Each site may store 64 new files and
-  16 GiB a day, and hold 32 GiB in total. A write over a limit fails with a
-  `QuotaExceededError`. Writing a file the site already stored costs nothing.
+  taps, or types on a page of the top-level site it was stored under (in any
+  of its frames). The page can use the file right away. A page loaded in a
+  hidden popup or a reload chain therefore shares nothing. A navigation or
+  reload forgets the page's interaction, and the writes still waiting stay
+  waiting until the user interacts with a page of that site, in the same
+  visit or a later one. `content.js` reports trusted input events only, which
+  a page can't synthesize.
+- **Limits on writes and storage.** Pages on each top-level site may store 64
+  new files and 16 GiB a day, whichever origin or frame writes them, and each
+  site may hold 32 GiB in total. A write over a limit fails with a
+  `QuotaExceededError`. Writing a file the same origin already stored under
+  the same top-level site costs nothing.
 - **Refusals look like misses.** Every refusal is a `NotFoundError`, and a
   refused lookup still queries the cache, for a key that's never there, so it
   takes as long as a genuine miss.
@@ -748,13 +752,15 @@ worker, and a run takes the better part of an hour.
 The run raises the lookup and write budgets, since the suite makes hundreds of
 lookups and writes from one top-level site, and clicks the runner page once, so
 that `origins: '*'` writes reach other sites. GREASE'ing stays on, since the
-tests allow for it.
+tests allow for it. Tests that need user activation call `test_driver.bless()`.
 
 `npm run test:wpt:local -- --wpt <checkout>` runs the same tests from a local
 web-platform-tests checkout served by `./wpt serve`, for when the cos-wpt
 mirrors can't be reached, or to try changes to the tests before they're pushed.
-Each test file runs as its own top-level page there. The header of
-`wpt-local-test.chrome.mjs` has the setup.
+Each test file runs as its own top-level page there, and the runner answers
+`test_driver.bless()` with a real click. It collects results through a binding,
+since evaluating script in the page with Playwright would give the page user
+activation. The header of `wpt-local-test.chrome.mjs` has the setup.
 
 Every subtest result is compared with
 [`wpt-expectations.json`](wpt-expectations.json). Its `failures` are subtests
