@@ -7,6 +7,7 @@ import { getSchemefulSite, getSite, isSameSite } from './same-site.js';
 import { initTelemetry, recordTelemetryEvent } from './telemetry.js';
 import { initNativeMigration, handleMigrationMessage } from './native-migration.js';
 import { createSha256, incrementalHexDigest, streamingHexDigest } from './sha256.js';
+import { PrivacyMitigations } from './privacy-mitigations.js';
 
 // Proactively checks (via the standard Storage API, supported in Chrome,
 // Firefox, and Safari) whether there's plausibly enough room for a resource
@@ -80,11 +81,22 @@ chrome.runtime.onInstalled.addListener(async ({ reason }) => {
       // patch is: it replaces a global that bot-detection systems inspect.
       // Off by default, enabled in options.html.
       fetchPatchEnabled: false,
-      // Public Hash List gating is opt-in: off by default so existing
-      // COS availability behavior doesn't change unless a user
-      // explicitly enables it in options.html.
-      publicHashListEnabled: false,
+      // The Public Hash List gates the global scope, as it will in browsers
+      // that ship COS. It can be switched off in options.html.
+      publicHashListEnabled: true,
+      phlGateOnByDefault: true,
     });
+  } else if (reason === 'update') {
+    // The gate used to be opt-in. It is the mitigation every other one
+    // builds on, so an update switches it on once, and leaves any later
+    // choice in options.html alone.
+    const { phlGateOnByDefault } = await chrome.storage.local.get('phlGateOnByDefault');
+    if (!phlGateOnByDefault) {
+      await chrome.storage.local.set({
+        publicHashListEnabled: true,
+        phlGateOnByDefault: true,
+      });
+    }
   }
 });
 
@@ -101,10 +113,16 @@ publicHashList.provenanceHashes = async () => {
  * How `origin`, running under the top-level site `partition`, may read a
  * stored hash, per "determine COS disclosure" in the spec
  * (https://wicg.github.io/cross-origin-storage/#reading-files):
- *   - 'grant'  through a storing grant or a list grant, which the Public
- *              Hash List never gates;
- *   - 'global' through the global grant alone, which it does;
- *   - null     not at all.
+ *   - 'storing'    through a storing grant under `partition`;
+ *   - 'list'       through a list grant written under `partition`;
+ *   - 'list-cross' through a first-party list grant written under another
+ *                  top-level site;
+ *   - 'global'     through the global grant alone;
+ *   - null         not at all.
+ *
+ * The Public Hash List and GREASE'ing gate 'global' alone. The cross-site
+ * lookup budget charges every answer but 'storing' and 'list', since those
+ * reveal only what was stored under the reader's own top-level site.
  *
  * Grants count under the partition they were written under, so a frame
  * embedded on two sites can't read back on one what it wrote on the other. A
@@ -119,18 +137,17 @@ async function grantFor(hash, origin, partition) {
         grant.partition === partition &&
         (await getSchemefulSite(grant.origin)) === site
       ) {
-        return 'grant';
+        return 'storing';
       }
     }
     const firstParty = site === partition;
+    let crossPartition = false;
     for (const grant of resourceManager.getListGrants(hash)) {
-      if (
-        (grant.partition === partition || (grant.firstParty && firstParty)) &&
-        (await getSchemefulSite(grant.origin)) === site
-      ) {
-        return 'grant';
-      }
+      if ((await getSchemefulSite(grant.origin)) !== site) continue;
+      if (grant.partition === partition) return 'list';
+      if (grant.firstParty && firstParty) crossPartition = true;
     }
+    if (crossPartition) return 'list-cross';
   }
   return resourceManager.isGloballyDisclosable(hash) ? 'global' : null;
 }
@@ -150,13 +167,123 @@ async function isBlockedByPublicHashList(hashValue) {
   return true;
 }
 
-// Whether `origin` may read a stored file under `partition`: every check a
-// read makes before revealing that a file is there.
+// Whether `origin` may read a stored file under `partition` through its
+// grants and the Public Hash List, before the per-lookup mitigations.
 async function mayRead(hashValue, origin, partition) {
   const grant = await grantFor(hashValue, origin, partition);
-  if (grant === 'grant') return true;
+  if (grant === 'storing' || grant === 'list' || grant === 'list-cross') return true;
   if (grant !== 'global') return false;
   return !(await isBlockedByPublicHashList(hashValue));
+}
+
+const mitigations = new PrivacyMitigations({ siteOf: getSchemefulSite });
+// For the test suites, which inspect and reset the budgets from this worker.
+globalThis.cosMitigations = mitigations;
+
+/**
+ * A lookup: of the hashes in `hashValues` (the digests one resource is known
+ * by), the first that `origin` under `partition` is told is there, or null.
+ * This is every check a read makes before revealing that a file is there:
+ * the grants, the cross-site lookup budget, the Public Hash List, and
+ * GREASE'ing. The budget is charged at most once per lookup, hit or miss,
+ * unless a grant written under the reader's own top-level site answers it.
+ * A charged lookup with nothing left to charge reads as a miss.
+ *
+ * On a disclosure, the hash is remembered for the handle's getFile(), which
+ * doesn't look it up again (see mayReadBytes()).
+ */
+async function lookUp(hashValues, origin, partition) {
+  const grants = [];
+  for (const value of hashValues) {
+    const grant = await grantFor(value, origin, partition);
+    if (grant === 'storing' || grant === 'list') return value;
+    grants.push(grant);
+  }
+  if (!(await mitigations.chargeLookup(partition))) return null;
+  for (const [i, value] of hashValues.entries()) {
+    const grant = grants[i];
+    if (grant === 'list-cross') {
+      await mitigations.rememberDisclosure(origin, partition, value);
+      return value;
+    }
+    if (grant !== 'global' || (await isBlockedByPublicHashList(value))) continue;
+    if (mitigations.shouldGrease(resourceManager.getSizeByHash(value))) continue;
+    await mitigations.rememberDisclosure(origin, partition, value);
+    return value;
+  }
+  return null;
+}
+
+// Whether a read of a file's bytes, for a handle the page already holds, may
+// go ahead. A handle only exists after a lookup disclosed the file, so one
+// this origin was recently told about reads without being charged or
+// GREASE'd again. Anything else is a lookup of its own: a page can post a
+// read to the relay directly, past main-world.js.
+async function mayReadBytes(hashValue, origin, partition) {
+  const grant = await grantFor(hashValue, origin, partition);
+  if (grant === 'storing' || grant === 'list') return true;
+  if (
+    (await mitigations.wasDisclosed(origin, partition, hashValue)) &&
+    (await mayRead(hashValue, origin, partition))
+  ) {
+    return true;
+  }
+  return (await lookUp([hashValue], origin, partition)) !== null;
+}
+
+// A refused lookup still queries the cache, for a key that's never there, so
+// that it takes as long as a genuine miss.
+const ABSENT_KEY = 'https://cos.example.com/absent';
+async function lookUpNothing() {
+  await cache.match(ABSENT_KEY);
+}
+
+// The bytes `origin` holds in COS through entries a same-site origin stored,
+// for the per-site cap.
+async function bytesHeldBySite(origin) {
+  const site = await getSchemefulSite(origin);
+  let total = 0;
+  for (const hash of resourceManager.getAllHashes()) {
+    for (const storer of resourceManager.getStoringOrigins(hash)) {
+      if ((await getSchemefulSite(storer)) === site) {
+        total += resourceManager.getSizeByHash(hash) || 0;
+        break;
+      }
+    }
+  }
+  return total;
+}
+
+// The write-budget check for a store of `size` bytes under `hashValue`, to
+// run before the bytes are stored. Returns what to pass to
+// `mitigations.commitWrite()` once they are.
+async function checkWriteBudget(hashValue, origin, partition, size) {
+  const write = {
+    size,
+    isNew: !resourceManager.isStoringOrigin(hashValue, origin, partition),
+    partition,
+  };
+  if (write.isNew) {
+    await mitigations.checkWrite(origin, { ...write, heldBytes: await bytesHeldBySite(origin) });
+  }
+  return write;
+}
+
+// Developer guidance for a "*" write, logged to the page's console: a file
+// off the Public Hash List stays readable only to its storing site and its
+// origins list. recordWrite() adds the one for a write that waits for a user
+// interaction.
+async function globalWriteWarnings(hashValue) {
+  const warnings = [];
+  const { publicHashListEnabled } = await chrome.storage.local.get('publicHashListEnabled');
+  if (publicHashListEnabled && !(await publicHashList.has(hashValue))) {
+    warnings.push(
+      `${hashValue} was stored with origins: '*', but it is not on the Public ` +
+        `Hash List, so origins outside its storing site and its origins list ` +
+        `can't read it until it is listed. See https://wicg.github.io/cross-origin-storage/#public-hash-list.`
+    );
+  }
+  return warnings;
 }
 
 const resourceManager = new ResourceManager();
@@ -227,6 +354,7 @@ const EXTENSION_PAGE_ACTIONS = new Set([
   'recordResourceMetadata',
   'getPublicHashListStatus',
   'getPublicHashListProgress',
+  'resetMitigationBudgets',
 ]);
 
 const HASH_ALGORITHMS = new Set(['SHA-256', 'SHA-384', 'SHA-512']);
@@ -400,17 +528,20 @@ function takeStagedPageFetched(id) {
 
 // For a host integration, the ceiling comes from the fetched resource's own
 // response: its server supplies the bytes, so it decides who may read them.
-function withResponseCeiling(requestedOrigins, response) {
+// Any origins it drops are reported in `warnings`, for the page's console.
+function withResponseCeiling(requestedOrigins, response, warnings = []) {
   if (!requestedOrigins.length) return undefined;
   const { origins, dropped } = applyScopeCeiling(
     requestedOrigins,
     parseScopeCeiling(response.headers.get('cross-origin-storage-allow-origin'))
   );
   if (dropped.length) {
-    console.warn(
-      `[COS] ${response.url} has no Cross-Origin-Storage-Allow-Origin header ` +
-        `authorizing ${dropped.join(', ')}, so they were dropped from its origins list.`
-    );
+    const warning =
+      `${response.url || 'The resource'} has no Cross-Origin-Storage-Allow-Origin header ` +
+      `authorizing ${dropped.join(', ')}, so ${dropped.length > 1 ? 'they were' : 'it was'} ` +
+      `dropped from its origins list.`;
+    console.warn(`[COS] ${warning}`);
+    warnings.push(warning);
   }
   return origins;
 }
@@ -476,15 +607,34 @@ function rememberCreate(origin, partition, hashValue, requestedOrigins) {
 // a write that skipped them gets the same-site default. A write that went
 // through getFileHandle() also records the writer's access, which that
 // request left until now (the CSS and script paths record their own).
-async function recordWrite(hashValue, origin, partition, requests) {
-  if (!partition) return;
+//
+// A "*" request only makes the entry globally disclosable once the user has
+// interacted with the page in `tabId`. Until then it waits for an interaction
+// with any page of the top-level site `partition` (see activatePage()), while
+// the writer and its site read the entry through the storing grant as usual. Returns developer warnings for the page's console.
+async function recordWrite(hashValue, origin, partition, requests, tabId) {
+  if (!partition) return [];
   const key = `${origin}|${partition}|${hashValue}`;
   if (!requests) resourceManager.recordAccess(origin, hashValue);
   requests ??= pendingCreates.get(key) ?? [];
   pendingCreates.delete(key);
   const firstParty = (await getSchemefulSite(origin)) === partition;
   resourceManager.addStoringGrant(hashValue, origin, partition);
+  const warnings = [];
   for (const requestedOrigins of requests) {
+    if (requestedOrigins === '*') {
+      warnings.push(...(await globalWriteWarnings(hashValue)));
+      if (
+        !resourceManager.isGloballyDisclosable(hashValue) &&
+        !(await mitigations.admitGlobalWrite(tabId, partition, hashValue))
+      ) {
+        warnings.push(
+          `${hashValue} was stored with origins: '*'. Other sites can read it ` +
+            `once the user has interacted with this page.`
+        );
+        continue;
+      }
+    }
     resourceManager.upgradeVisibility(
       hashValue,
       requestedOrigins,
@@ -493,7 +643,36 @@ async function recordWrite(hashValue, origin, partition, requests) {
     );
   }
   await resourceManager.saveManagerToStorage();
+  return [...new Set(warnings)];
 }
+
+// A user interaction with the page in `tab`, reported by content.js from any
+// of its frames: the "*" writes that were waiting for one on the page's
+// top-level site become globally disclosable.
+async function activatePage(tab) {
+  let partition = null;
+  try {
+    partition = tab?.url ? await getSchemefulSite(new URL(tab.url).origin) : null;
+  } catch {
+    // An opaque or unparsable URL has no site to release writes for.
+  }
+  const released = await mitigations.activate(tab?.id, partition);
+  let changed = false;
+  for (const hash of released) {
+    // Unless it was deleted in the meantime.
+    if (!resourceManager.getStoringGrants(hash).length) continue;
+    resourceManager.upgradeVisibility(hash, '*');
+    changed = true;
+  }
+  if (changed) await resourceManager.saveManagerToStorage();
+}
+
+// A navigation or a reload replaces the page, so its interaction goes. Writes
+// waiting for one stay, for the next interaction with a page of their site.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === 'loading') mitigations.resetTab(tabId);
+});
+chrome.tabs.onRemoved.addListener((tabId) => mitigations.resetTab(tabId));
 
 // Removes what earlier versions could leave behind: records of a hash whose
 // create request was never written (they recorded the access before any
@@ -676,14 +855,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const tabId = sender.tab?.id;
           maybeResetForNewPage(tabId, sender.documentId);
           const success = [];
+          const warnings = [];
           for (const hash of hashes) {
-            // A read must clear the grants (and, for the global grant alone,
-            // the Public Hash List) before the cache is even queried, so a
-            // refusal looks exactly like a file that isn't there.
+            // A read must clear the grants, the lookup budget, and, for the
+            // global grant alone, the Public Hash List and GREASE'ing, before
+            // the cache is even queried. A refusal then queries the cache for
+            // a key that's never there, so it looks exactly like a file that
+            // isn't there, in its answer and in its timing.
             // See inFlightStores: a host integration's store from this same
             // document may still be settling.
             if (!create) await storesInFlight(origin, partition, [hash.value]);
-            if (!create && !(await mayRead(hash.value, origin, partition))) {
+            if (!create && !(await lookUp([hash.value], origin, partition))) {
+              await lookUpNothing();
               resourceManager.recordMiss();
               countForTelemetry('miss', hash.value, origin, 'getFileHandle');
               if (tabId) {
@@ -740,7 +923,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
           }
           await resourceManager.saveManagerToStorage();
-          responseData = { hashes, success, droppedOrigins };
+          responseData = { hashes, success, droppedOrigins, warnings };
           break;
         }
         case 'getFileData': {
@@ -750,12 +933,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           // like a miss, so the answer reveals nothing about it.
           if (
             !fromExtensionPage(sender) &&
-            !(await mayRead(
+            !(await mayReadBytes(
               hash.value,
               senderOrigin(sender),
               await senderPartition(sender)
             ))
           ) {
+            await lookUpNothing();
             throw cosError('NotFoundError', 'File not found in cross-origin storage.');
           }
           const fileResult = await getFileData(hash);
@@ -772,12 +956,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           assertValidHash(hash);
           if (
             !fromExtensionPage(sender) &&
-            !(await mayRead(
+            !(await mayReadBytes(
               hash.value,
               senderOrigin(sender),
               await senderPartition(sender)
             ))
           ) {
+            await lookUpNothing();
             responseData = { found: false };
             break;
           }
@@ -830,12 +1015,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                   type: mimeType?.['content-type'] || 'application/octet-stream',
                 });
           await assertMatchesHash(hash, blob);
+          const pageWrite = !fromExtensionPage(sender);
+          const partition = pageWrite ? await senderPartition(sender) : null;
+          const budgeted =
+            pageWrite &&
+            (await checkWriteBudget(hash.value, senderOrigin(sender), partition, blob.size));
           await storeFileData(hash, blob, mimeType);
-          if (!fromExtensionPage(sender)) {
-            await recordWrite(
+          let warnings = [];
+          if (pageWrite) {
+            await mitigations.commitWrite(senderOrigin(sender), budgeted);
+            warnings = await recordWrite(
               hash.value,
               senderOrigin(sender),
-              await senderPartition(sender)
+              partition,
+              undefined,
+              sender.tab?.id
             );
           }
           countForTelemetry('store', hash.value, senderOrigin(sender), 'getFileHandle');
@@ -844,7 +1038,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             hash.value,
             mimeType['content-type'] || 'application/octet-stream'
           );
-          responseData = { hash };
+          responseData = { hash, warnings };
           break;
         }
         // Safari-only push path for storing a resource's bytes in bounded
@@ -859,6 +1053,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             assertValidHash(hash);
             assertNotEmpty(totalSize);
             await checkStorageQuota(totalSize);
+            // Checked against the announced size before any byte is stored,
+            // and counted once the stored bytes are verified.
+            const budgeted = await checkWriteBudget(
+              hash.value,
+              senderOrigin(sender),
+              await senderPartition(sender),
+              totalSize
+            );
             const { readable, writable } = new TransformStream();
             const putPromise = cache
               .put(
@@ -878,6 +1080,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               mimeType,
               putPromise,
               bytesWritten: 0,
+              budgeted,
               // Verified as the chunks arrive (see assertMatchesHash()).
               sha: hash.algorithm === 'SHA-256' ? createSha256() : null,
             };
@@ -917,10 +1120,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 throw err;
               }
             }
-            await recordWrite(
+            await mitigations.commitWrite(senderOrigin(sender), {
+              ...entry.budgeted,
+              size: entry.bytesWritten,
+            });
+            const warnings = await recordWrite(
               entry.hash.value,
               senderOrigin(sender),
-              await senderPartition(sender)
+              await senderPartition(sender),
+              undefined,
+              sender.tab?.id
             );
             countForTelemetry(
               'store',
@@ -933,10 +1142,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               entry.hash.value,
               entry.mimeType['content-type'] || 'application/octet-stream'
             );
-            responseData = { hash: entry.hash };
+            responseData = { hash: entry.hash, warnings };
           } else {
             responseData = { received: true };
           }
+          break;
+        }
+        // content.js reporting a user interaction with a frame of the page
+        // (pages can't send it through the relay).
+        case 'userActivation': {
+          await activatePage(sender.tab);
+          responseData = { activated: true };
           break;
         }
         // content.js asking whether a Blob survives runtime messaging in
@@ -980,6 +1196,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // instance stays the only writer (see ResourceManager.ready()).
         case 'deleteResourceRecords': {
           await resourceManager.deleteResourcesByHash(data.hashes);
+          responseData = { success: true };
+          break;
+        }
+        case 'resetMitigationBudgets': {
+          await mitigations.resetBudgets();
           responseData = { success: true };
           break;
         }
@@ -1080,6 +1301,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             break;
           }
           const fonts = [];
+          const warnings = [];
           let fontIdx = 0;
           // Fonts this worker couldn't fetch, for the page to fetch instead.
           const needsPageFetch = [];
@@ -1101,7 +1323,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             if (data.pageFetched === undefined) {
               await storesInFlight(origin, partition, [hash.value]);
             }
-            const readable = await mayRead(hash.value, origin, partition);
+            // A retry with the page's bytes for this font is the store of a
+            // first request's miss, already charged, and discloses nothing.
+            const retried = !!data.pageFetched?.[fm.fontUrl];
+            const readable =
+              !retried && !!(await lookUp([hash.value], origin, partition));
+            if (!readable && !retried) await lookUpNothing();
             let fileResult = readable ? await getFileData(hash) : false;
             const alreadyCached = !!fileResult;
             if (!fileResult) {
@@ -1135,9 +1362,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 await assertMatchesHash(hash, fontBlob);
                 const mimeType =
                   fontResp.headers.get('content-type') || 'font/woff2';
+                // Over its write budget, the font loads from its own URL.
+                const budgeted = await checkWriteBudget(
+                  hash.value,
+                  origin,
+                  partition,
+                  fontBlob.size
+                );
                 await storeFileData(hash, fontBlob, {
                   'content-type': mimeType,
                 });
+                await mitigations.commitWrite(origin, budgeted);
                 countForTelemetry('store', hash.value, origin, 'css');
                 resourceManager.recordSize(hash.value, fontBlob.size);
                 resourceManager.recordMimeType(hash.value, mimeType);
@@ -1145,13 +1380,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 // modifier's own origins list, recorded the same way as for
                 // the JS getFileHandle() path, so a hash stored via CSS is
                 // governed by the same rules either way.
-                await recordWrite(hash.value, origin, partition, [
-                  allowed === '*'
-                    ? '*'
-                    : withResponseCeiling(allowed, fontResp),
-                ]);
+                warnings.push(
+                  ...(await recordWrite(
+                    hash.value,
+                    origin,
+                    partition,
+                    [
+                      allowed === '*'
+                        ? '*'
+                        : withResponseCeiling(allowed, fontResp, warnings),
+                    ],
+                    tabId
+                  ))
+                );
                 fileResult = await getFileData(hash);
               } catch (e) {
+                if (e.cosErrorName === 'QuotaExceededError') warnings.push(e.message);
                 rewritten = rewritten.replace(fm.full, `url("${fm.fontUrl}")`);
                 continue;
               } finally {
@@ -1192,6 +1436,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             cssText: rewritten,
             fonts,
             changed: rewritten !== cssText,
+            warnings,
           };
           break;
         }
@@ -1199,8 +1444,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // and <script integrity crossoriginstorage>. See
         // https://github.com/WICG/cross-origin-storage/blob/main/README.md#declarative-html-integration
         //
-        // Reads are gated by mayRead(), exactly like getFileHandle() and the
-        // CSS integration above.
+        // Reads are lookups (lookUp()), exactly like getFileHandle() and the
+        // CSS integration above, and charged to the same budget.
         case 'resolveDeclarativeResource': {
           const tabId = sender.tab?.id;
           maybeResetForNewPage(tabId, sender.documentId);
@@ -1231,14 +1476,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           if (data.pageFetched === undefined) {
             await storesInFlight(origin, partition, candidates.map((c) => c.value));
           }
+          // One lookup for the resource, however many digests name it. A
+          // retry with the page's bytes is the store of the first request's
+          // miss, already charged, and discloses nothing.
           let fileResult = false;
-          for (const candidate of candidates) {
-            if (!(await mayRead(candidate.value, origin, partition))) continue;
-            hash = candidate;
-            fileResult = await lookup();
-            if (fileResult) break;
+          if (data.pageFetched === undefined) {
+            const disclosed = await lookUp(
+              candidates.map((c) => c.value),
+              origin,
+              partition
+            );
+            if (disclosed) {
+              hash = candidates.find((c) => c.value === disclosed);
+              fileResult = await lookup();
+            } else {
+              await lookUpNothing();
+            }
           }
           hash = fileResult ? hash : candidates[0];
+          const warnings = [];
           const alreadyCached = !!fileResult;
 
           if (!fileResult) {
@@ -1294,19 +1550,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               }
               const mimeType =
                 resp.headers.get('content-type') || 'application/octet-stream';
+              // Over its write budget, the page loads the resource from the
+              // network, as on any other failure.
+              const budgeted = await checkWriteBudget(hash.value, origin, partition, blob.size);
               await storeFileData(hash, blob, { 'content-type': mimeType });
+              await mitigations.commitWrite(origin, budgeted);
               countForTelemetry('store', hash.value, origin, api);
               resourceManager.recordSize(hash.value, blob.size);
               resourceManager.recordMimeType(hash.value, mimeType);
               // The grants come from the crossoriginstorage attribute's own
               // origins value, recorded the same way as for the JS
               // getFileHandle() path.
-              await recordWrite(hash.value, origin, partition, [
-                Array.isArray(origins) ? withResponseCeiling(origins, resp) : origins,
-              ]);
+              warnings.push(
+                ...(await recordWrite(
+                  hash.value,
+                  origin,
+                  partition,
+                  [Array.isArray(origins) ? withResponseCeiling(origins, resp, warnings) : origins],
+                  tabId
+                ))
+              );
               fileResult = await lookup();
             } catch (e) {
-              responseData = { hash, data: null };
+              responseData = {
+                hash,
+                data: null,
+                warnings: e.cosErrorName === 'QuotaExceededError' ? [e.message] : [],
+              };
               break;
             } finally {
               if (!handedToPage) settle();
@@ -1330,10 +1600,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // No `hash` in a seed-only response, so Safari's content.js
             // doesn't pull the bytes it has no use for.
             responseData = seedOnly
-              ? { seeded: true }
-              : { hash, data: fileResult, mimeType };
+              ? { seeded: true, warnings }
+              : { hash, data: fileResult, mimeType, warnings };
           } else {
-            responseData = { hash, data: null };
+            responseData = { hash, data: null, warnings };
           }
           await resourceManager.saveManagerToStorage();
           break;

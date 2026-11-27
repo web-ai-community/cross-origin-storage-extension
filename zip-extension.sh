@@ -50,6 +50,7 @@ COMMON_FILES=(
   "telemetry-notice.html"
   "telemetry-notice.js"
   "native-migration.js"
+  "privacy-mitigations.js"
   "migration.html"
   "migration.js"
 )

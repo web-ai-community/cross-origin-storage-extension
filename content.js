@@ -625,6 +625,9 @@ window.addEventListener('message', async (event) => {
       return;
     }
     if (response.error) {
+      if (response.errorName === 'QuotaExceededError') {
+        console.warn(`Cross-Origin Storage: ${response.error}`);
+      }
       window.postMessage(
         {
           source: 'cos-polyfill-isolated',
@@ -634,6 +637,10 @@ window.addEventListener('message', async (event) => {
         event.origin
       );
       return;
+    }
+    // Developer guidance about what a write exposes, for this page's console.
+    for (const warning of response.data?.warnings ?? []) {
+      console.warn(`Cross-Origin Storage: ${warning}`);
     }
     await finalizeResponseData(action, response.data, !!data?.transferAsChunks);
     window.postMessage(
@@ -655,6 +662,31 @@ window.addEventListener('message', async (event) => {
     reply(response);
   });
 });
+
+// A file written with `origins: '*'` only becomes visible to other sites once
+// the user has interacted with the page (see activatePage() in
+// background.js). The events are HTML's activation-triggering input events,
+// and only trusted ones count, which a page can't synthesize. Each frame
+// reports them at most once a second, since the background forgets an
+// interaction whenever the tab loads a new page; it treats an interaction with
+// any frame as one with the page.
+{
+  const ACTIVATION_EVENTS = ['keydown', 'mousedown', 'pointerdown', 'pointerup', 'touchend'];
+  let lastReport = -Infinity;
+  const onActivation = (event) => {
+    if (!event.isTrusted) return;
+    if (event.type === 'keydown' && event.key === 'Escape') return;
+    if (event.type === 'pointerup' && event.pointerType === 'mouse') return;
+    if (event.timeStamp - lastReport < 1000) return;
+    lastReport = event.timeStamp;
+    chrome.runtime.sendMessage({ action: 'userActivation' }, () => {
+      void chrome.runtime.lastError;
+    });
+  };
+  for (const type of ACTIVATION_EVENTS) {
+    window.addEventListener(type, onActivation, { capture: true });
+  }
+}
 
 // Moving files into the browser's own Cross-Origin Storage, for a browser
 // that has it (see native-migration.js). In this isolated world,

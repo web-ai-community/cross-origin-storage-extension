@@ -97,7 +97,7 @@
         nothing specific about your browsing history. When enabled, a
         requested hash that isn't on the PHL is treated as unavailable —
         and the access is blocked and logged — even if it's actually
-        present in the local COS cache. Off by default; the PHL is fetched
+        present in the local COS cache. On by default; the PHL is fetched
         from GitHub and refreshed at most once every 24 hours. See the
         <a
           href="https://github.com/WICG/cross-origin-storage/blob/main/public-hash-list/phl-explainer.md"
@@ -107,6 +107,64 @@
         >
         for the full rationale and governance model.
       </p>
+    </div>
+    <div class="panel">
+      <h2>Privacy mitigations</h2>
+      <p>
+        These limit what one site can learn about the files other sites left
+        in COS. Each turns some cache hits into misses, and a miss only costs
+        the page the download it would have made without COS. All are on by
+        default. See the
+        <a
+          href="https://wicg.github.io/cross-origin-storage/#availability-gating"
+          target="_blank"
+          rel="noopener noreferrer"
+          >availability gating</a
+        >
+        section of the specification.
+      </p>
+      <div class="option-item">
+        <!-- prettier-ignore -->
+        <input type="checkbox" switch id="mitigation-lookupBudget" data-mitigation="lookupBudget">
+        <label for="mitigation-lookupBudget">Limit cross-site lookups</label>
+      </div>
+      <p>
+        Each site may look up files that other sites stored 16 times a week,
+        whether it finds them or not. Lookups of a site's own files are free.
+        Every frame on a page shares the budget of the site in the address
+        bar.
+      </p>
+      <div class="option-item">
+        <!-- prettier-ignore -->
+        <input type="checkbox" switch id="mitigation-grease" data-mitigation="grease">
+        <label for="mitigation-grease">Occasionally report small shared files as missing</label>
+      </div>
+      <p>
+        One in ten lookups of a file shared with every site through the
+        Public Hash List reports it as missing, so a miss never proves that a
+        file is absent. Files over 10 MiB are always reported exactly.
+      </p>
+      <div class="option-item">
+        <!-- prettier-ignore -->
+        <input type="checkbox" switch id="mitigation-activationGate" data-mitigation="activationGate">
+        <label for="mitigation-activationGate">Share files with every site only after you interact with the page</label>
+      </div>
+      <p>
+        A file a page stores for every site becomes visible to other sites
+        once you click, tap, or type on a page of that site, so pages opened
+        in hidden popups or reload chains share nothing. The page itself can
+        use the file right away.
+      </p>
+      <div class="option-item">
+        <!-- prettier-ignore -->
+        <input type="checkbox" switch id="mitigation-writeLimits" data-mitigation="writeLimits">
+        <label for="mitigation-writeLimits">Limit how much each site stores</label>
+      </div>
+      <p>
+        Pages on each site may store 64 new files and 16 GiB a day, and each
+        site may hold 32 GiB in total, so no site can flood the cache.
+      </p>
+      <button type="button" id="reset-budgets">Reset lookup and write budgets</button>
     </div>
     <div class="panel">
       <div class="option-item">

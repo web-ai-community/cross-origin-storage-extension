@@ -12,6 +12,7 @@
     "check:hashes": "node check-fixture-hashes.mjs",
     "test": "node e2e-test.chrome.mjs",
     "test:wpt": "npm run use-chrome && node wpt-test.chrome.mjs",
+    "test:wpt:local": "npm run use-chrome && node wpt-local-test.chrome.mjs",
     "use-chrome": "cp manifest.chrome.json manifest.json",
     "use-firefox": "cp manifest.firefox.json manifest.json",
     "use-safari": "cp manifest.safari.json manifest.json",

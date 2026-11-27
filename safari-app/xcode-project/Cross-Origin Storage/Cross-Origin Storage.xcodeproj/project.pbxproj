@@ -32,6 +32,7 @@
 		0C8D48C43083C6E7007B8931 /* sha256.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C8D48A43083C6E7007B8931 /* sha256.js */; };
 		0C8D48C53083C6E7007B8931 /* popup.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C8D48A53083C6E7007B8931 /* popup.js */; };
 		0C8D48C63083C6E7007B8931 /* native-migration.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C8D48A63083C6E7007B8931 /* native-migration.js */; };
+		0C8D49113083C6E7007B8931 /* privacy-mitigations.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C8D49103083C6E7007B8931 /* privacy-mitigations.js */; };
 		0C8D48C73083C6E7007B8931 /* telemetry-notice.html in Resources */ = {isa = PBXBuildFile; fileRef = 0C8D48A73083C6E7007B8931 /* telemetry-notice.html */; };
 		0C8D48C83083C6E7007B8931 /* relay-extension.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C8D48A83083C6E7007B8931 /* relay-extension.js */; };
 		0C8D48C93083C6E7007B8931 /* telemetry.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C8D48A93083C6E7007B8931 /* telemetry.js */; };
@@ -64,6 +65,7 @@
 		0C8D48E43083C6E7007B8931 /* sha256.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C8D48A43083C6E7007B8931 /* sha256.js */; };
 		0C8D48E53083C6E7007B8931 /* popup.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C8D48A53083C6E7007B8931 /* popup.js */; };
 		0C8D48E63083C6E7007B8931 /* native-migration.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C8D48A63083C6E7007B8931 /* native-migration.js */; };
+		0C8D49123083C6E7007B8931 /* privacy-mitigations.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C8D49103083C6E7007B8931 /* privacy-mitigations.js */; };
 		0C8D48E73083C6E7007B8931 /* telemetry-notice.html in Resources */ = {isa = PBXBuildFile; fileRef = 0C8D48A73083C6E7007B8931 /* telemetry-notice.html */; };
 		0C8D48E83083C6E7007B8931 /* relay-extension.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C8D48A83083C6E7007B8931 /* relay-extension.js */; };
 		0C8D48E93083C6E7007B8931 /* telemetry.js in Resources */ = {isa = PBXBuildFile; fileRef = 0C8D48A93083C6E7007B8931 /* telemetry.js */; };
@@ -158,6 +160,7 @@
 		0C8D48A43083C6E7007B8931 /* sha256.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = sha256.js; path = "../../../safari-extension-src/sha256.js"; sourceTree = "<group>"; };
 		0C8D48A53083C6E7007B8931 /* popup.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = popup.js; path = "../../../safari-extension-src/popup.js"; sourceTree = "<group>"; };
 		0C8D48A63083C6E7007B8931 /* native-migration.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = "native-migration.js"; path = "../../../safari-extension-src/native-migration.js"; sourceTree = "<group>"; };
+		0C8D49103083C6E7007B8931 /* privacy-mitigations.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = "privacy-mitigations.js"; path = "../../../safari-extension-src/privacy-mitigations.js"; sourceTree = "<group>"; };
 		0C8D48A73083C6E7007B8931 /* telemetry-notice.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; name = "telemetry-notice.html"; path = "../../../safari-extension-src/telemetry-notice.html"; sourceTree = "<group>"; };
 		0C8D48A83083C6E7007B8931 /* relay-extension.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = "relay-extension.js"; path = "../../../safari-extension-src/relay-extension.js"; sourceTree = "<group>"; };
 		0C8D48A93083C6E7007B8931 /* telemetry.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = telemetry.js; path = "../../../safari-extension-src/telemetry.js"; sourceTree = "<group>"; };
@@ -311,6 +314,7 @@
 				0C8D48A43083C6E7007B8931 /* sha256.js */,
 				0C8D48A53083C6E7007B8931 /* popup.js */,
 				0C8D48A63083C6E7007B8931 /* native-migration.js */,
+				0C8D49103083C6E7007B8931 /* privacy-mitigations.js */,
 				0C8D48A73083C6E7007B8931 /* telemetry-notice.html */,
 				0C8D48A83083C6E7007B8931 /* relay-extension.js */,
 				0C8D48A93083C6E7007B8931 /* telemetry.js */,
@@ -493,6 +497,7 @@
 				0C8D48F93083C6E7007B8931 /* migration.html in Resources */,
 				0C8D48FC3083C6E7007B8931 /* same-site.js in Resources */,
 				0C8D48E63083C6E7007B8931 /* native-migration.js in Resources */,
+				0C8D49123083C6E7007B8931 /* privacy-mitigations.js in Resources */,
 				0C8D48E93083C6E7007B8931 /* telemetry.js in Resources */,
 				0C8D48FB3083C6E7007B8931 /* manifest.json in Resources */,
 				0C8D48F83083C6E7007B8931 /* telemetry-notice.js in Resources */,
@@ -530,6 +535,7 @@
 				0C8D48D93083C6E7007B8931 /* migration.html in Resources */,
 				0C8D48DC3083C6E7007B8931 /* same-site.js in Resources */,
 				0C8D48C63083C6E7007B8931 /* native-migration.js in Resources */,
+				0C8D49113083C6E7007B8931 /* privacy-mitigations.js in Resources */,
 				0C8D48C93083C6E7007B8931 /* telemetry.js in Resources */,
 				0C8D48DB3083C6E7007B8931 /* manifest.json in Resources */,
 				0C8D48D83083C6E7007B8931 /* telemetry-notice.js in Resources */,
