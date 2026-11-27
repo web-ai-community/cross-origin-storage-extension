@@ -14,7 +14,7 @@ const STORAGE_KEY = 'resourceManagerData';
 // (read access to a stored resource, not cookie/storage sharing), but
 // the same incentive applies: an unbounded list lets a site enumerate
 // "related" origins by probing hashes, so a small cap is kept here too.
-const MAX_ORIGINS_PER_RESOURCE = 6;
+export const MAX_ORIGINS_PER_RESOURCE = 6;
 
 class ResourceManager {
   constructor() {
@@ -79,21 +79,24 @@ class ResourceManager {
    * @param {'*'|string[]|undefined} requestedOrigins
    * @param {string} partition - The writer's partition.
    * @param {boolean} firstParty - Whether the write ran first-party.
+   * @returns {string[]} The requested origins left out because the list was
+   *     full, for the page's console.
    */
   upgradeVisibility(hash, requestedOrigins, partition, firstParty) {
     if (requestedOrigins === '*') {
       this.hashToGlobal[hash] = true;
-      return;
+      return [];
     }
-    if (!Array.isArray(requestedOrigins) || !requestedOrigins.length) return;
+    if (!Array.isArray(requestedOrigins) || !requestedOrigins.length) return [];
     if (requestedOrigins.length > MAX_ORIGINS_PER_RESOURCE) {
       console.warn(
         `[COS] Rejected origins list of ${requestedOrigins.length} entries ` +
           `for hash ${hash}: exceeds the maximum of ${MAX_ORIGINS_PER_RESOURCE}.`
       );
-      return;
+      return [];
     }
     const grants = (this.hashToListGrants[hash] ??= []);
+    const dropped = [];
     for (const origin of requestedOrigins) {
       if (
         grants.some(
@@ -106,13 +109,17 @@ class ResourceManager {
         continue;
       }
       if (grants.length >= MAX_ORIGINS_PER_RESOURCE) {
-        console.warn(
-          `[COS] The origins list of hash ${hash} is full; ${origin} was not added.`
-        );
-        break;
+        dropped.push(origin);
+        continue;
       }
       grants.push({ origin, partition, firstParty });
     }
+    if (dropped.length) {
+      console.warn(
+        `[COS] The origins list of hash ${hash} is full; ${dropped.join(', ')} not added.`
+      );
+    }
+    return dropped;
   }
 
   /** Records that `origin` wrote this hash's bytes under `partition`. */

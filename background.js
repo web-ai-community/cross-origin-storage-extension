@@ -1,7 +1,7 @@
 // Copyright 2025 Google LLC.
 // SPDX-License-Identifier: Apache-2.0
 
-import ResourceManager from './resource-manager.js';
+import ResourceManager, { MAX_ORIGINS_PER_RESOURCE } from './resource-manager.js';
 import { PublicHashList } from './public-hash-list.js';
 import { getSchemefulSite, getSite, isSameSite } from './same-site.js';
 import { initTelemetry, recordTelemetryEvent } from './telemetry.js';
@@ -635,12 +635,20 @@ async function recordWrite(hashValue, origin, partition, requests, tabId) {
         continue;
       }
     }
-    resourceManager.upgradeVisibility(
+    const dropped = resourceManager.upgradeVisibility(
       hashValue,
       requestedOrigins,
       partition,
       firstParty
     );
+    if (dropped?.length) {
+      warnings.push(
+        `The origins list of ${hashValue} already holds the maximum of ` +
+          `${MAX_ORIGINS_PER_RESOURCE} origins, so ${dropped.join(', ')} ` +
+          `${dropped.length > 1 ? 'were' : 'was'} not added. The write itself succeeded. ` +
+          `See https://wicg.github.io/cross-origin-storage/#resource-visibility-upgrades.`
+      );
+    }
   }
   await resourceManager.saveManagerToStorage();
   return [...new Set(warnings)];

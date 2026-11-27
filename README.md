@@ -655,8 +655,9 @@ it would have made without COS. Every mitigation is on by default, and
 - **Developer guidance.** The page's console says when a write of
   `origins: '*'` names a file off the Public Hash List, when the file waits for
   a user interaction, when a `Cross-Origin-Storage-Allow-Origin` header trims
-  an `origins` list (for every integration), and when a write budget refuses a
-  write.
+  an `origins` list (for every integration), when an `origins` list is already
+  full and a write's origins are left out of it, and when a write budget
+  refuses a write.
 
 `options.html` also resets both budgets. The limits themselves can be
 overridden with a `mitigationLimits` object in `chrome.storage.local` (the

@@ -937,6 +937,25 @@ async function main() {
       JSON.stringify(messages));
   });
   await limits({});
+  await section('Full origins list', async () => {
+    await limits({});
+    const text = `full origins list ${Date.now()}`;
+    // Every origin the ceiling authorizes, which is as many as a list holds.
+    const all = CEILING.split(', ');
+    const writer = await openActivated('a.test');
+    await write(writer, text, { origins: all });
+    // The same bytes from another top-level site add records of their own,
+    // which the full list has no room for.
+    const other = await open('c.test');
+    const messages = [];
+    other.page().on('console', (msg) => {
+      if (msg.type() === 'warning') messages.push(msg.text());
+    });
+    await write(other, text, { origins: [B] });
+    await new Promise((r) => setTimeout(r, 300));
+    record('a write into a full origins list warns in the page console',
+      messages.some((m) => m.includes('already holds the maximum')), JSON.stringify(messages));
+  });
 
   // ── Collect + report all results ──────────────────────────────────────────
 
